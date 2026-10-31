@@ -15,6 +15,7 @@ import tempfile
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--binary', default='target/debug/rexue')
+    parser.add_argument('--output', type=pathlib.Path)
     args = parser.parse_args()
     binary = str(pathlib.Path(args.binary).resolve())
     real_wt = shutil.which('wt')
@@ -173,13 +174,11 @@ else: print('{}')
         fail.write_text('#!/bin/sh\nif [ "$1" = --version ]; then echo wt v0.81.0; else echo fixture-failure >&2; exit 7; fi\n'); fail.chmod(0o755)
         assert 'fixture-failure' in cli('worktree', 'list', expected=1, local_env=dict(env, REXUE_WT=str(fail))).stderr
         checks.append('subprocess-error-propagation')
-        for retired in ['repo="owner/repo"', 'worktree_dir=".wk"', 'branch_template="{number}"', 'base_branch="main"', 'fetch=false', 'create_command="true"', 'startup_command="true"']:
-            config.write_text('[[worktree]]\npath='+json.dumps(str(repo))+'\n'+retired+'\n')
-            assert 'was removed' in cli('worktree', 'list', expected=1).stderr
-        config.write_text('[browser]\napplication="Safari"\n')
-        assert '[browser] was removed' in cli('worktree', 'list', expected=1).stderr
-        checks.append('explicit-old-config-migration-errors')
-    print(json.dumps({'checks': checks, 'count': len(checks), 'worktrunk': subprocess.check_output([real_wt, '--version'], text=True).strip()}, indent=2))
+    receipt = json.dumps({'checks': checks, 'count': len(checks), 'worktrunk': subprocess.check_output([real_wt, '--version'], text=True).strip()}, indent=2)
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(receipt + '\n')
+    print(receipt)
 
 
 if __name__ == '__main__':

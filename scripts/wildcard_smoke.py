@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only CLI reproduction of Go wildcard class compatibility."""
+"""Isolated CLI check of wildcard character classes."""
 import argparse,json,os,pathlib,subprocess,tempfile
 
 
@@ -14,7 +14,7 @@ def main():
             result=subprocess.run([binary,'-C',str(cfg),'list','--config','--json'],capture_output=True,check=True,timeout=10,env=env)
             observed=json.loads(result.stdout)[0]['icon'];matches=observed==expected
             assert matches != args.expect_broken, (pattern,expected,observed)
-            records.append({'pattern':pattern,'expected_go_icon':expected,'observed_icon':observed,'matches_go':matches})
+            records.append({'pattern':pattern,'expected_icon':expected,'observed_icon':observed,'matches_pattern':matches})
     print(json.dumps({'wildcard_reproduction':records,'expected_broken_baseline':args.expect_broken},indent=2,ensure_ascii=False))
 
 

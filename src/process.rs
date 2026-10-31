@@ -653,51 +653,9 @@ pub fn shell_argument(
             .current_dir(cwd),
     )
 }
-/// Match sesh's optional macOS activation; other platforms deliberately skip it.
-pub fn activate_application(app: &str) -> Result<bool> {
-    if app.is_empty() || !cfg!(target_os = "macos") {
-        return Ok(false);
-    }
-    let bin = std::env::var_os("REXUE_OPEN").unwrap_or_else(|| "/usr/bin/open".into());
-    activate_application_with(app, &bin)
-}
-fn activate_application_with(app: &str, bin: &std::ffi::OsStr) -> Result<bool> {
-    if app.is_empty() {
-        return Ok(false);
-    }
-    // LaunchServices activates without an AppleEvent or an Automation grant.
-    text(Command::new(bin).args(["-a", app]))?;
-    Ok(true)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(unix)]
-    #[test]
-    fn activation_uses_actual_process_arguments_without_script_injection() {
-        use std::os::unix::fs::PermissionsExt;
-        let dir = tempfile::tempdir().unwrap();
-        let exe = dir.path().join("fake-open");
-        let captured = dir.path().join("arguments");
-        let quoted = format!(
-            "'{}'",
-            captured.display().to_string().replace('\'', "'\\''")
-        );
-        std::fs::write(
-            &exe,
-            format!("#!/bin/sh\nprintf '%s\\000' \"$@\" > {quoted}\n"),
-        )
-        .unwrap();
-        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let app = "Rex \\\"; touch INJECTED; $(echo data)";
-        assert!(activate_application_with(app, exe.as_os_str()).unwrap());
-        let data = std::fs::read(captured).unwrap();
-        let args: Vec<_> = data.split(|b| *b == 0).filter(|b| !b.is_empty()).collect();
-        assert_eq!(args, vec![b"-a".as_slice(), app.as_bytes()]);
-        assert!(!dir.path().join("INJECTED").exists());
-        assert!(!activate_application("").unwrap());
-    }
 
     #[test]
     fn placeholder_keeps_paths_as_data_in_every_quote_context() {

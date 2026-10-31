@@ -1,24 +1,17 @@
-# Save as $XDG_CONFIG_HOME/rexue/rexue.toml
-# (or ~/.config/rexue/rexue.toml). Explicit --config-file paths must exist.
-# Unknown keys warn by default; strict_mode makes them errors. Replace sesh's
-# tmux/tmuxp/tmuxinator options with native Rex windows and startup commands.
-# Commands run only on connect/preview. Exact import filenames resolve from
-# the process working directory; only sessions/windows/wildcards append.
-# Nested imports and other imported settings are ignored; globs are literal.
-cache = false
+# Save as $XDG_CONFIG_HOME/rexue/rexue.toml (or ~/.config/rexue/rexue.toml).
+# Explicit --config-file paths must exist. Unknown fields are errors in strict mode.
 strict_mode = true
-import = [] # e.g. ["sessions/work.toml", "personal.toml"]
+cache = false
+import = [] # Exact filenames; append session, wildcard and worktree definitions.
 blacklist = ["scratch"]
 sort_order = ["rex", ["config", "zoxide"], "directory", "worktree"]
 dir_length = 1
 git_dir_length = 1
 git_namer_use_worktree_root = false
 separator_aware = false
-vcs = "git"
-# terminal = "Rex" # Optional macOS app activation after foreground connections.
 
 [[name_substitution]]
-find = '^~/projects/(.*)$'
+find = '^~/Projects/(.*)$'
 replace = '$1'
 regex = true
 
@@ -31,53 +24,44 @@ icon = ""
 color = "bright-black"
 
 [default_session]
-startup_command = "ls"
 preview_command = "ls -la {}"
-windows = ["editor"]
 
-[[window]]
-name = "editor"
-startup_command = "${EDITOR:-vi}"
-# startup_script = "~/scripts/editor.sh"
-# path = "~/projects"
-
-# First matching wildcard wins. A single * matches one path component;
-# a trailing /** matches descendants at any depth, excluding the root itself.
+# First matching wildcard wins. A trailing /** matches descendants, excluding its root.
 [[wildcard]]
-pattern = "~/projects/**"
+pattern = "~/Projects/**"
 startup_command = "git status --short"
 icon = ""
 
-# Explicit session > first matching wildcard > default_session.
-# Empty commands/windows fall through to the matching wildcard/defaults.
-# disable_startup_command controls the default strategy; explicit commands still run.
 [[session]]
 name = "projects"
-path = "~/projects"
+path = "~/Projects"
 alias = "p"
 alias_auto_connect = true
-icon = ""
 startup_command = ""
 disable_startup_command = false
-windows = []
+icon = ""
 
-# Worktrunk owns worktree-path, base/default branches, hooks and approvals.
-# Install wt >=0.81.0; see https://worktrunk.dev/config/
+# zoxide is used by default. Optional nonempty commands replace each operation.
+# [frecency]
+# list_command = "zoxide query --list --score"
+# query_command = "zoxide query -- {}"
+# add_command = "zoxide add -- {}"
+# remove_command = "zoxide remove -- {}"
+
+# Worktrunk manages paths, branches, hooks and approvals.
 [[worktree]]
-path = "~/projects/project"
+path = "~/Projects/app"
 icon = ""
 
 [tui]
 show_icons = true
-show_windows = true
-window_name_format = "{window_name}"
 prompt = "> "
 placeholder = "Filter Sessions..."
 pointer = "> "
 alias_auto_connect_delay = "150ms"
-alias_filter_prefix = "/" # Empty disables alias filtering.
+alias_filter_prefix = "/"
 preview = true
-preview_width = 60 # <=0 defaults to 60; positive values clamp to 10–90.
+preview_width = 60
 preview_min_width = 100
-preview_border = "line" # none, line, thick, double
+preview_border = "line"
 group_separator = false

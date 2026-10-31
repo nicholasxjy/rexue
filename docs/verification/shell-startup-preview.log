@@ -1,6 +1,0 @@
-{
-  "expected": "space $(literal) 项目",
-  "session_startup": "space $(literal) 项目",
-  "window_startup": "space $(literal) 项目",
-  "preview": "space $(literal) 项目"
-}

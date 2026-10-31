@@ -1,8 +1,8 @@
 use crate::{
     backend::Rex,
-    config::{Config, expand_path},
+    config::Config,
     model::{Entry, Source},
-    picker, process,
+    picker,
     session::{ConnectOptions, ListOptions, Manager},
     worktree::{RemoveOptions, Selection, Worktrees},
 };
@@ -11,7 +11,6 @@ use clap::{ArgAction, Args, CommandFactory, Parser, Subcommand, builder::TypedVa
 use std::{
     io::{self, Write},
     path::PathBuf,
-    process::Command,
     time::Duration,
 };
 
@@ -56,9 +55,6 @@ pub enum Commands {
     /// Search and select sessions using system fzf.
     #[command(aliases=["pick","pk"])]
     Picker(PickerArgs),
-    /// Print the containing Git/JJ workspace session name.
-    #[command(alias = "r")]
-    Root { target: Option<String> },
     /// Preview a running session or project directory.
     #[command(alias = "p")]
     Preview {
@@ -72,56 +68,24 @@ pub enum Commands {
     /// Switch this Rex client to its previous session.
     #[command(alias = "L")]
     Last,
-    /// Clone a Git/Jujutsu repository and connect to it.
-    #[command(alias = "cl")]
-    Clone(CloneArgs),
-    /// Create a directory and connect to its session.
-    #[command(alias = "md")]
-    Mkdir {
-        path: String,
-        #[arg(short = 's', long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
-        #[arg(default_value_t = false)]
-        switch: bool,
-        #[arg(short = 'c', long)]
-        command: Option<String>,
-        #[arg(long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
-        #[arg(default_value_t = false)]
-        json: bool,
-    },
-    /// List, create and select tabs within a session.
-    #[command(alias = "w")]
-    Window {
-        #[command(subcommand)]
-        command: WindowCommand,
-    },
     /// Manage branch worktrees with Worktrunk and connect their Rex sessions.
     #[command(alias = "wt")]
     Worktree {
         #[command(subcommand)]
         command: WorktreeCommand,
     },
-    /// Rename a live session or enrich its name with an issue title.
+    /// Rename a running session.
     Rename {
         target: Option<String>,
-        #[arg(long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
-        #[arg(default_value_t = false)]
-        enrich: bool,
         #[arg(long)]
-        to: Option<String>,
-    },
-    /// Refresh optional directory discovery caches.
-    Cache {
-        #[command(subcommand)]
-        command: CacheCommand,
+        to: String,
     },
     /// Generate a shell completion script.
     Completion { shell: clap_complete::Shell },
-    /// Show available Rex clients and connection information.
-    Doctor,
 }
 #[derive(Debug, Args, Default, Clone)]
 pub struct Sources {
-    #[arg(short = 't', long, visible_alias = "tmux", action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
+    #[arg(short = 't', long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
     #[arg(default_value_t = false)]
     pub rex: bool,
     #[arg(short = 'c', long = "config", action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
@@ -165,9 +129,6 @@ pub struct ListArgs {
     #[arg(short = 'n', long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
     #[arg(default_value_t = false)]
     pub no_color: bool,
-    #[arg(short = 'p', long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
-    #[arg(default_value_t = false)]
-    pub panes: bool,
     #[arg(short = 'b', long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
     #[arg(default_value_t = false)]
     pub blacklisted: bool,
@@ -188,10 +149,6 @@ impl ListArgs {
 pub struct ConnectArgs {
     #[arg(required=true,num_args=1..)]
     pub target: Vec<String>,
-    /// Rex always switches the chosen app client; accepted for sesh compatibility.
-    #[arg(short = 's', long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
-    #[arg(default_value_t = false)]
-    pub switch: bool,
     #[arg(short = 'c', long)]
     pub command: Option<String>,
     #[arg(short = 'r', long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
@@ -206,7 +163,7 @@ impl ConnectArgs {
     fn options(&self, detach: bool) -> ConnectOptions {
         ConnectOptions {
             detach,
-            // Upstream treats an empty command as an absent override.
+            // Empty commands fall through to configured session startup.
             command: self.command.clone().filter(|s| !s.is_empty()),
             root: self.root,
             name: self.name.clone(),
@@ -235,77 +192,6 @@ pub struct PickerArgs {
     #[arg(long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
     #[arg(default_value_t = false)]
     pub no_preview: bool,
-}
-#[derive(Debug, Args)]
-pub struct CloneArgs {
-    pub repo: String,
-    #[arg(short = 'c', long = "cmdDir", visible_alias = "cmd-dir", value_parser = clap::builder::OsStringValueParser::new().map(PathBuf::from))]
-    pub cmd_dir: Option<PathBuf>,
-    #[arg(short = 'd', long)]
-    pub dir: Option<String>,
-    #[arg(long)]
-    pub vcs: Option<String>,
-    #[arg(last = true, allow_hyphen_values = true)]
-    pub flags: Vec<String>,
-}
-#[derive(Debug, Subcommand)]
-pub enum CacheCommand {
-    Refresh,
-}
-#[derive(Debug, Args, Default)]
-pub struct TargetArgs {
-    #[arg(short = 't', long)]
-    pub target: Option<String>,
-    #[arg(long)]
-    pub session: Option<String>,
-}
-impl TargetArgs {
-    fn selected(&self) -> Option<&str> {
-        // An explicitly empty --target suppresses --session, then means current.
-        self.target
-            .as_deref()
-            .or(self.session.as_deref())
-            .filter(|s| !s.is_empty())
-    }
-}
-#[derive(Debug, Subcommand)]
-pub enum WindowCommand {
-    #[command(aliases=["l","ls"])]
-    List {
-        #[command(flatten)]
-        target: TargetArgs,
-        #[arg(short = 'j', long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
-        #[arg(default_value_t = false)]
-        json: bool,
-    },
-    #[command(aliases=["cn","c"])]
-    Connect {
-        #[command(flatten)]
-        target: TargetArgs,
-        #[arg(num_args=0..)]
-        name: Vec<String>,
-        #[arg(short = 'c', long)]
-        command: Option<String>,
-        #[arg(short = 'p', long)]
-        path: Option<String>,
-        #[arg(short = 'b', long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
-        #[arg(default_value_t = false)]
-        background: bool,
-        #[arg(short = 's', long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
-        #[arg(default_value_t = false)]
-        switch: bool,
-        #[arg(long = "new", action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
-        #[arg(default_value_t = false)]
-        force_new: bool,
-    },
-}
-impl WindowCommand {
-    fn normalize_empty_overrides(&mut self) {
-        if let Self::Connect { command, path, .. } = self {
-            *command = command.take().filter(|s| !s.is_empty());
-            *path = path.take().filter(|s| !s.is_empty());
-        }
-    }
 }
 #[derive(Debug, Args, Clone, Default)]
 pub struct RepoArgs {
@@ -413,14 +299,9 @@ pub fn run(cli: Cli) -> Result<()> {
         .unwrap_or(Commands::Picker(PickerArgs::default()))
     {
         Commands::Completion { .. } | Commands::PickerHelper { .. } => unreachable!(),
-        Commands::Doctor => {
-            let data = serde_json::json!({"context":manager.rex.context()?,"clients":manager.rex.clients()?,"state_dir":manager.state_dir});
-            out(&serde_json::to_string_pretty(&data)?)?;
-        }
         Commands::List(args) => {
             args.validate()?;
             let mut opts = args.sources.options();
-            opts.panes = args.panes;
             opts.blacklisted = args.blacklisted;
             let entries = manager.list(&opts)?;
             if args.json {
@@ -449,11 +330,6 @@ pub fn run(cli: Cli) -> Result<()> {
         Commands::Picker(args) => {
             pick_session(manager, args, cli.detach)?;
         }
-        Commands::Root { target } => {
-            let id = session_target(&manager, target.as_deref())?;
-            let entry = manager.resolve_entry(&id)?;
-            out(&manager.root_name(&entry.path)?)?;
-        }
         Commands::Preview {
             target,
             watch,
@@ -464,59 +340,14 @@ pub fn run(cli: Cli) -> Result<()> {
         Commands::Last => {
             connection_out(&manager.last()?, false)?;
         }
-        Commands::Mkdir {
-            path,
-            command,
-            json,
-            ..
-        } => {
-            let path = expand_path(&path)?;
-            std::fs::create_dir_all(&path).with_context(|| format!("create {}", path.display()))?;
-            let c = manager.connect(
-                &path.display().to_string(),
-                &ConnectOptions {
-                    detach: cli.detach,
-                    command: command.filter(|s| !s.is_empty()),
-                    ..Default::default()
-                },
-            )?;
-            connection_out(&c, json)?;
-        }
-        Commands::Clone(args) => {
-            clone_connect(&manager, args, cli.detach)?;
-        }
-        Commands::Window { command } => {
-            window_command(&manager, command, cli.detach)?;
-        }
         Commands::Worktree { command } => {
             worktree_command(manager, command, cli.detach)?;
         }
-        Commands::Rename { target, enrich, to } => {
+        Commands::Rename { target, to } => {
             let id = session_target(&manager, target.as_deref())?;
-            let detail = manager.rex.inspect(&id)?;
             let entry = manager.resolve_entry(&id)?;
-            let name = if let Some(name) = to {
-                name
-            } else if enrich {
-                enriched_name(&manager, &entry.path)?
-            } else {
-                return Ok(());
-            };
-            if name != detail["label"].as_str().unwrap_or("") {
-                manager.rex.rename(&id, &name)?;
-                manager.invalidate();
-            }
-            out(&name)?;
-        }
-        Commands::Cache {
-            command: CacheCommand::Refresh,
-        } => {
-            manager.invalidate();
-            let rows = manager.list(&ListOptions {
-                no_cache: true,
-                ..Default::default()
-            })?;
-            out(&format!("refreshed {} entries", rows.len()))?;
+            manager.rename(&entry, &to)?;
+            out(&to)?;
         }
     }
     Ok(())
@@ -591,12 +422,7 @@ fn picker_options_for(
     let glyphs = cfg
         .icons
         .iter()
-        .map(|(s, i)| {
-            (
-                if s == "tmux" { "rex".into() } else { s.clone() },
-                i.icon.clone(),
-            )
-        })
+        .map(|(s, i)| (s.clone(), i.icon.clone()))
         .collect();
     let icon_width = cfg
         .session
@@ -618,7 +444,6 @@ fn picker_options_for(
         .max(1);
     Ok(picker::PickerOptions {
         show_icons: args.icons.unwrap_or(cfg.tui.show_icons),
-        show_windows: cfg.tui.show_windows,
         separator_aware: args.separator_aware.unwrap_or(cfg.separator_aware),
         prompt: args
             .prompt
@@ -644,14 +469,8 @@ fn picker_options_for(
         glyph_colors: cfg
             .icons
             .iter()
-            .map(|(s, i)| {
-                (
-                    if s == "tmux" { "rex".into() } else { s.clone() },
-                    i.color.clone(),
-                )
-            })
+            .map(|(s, i)| (s.clone(), i.color.clone()))
             .collect(),
-        window_name_format: cfg.tui.window_name_format.clone(),
         alias_auto_connect_delay: crate::config::parse_alias_delay(
             &cfg.tui.alias_auto_connect_delay,
         )?,
@@ -689,11 +508,10 @@ fn configured_format_entry(
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| entry.source.glyph());
     let decorated = if icons
-        && !exclude.iter().any(|s| {
-            s.trim().eq_ignore_ascii_case(entry.source.as_str())
-                || (s.trim().eq_ignore_ascii_case("tmux") && entry.source == Source::Rex)
-                || (s.trim().eq_ignore_ascii_case("tmux-pane") && entry.source == Source::RexBlock)
-        }) {
+        && !exclude
+            .iter()
+            .any(|s| s.trim().eq_ignore_ascii_case(entry.source.as_str()))
+    {
         let code = source
             .and_then(|s| ansi_color(&s.color.to_lowercase()))
             .unwrap_or_else(|| source_color(entry.source));
@@ -726,14 +544,6 @@ fn configured_format_entry(
             "session" => entry.name.clone(),
             "source" => entry.source.as_str().into(),
             "path" => entry.path.display().to_string(),
-            "active_window_name" => entry.active_window_name.clone(),
-            "active_window_name_prefix" => {
-                if entry.active_window_name.is_empty() {
-                    String::new()
-                } else {
-                    format!("{} ", entry.active_window_name)
-                }
-            }
             "/fg" => {
                 if color {
                     "\x1b[39m".into()
@@ -764,7 +574,6 @@ fn configured_format_entry(
 fn source_color(source: Source) -> u8 {
     match source {
         Source::Rex => 34,
-        Source::RexBlock => 32,
         Source::Config => 90,
         Source::Zoxide | Source::Directory => 36,
         Source::Worktree => 36,
@@ -799,204 +608,7 @@ fn session_target(manager: &Manager, target: Option<&str>) -> Result<String> {
     manager.rex.context()?["session_id"]
         .as_str()
         .map(str::to_owned)
-        .context("not inside a Rex session; use --target")
-}
-fn clone_connect(manager: &Manager, args: CloneArgs, detach: bool) -> Result<()> {
-    let (mut cmd, path) = clone_command(&manager.config, args)?;
-    process::output(&mut cmd, Duration::from_secs(300))?;
-    let c = manager.connect(
-        &path.display().to_string(),
-        &ConnectOptions {
-            detach,
-            ..Default::default()
-        },
-    )?;
-    connection_out(&c, false)
-}
-// Keep command construction separate so CLI defaults can be checked without cloning.
-fn clone_command(config: &Config, args: CloneArgs) -> Result<(Command, PathBuf)> {
-    let repo = if !args.repo.contains(":")
-        && !args.repo.starts_with('/')
-        && !args.repo.starts_with('.')
-        && args.repo.split('/').count() == 2
-    {
-        format!("https://github.com/{}", args.repo)
-    } else {
-        args.repo
-    };
-    if repo.starts_with('-') {
-        bail!("repository must not start with '-'");
-    }
-    let parent = match args.cmd_dir.filter(|p| !p.as_os_str().is_empty()) {
-        Some(raw) => expand_path(&raw.to_string_lossy())?,
-        None => std::env::current_dir()?,
-    };
-    let name = args.dir.filter(|s| !s.is_empty()).unwrap_or_else(|| {
-        repo.trim_end_matches('/')
-            .rsplit(['/', ':'])
-            .next()
-            .unwrap_or("repo")
-            .trim_end_matches(".git")
-            .into()
-    });
-    let path = parent.join(&name);
-    if path.exists() {
-        bail!("clone destination already exists: {}", path.display());
-    }
-    let vcs = args
-        .vcs
-        .as_deref()
-        .filter(|s| !s.is_empty())
-        .unwrap_or(&config.vcs);
-    let mut cmd = if vcs == "jj" {
-        let mut c = Command::new("jj");
-        c.args(["git", "clone"]);
-        c
-    } else if vcs == "git" {
-        let mut c = Command::new("git");
-        c.arg("clone");
-        c
-    } else {
-        bail!("unsupported VCS {vcs:?}; expected git or jj")
-    };
-    cmd.current_dir(&parent)
-        .args(&args.flags)
-        .arg("--")
-        .arg(&repo)
-        .arg(&name);
-    Ok((cmd, path))
-}
-fn window_command(manager: &Manager, mut command: WindowCommand, detach: bool) -> Result<()> {
-    command.normalize_empty_overrides();
-    match command {
-        WindowCommand::List { target, json } => {
-            let id = session_target(manager, target.selected())?;
-            let detail = manager.rex.inspect(&id)?;
-            let windows = detail["windows"]
-                .as_array()
-                .context("session has no windows")?;
-            if json {
-                out(&serde_json::to_string_pretty(windows)?)?;
-            } else {
-                for w in windows {
-                    out(w["label"].as_str().unwrap_or(""))?;
-                }
-            }
-        }
-        WindowCommand::Connect {
-            target,
-            name,
-            command,
-            path,
-            background,
-            force_new,
-            ..
-        } => {
-            let words = name.join(" ");
-            let supplied = (!words.is_empty()).then_some(words);
-            let name_path = supplied
-                .as_deref()
-                .and_then(|n| expand_path(n).ok())
-                .filter(|p| p.is_dir());
-            let name = name_path
-                .as_ref()
-                .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
-                .or(supplied);
-            let client = if background || detach {
-                None
-            } else {
-                let c = manager.rex.selected_client()?;
-                manager.rex.check_switch(&c)?;
-                Some(c)
-            };
-            let id = match session_target(manager, target.selected()) {
-                Ok(id) => id,
-                Err(e) if target.selected().is_some() => {
-                    let c = manager
-                        .connect(
-                            target.selected().unwrap(),
-                            &ConnectOptions {
-                                detach: true,
-                                ..Default::default()
-                            },
-                        )
-                        .with_context(|| format!("resolve window target: {e:#}"))?;
-                    c.session_id
-                }
-                Err(e) => return Err(e),
-            };
-            let detail = manager.rex.inspect(&id)?;
-            let windows = detail["windows"]
-                .as_array()
-                .context("session has no windows")?;
-            let matches: Vec<_> = windows
-                .iter()
-                .filter(|w| {
-                    name.as_deref()
-                        .is_some_and(|n| w["label"] == n || w["window_id"] == n)
-                })
-                .collect();
-            if matches.len() > 1 && !force_new {
-                bail!("window name is ambiguous; use a full window ID");
-            }
-            let window = if !force_new && let Some(w) = matches.first() {
-                let w = (*w).clone();
-                if let Some(script) = &command {
-                    manager.rex.send(
-                        &id,
-                        w["focused_block_id"]
-                            .as_str()
-                            .context("window has no terminal")?,
-                        script,
-                    )?;
-                }
-                w
-            } else {
-                let root = manager.resolve_entry(&id)?.path;
-                let cwd = path
-                    .as_deref()
-                    .map(expand_path)
-                    .transpose()?
-                    .or(name_path.clone())
-                    .unwrap_or(root);
-                if !cwd.is_dir() {
-                    bail!("window directory does not exist: {}", cwd.display());
-                }
-                let label = name.as_deref().unwrap_or("Terminal");
-                let mut cmd = manager.rex.command();
-                cmd.args(["window", "new", "-s", &id, label, "-c"])
-                    .arg(&cwd)
-                    .args(["--focus=false", "--json"]);
-                if let Some(script) = command {
-                    cmd.args(["--", "sh", "-c", &script]);
-                }
-                let v: serde_json::Value = serde_json::from_slice(
-                    &process::output(&mut cmd, Duration::from_secs(30))?.stdout,
-                )?;
-                v
-            };
-            let wid = window["window_id"]
-                .as_str()
-                .context("window response has no ID")?;
-            if let Some(client) = client {
-                manager.rex.json(&[
-                    "-C",
-                    &client.id,
-                    "do",
-                    "session.select",
-                    "--args",
-                    &serde_json::json!({"session_id":id,"window_id":wid}).to_string(),
-                    "--json",
-                ])?;
-                manager.rex.text(&["focus", "-s", &id, wid])?;
-                manager.note_client_switch(&client.id, &id)?;
-                manager.activate_terminal();
-            }
-            manager.invalidate();
-            out(wid)?;
-        }
-    }
-    Ok(())
+        .context("not inside a Rex session; provide a target session")
 }
 fn worktree_command(manager: Manager, command: WorktreeCommand, detach: bool) -> Result<()> {
     let worktrees = Worktrees::new(&manager.config);
@@ -1204,213 +816,9 @@ fn preview_command(manager: &Manager, target: &str, watch: bool, interval: Durat
     }
     result
 }
-fn enriched_name(manager: &Manager, path: &std::path::Path) -> Result<String> {
-    let base = manager.name(path)?;
-    let branch = process::text(
-        Command::new("git")
-            .arg("-C")
-            .arg(path)
-            .args(["branch", "--show-current"]),
-    )
-    .unwrap_or_default();
-    let re = regex::Regex::new(r"\d+")?;
-    let Some(number) = re.find(&branch) else {
-        return Ok(base);
-    };
-    let title = process::text(Command::new("gh").current_dir(path).args([
-        "issue",
-        "view",
-        number.as_str(),
-        "--json",
-        "title",
-        "--jq",
-        ".title",
-    ]));
-    match title {
-        Ok(title) => {
-            let title = title
-                .chars()
-                .filter(|c| !c.is_control())
-                .collect::<String>();
-            Ok(format!("{base} — {}", title.trim()))
-        }
-        Err(_) => Ok(base),
-    }
-}
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn empty_clone_flags_use_effective_defaults() {
-        let cwd = std::env::current_dir().unwrap();
-        for configured in ["git", "jj"] {
-            let cfg = Config {
-                vcs: configured.into(),
-                ..Default::default()
-            };
-            for flags in [
-                vec![],
-                vec!["--cmdDir="],
-                vec!["--cmd-dir="],
-                vec!["--dir="],
-                vec!["--vcs="],
-                vec!["--cmdDir=", "--dir=", "--vcs="],
-            ] {
-                let Some(Commands::Clone(args)) = Cli::try_parse_from(
-                    ["rexue", "clone", "org/rexue-empty-flags-regression.git"]
-                        .into_iter()
-                        .chain(flags.iter().copied()),
-                )
-                .unwrap()
-                .command
-                else {
-                    panic!("expected clone")
-                };
-                let (cmd, path) = clone_command(&cfg, args)
-                    .unwrap_or_else(|e| panic!("{configured} {flags:?}: {e:#}"));
-                assert_eq!(path, cwd.join("rexue-empty-flags-regression"), "{flags:?}");
-                assert_eq!(cmd.get_current_dir(), Some(cwd.as_path()));
-                assert_eq!(cmd.get_program(), configured);
-                let expected = if configured == "jj" {
-                    vec![
-                        "git",
-                        "clone",
-                        "--",
-                        "https://github.com/org/rexue-empty-flags-regression.git",
-                        "rexue-empty-flags-regression",
-                    ]
-                } else {
-                    vec![
-                        "clone",
-                        "--",
-                        "https://github.com/org/rexue-empty-flags-regression.git",
-                        "rexue-empty-flags-regression",
-                    ]
-                };
-                assert_eq!(cmd.get_args().collect::<Vec<_>>(), expected);
-            }
-        }
-    }
-
-    #[test]
-    fn clone_nonempty_values_and_raw_arguments_are_preserved() {
-        let parent = tempfile::tempdir().unwrap();
-        for name in ["custom folder", " "] {
-            let Some(Commands::Clone(args)) = Cli::try_parse_from([
-                "rexue",
-                "clone",
-                "org/repo.git",
-                "--cmdDir",
-                parent.path().to_str().unwrap(),
-                "--dir",
-                name,
-                "--vcs=jj",
-                "--",
-                "--config",
-                "key=",
-                "",
-                "$literal",
-                "--prompt=",
-            ])
-            .unwrap()
-            .command
-            else {
-                panic!("expected clone")
-            };
-            let (cmd, path) = clone_command(&Config::default(), args).unwrap();
-            assert_eq!(path, parent.path().join(name));
-            assert_eq!(cmd.get_current_dir(), Some(parent.path()));
-            assert_eq!(cmd.get_program(), "jj");
-            assert_eq!(
-                cmd.get_args().collect::<Vec<_>>(),
-                [
-                    "git",
-                    "clone",
-                    "--config",
-                    "key=",
-                    "",
-                    "$literal",
-                    "--prompt=",
-                    "--",
-                    "https://github.com/org/repo.git",
-                    name,
-                ]
-            );
-        }
-        for vcs in [" ", "unknown"] {
-            let Some(Commands::Clone(args)) = Cli::try_parse_from([
-                "rexue",
-                "clone",
-                "org/repo.git",
-                "--cmdDir",
-                parent.path().to_str().unwrap(),
-                "--vcs",
-                vcs,
-            ])
-            .unwrap()
-            .command
-            else {
-                panic!("expected clone")
-            };
-            assert!(
-                clone_command(&Config::default(), args)
-                    .unwrap_err()
-                    .to_string()
-                    .contains("unsupported VCS")
-            );
-        }
-    }
-
-    #[test]
-    fn command_and_window_path_empty_overrides_follow_source_defaults() {
-        for value in [None, Some(""), Some(" "), Some("echo custom")] {
-            let flags = value
-                .map(|v| vec![format!("--command={v}")])
-                .unwrap_or_default();
-            let Some(Commands::Connect(args)) = Cli::try_parse_from(
-                ["rexue", "connect", "literal target", "--name="]
-                    .into_iter()
-                    .chain(flags.iter().map(String::as_str)),
-            )
-            .unwrap()
-            .command
-            else {
-                panic!("expected connect")
-            };
-            assert_eq!(args.target, ["literal target"]);
-            let options = args.options(true);
-            assert_eq!(options.command.as_deref(), value.filter(|v| !v.is_empty()));
-            assert_eq!(options.name.as_deref(), Some("")); // Native --name keeps its own validation.
-            assert!(options.detach);
-
-            let flags = value
-                .map(|v| vec![format!("--command={v}"), format!("--path={v}")])
-                .unwrap_or_default();
-            let Some(Commands::Window { mut command }) = Cli::try_parse_from(
-                ["rexue", "window", "connect", "literal window"]
-                    .into_iter()
-                    .chain(flags.iter().map(String::as_str)),
-            )
-            .unwrap()
-            .command
-            else {
-                panic!("expected window")
-            };
-            command.normalize_empty_overrides();
-            let WindowCommand::Connect {
-                command,
-                path,
-                name,
-                ..
-            } = command
-            else {
-                unreachable!()
-            };
-            assert_eq!(command.as_deref(), value.filter(|v| !v.is_empty()));
-            assert_eq!(path.as_deref(), value.filter(|v| !v.is_empty()));
-            assert_eq!(name, ["literal window"]);
-        }
-    }
 
     #[test]
     fn worktree_selection_preserves_typed_paths_and_rejects_removed_flags() {
@@ -1508,37 +916,6 @@ mod tests {
     }
 
     #[test]
-    fn empty_window_target_preserves_alias_precedence() {
-        for (flags, expected) in [
-            (vec![], None),
-            (vec!["--session="], None),
-            (vec!["--session=legacy"], Some("legacy")),
-            (vec!["--target=", "--session=legacy"], None),
-            (vec!["--target=chosen", "--session=legacy"], Some("chosen")),
-            (vec!["--target= "], Some(" ")),
-        ] {
-            for subcommand in ["list", "connect"] {
-                let Some(Commands::Window { command }) = Cli::try_parse_from(
-                    ["rexue", "window", subcommand]
-                        .into_iter()
-                        .chain(flags.iter().copied()),
-                )
-                .unwrap()
-                .command
-                else {
-                    panic!("expected window")
-                };
-                let target = match command {
-                    WindowCommand::List { target, .. } | WindowCommand::Connect { target, .. } => {
-                        target
-                    }
-                };
-                assert_eq!(target.selected(), expected, "{subcommand} {flags:?}");
-            }
-        }
-    }
-
-    #[test]
     fn picker_and_format_empty_strings_remain_explicit_source_overrides() {
         let mut cfg = Config::default();
         cfg.tui.prompt = "configured prompt".into();
@@ -1594,7 +971,7 @@ mod tests {
         Cli::command().debug_assert();
     }
     #[test]
-    fn every_boolean_flag_accepts_go_values_and_defaults() {
+    fn every_boolean_flag_accepts_values_and_defaults() {
         fn check(command: clap::Command, path: Vec<String>) -> usize {
             let mut count = 0;
             let mut base = path.clone();
@@ -1609,6 +986,13 @@ mod tests {
                     .unwrap_or_else(|| "1".into());
                 base.push(value);
                 assert!(positional.get_index().is_some());
+            }
+            for option in command
+                .get_arguments()
+                .filter(|arg| arg.is_required_set() && arg.get_index().is_none())
+            {
+                base.push(format!("--{}", option.get_long().unwrap()));
+                base.push("value".into());
             }
             if !command.is_subcommand_required_set() {
                 let defaults = Cli::command().try_get_matches_from(&base).unwrap();
@@ -1669,7 +1053,7 @@ mod tests {
         }
         let mut command = Cli::command();
         command.build();
-        assert!(check(command, vec!["rexue".into()]) >= 35);
+        assert!(check(command, vec!["rexue".into()]) >= 20);
     }
 
     fn parsed_picker(flags: &[&str]) -> PickerArgs {
@@ -1687,7 +1071,7 @@ mod tests {
         else {
             panic!("expected list");
         };
-        assert!(!list.json && !list.icons && !list.no_color && !list.panes && !list.blacklisted);
+        assert!(!list.json && !list.icons && !list.no_color && !list.blacklisted);
         for sources in [list.sources, parsed_picker(&[]).sources] {
             assert!(!sources.rex && !sources.configs && !sources.zoxide);
             assert!(!sources.hide_attached && !sources.hide_duplicates && !sources.no_cache);
@@ -1835,17 +1219,16 @@ mod tests {
 
     #[test]
     fn format_separates_raw_name_and_decorated_name() {
-        let mut e = Entry::new("a b", "/tmp/a b", Source::Rex);
-        e.active_window_name = "editor".into();
+        let e = Entry::new("a b", "/tmp/a b", Source::Rex);
         let s = format_entry(
             &e,
-            Some("{source}|{session}|{name}|{path}|{active_window_name_prefix}"),
+            Some("{source}|{session}|{name}|{path}"),
             true,
             false,
             &[],
         )
         .unwrap();
-        assert_eq!(s, "rex|a b| a b|/tmp/a b|editor ");
+        assert_eq!(s, "rex|a b| a b|/tmp/a b");
     }
     fn loaded_picker_config(text: &str) -> Config {
         let dir = tempfile::tempdir().unwrap();

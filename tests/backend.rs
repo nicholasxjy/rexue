@@ -2,7 +2,7 @@
 
 use rexue::{
     backend::Rex,
-    config::{Config, FrecencyConfig, SessionConfig, SortGroup, WindowConfig},
+    config::{Config, FrecencyConfig, SessionConfig, SortGroup},
     model::{Entry, Source},
     session::{ConnectOptions, ListOptions, Manager},
 };
@@ -67,7 +67,6 @@ case "$1 $2" in
     'new '*)
         /bin/cp "$root/after-create.json" "$root/sessions.json"
         /bin/cat "$root/created.json" ;;
-    'window new') /bin/cat "$root/window.json" ;;
     'session rename'|'kill '*|'send '*|'send-key '*|'focus '*) printf '{{}}' ;;
     'capture '*) printf 'terminal fixture\n' ;;
     *) printf 'unexpected fake Rex command: %s %s\n' "$1" "$2" >&2; exit 92 ;;
@@ -98,7 +97,6 @@ esac
             json!({"session_id": "session:previous-full"}),
         );
         fake.json("created.json", json!({"session_id": "session:created-full", "initial_windows": [{"block_ids": ["block:initial-full"]}]}));
-        fake.json("window.json", json!({"window_id": "window:extra-full"}));
         fake.session("session:created-full", "project", Path::new("/unused"));
         fake.json(
             "after-create.json",
@@ -158,6 +156,111 @@ fn client(id: &str, label: &str, kind: &str, connection: &str) -> Value {
 }
 
 #[test]
+fn session_switch_history_preview_and_removal_keep_full_ids() {
+    let fake = FakeRex::new();
+    let first = fake.session("session:first-full", "same", fake.dir.path());
+    let second = fake.session("session:second-full", "same", fake.dir.path());
+    fake.json("sessions.json", json!({"sessions": [first, second]}));
+    let mut manager = fake.manager(Config::default());
+    manager.config.frecency.add_command = Some("true".into());
+    manager
+        .connect("session:first-full", &ConnectOptions::default())
+        .unwrap();
+    manager
+        .connect("session:second-full", &ConnectOptions::default())
+        .unwrap();
+    let previous = manager.last().unwrap();
+    assert_eq!(previous.session_id, "session:first-full");
+    assert!(!previous.created);
+    let entry = manager.resolve_entry("session:first-full").unwrap();
+    assert_eq!(manager.preview(&entry).unwrap(), "terminal fixture\n");
+    manager.remove(&entry).unwrap();
+    assert_eq!(
+        &fake.calls().last().unwrap()[5..],
+        ["kill", "session:first-full"]
+    );
+}
+
+#[test]
+fn rename_cli_validates_names_and_uses_the_resolved_session_id() {
+    let fake = FakeRex::new();
+    let live = fake.session("session:rename-full", "project", fake.dir.path());
+    fake.json("sessions.json", json!({"sessions": [live]}));
+    let cfg = fake.dir.path().join("rename.toml");
+    fs::write(&cfg, "strict_mode=true").unwrap();
+    let invalid = session_cli(&fake, &cfg, &["rename", "project", "--to", "bad\nname"]);
+    assert!(!invalid.status.success());
+    assert!(
+        !fake
+            .calls()
+            .iter()
+            .any(|call| call.windows(2).any(|args| args == ["session", "rename"]))
+    );
+    let result = session_cli(
+        &fake,
+        &cfg,
+        &["rename", "project", "--to", "renamed ; literal"],
+    );
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert_eq!(result.stdout, b"renamed ; literal\n");
+    assert!(fake.calls().iter().any(|call| call.ends_with(&[
+        "session".into(),
+        "rename".into(),
+        "session:rename-full".into(),
+        "renamed ; literal".into()
+    ])));
+}
+
+#[test]
+fn connect_root_uses_git_checkout_and_matching_session_startup() {
+    let fake = FakeRex::new();
+    let repo = fake.dir.path().join("repo");
+    assert!(
+        Command::new("git")
+            .args(["init", "--quiet"])
+            .arg(&repo)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let child = repo.join("nested");
+    fs::create_dir(&child).unwrap();
+    fake.session("session:created-full", "app", &repo);
+    let config = Config {
+        session: vec![SessionConfig {
+            name: "app".into(),
+            path: repo.display().to_string(),
+            startup_command: Some("printf root-start".into()),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let manager = fake.manager(config);
+    let result = manager
+        .connect(
+            child.to_str().unwrap(),
+            &ConnectOptions {
+                root: true,
+                detach: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(result.created);
+    assert_eq!(result.name, "app");
+    assert_eq!(result.path, repo.canonicalize().unwrap());
+    assert!(
+        fake.calls()
+            .iter()
+            .any(|call| call.iter().any(|arg| arg.contains("printf root-start")))
+    );
+}
+
+#[test]
 fn picker_rename_preserves_live_identity_and_rejects_invalid_targets_and_names() {
     let fake = FakeRex::new();
     let manager = fake.manager(Config::default());
@@ -168,7 +271,6 @@ fn picker_rename_preserves_live_identity_and_rejects_invalid_targets_and_names()
         Source::Zoxide,
         Source::Directory,
         Source::Worktree,
-        Source::RexBlock,
     ] {
         let mut invalid = entry.clone();
         invalid.source = source;
@@ -410,71 +512,6 @@ fn connect_root_preserves_plain_directories_with_and_without_git() {
     }
 }
 #[test]
-fn connect_root_detects_git_jj_and_bare_before_selecting_configuration() {
-    for kind in ["git", "jj", "bare"] {
-        let fake = FakeRex::new();
-        let repo = fake.dir.path().join("repository");
-        fs::create_dir(&repo).unwrap();
-        let (target, expected) = match kind {
-            "git" => {
-                let r = Command::new("git")
-                    .args(["init", "-b", "main"])
-                    .arg(&repo)
-                    .output()
-                    .unwrap();
-                assert!(r.status.success());
-                let child = repo.join("child");
-                fs::create_dir(&child).unwrap();
-                (child, repo.clone())
-            }
-            "jj" => {
-                fs::create_dir(repo.join(".jj")).unwrap();
-                let child = repo.join("child");
-                fs::create_dir(&child).unwrap();
-                (child, repo.clone())
-            }
-            _ => {
-                let bare = repo.join(".bare");
-                let r = Command::new("git")
-                    .args(["init", "--bare"])
-                    .arg(&bare)
-                    .output()
-                    .unwrap();
-                assert!(r.status.success());
-                (bare.clone(), bare)
-            }
-        };
-        fake.session("session:created-full", "project", &expected);
-        let cfg = fake.dir.path().join("root-connect.toml");
-        fs::write(&cfg,format!("[frecency]\nadd_command='/usr/bin/true'\n[[session]]\nname='root-profile'\npath={}\nstartup_command='printf root-profile-startup'\n",serde_json::to_string(expected.to_str().unwrap()).unwrap())).unwrap();
-        let r = Command::new(env!("CARGO_BIN_EXE_rexue"))
-            .args(["--detach", "--rex-bin"])
-            .arg(&fake.rex.bin)
-            .arg("-C")
-            .arg(&cfg)
-            .args(["connect", "--root", target.to_str().unwrap(), "--json"])
-            .env("REXUE_STATE_DIR", fake.dir.path().join("state"))
-            .env_remove("REX_SESSION")
-            .output()
-            .unwrap();
-        assert!(
-            r.status.success(),
-            "{kind}: {}",
-            String::from_utf8_lossy(&r.stderr)
-        );
-        let c: Value = serde_json::from_slice(&r.stdout).unwrap();
-        assert_eq!(c["name"], "root-profile");
-        assert_eq!(
-            Path::new(c["path"].as_str().unwrap())
-                .canonicalize()
-                .unwrap(),
-            expected.canonicalize().unwrap()
-        );
-        assert!(fake.calls().iter().any(|a| a.iter().any(|v| v == "new")
-            && a.iter().any(|v| v.contains("root-profile-startup"))));
-    }
-}
-#[test]
 fn connect_root_keeps_config_alias_and_exact_live_identity() {
     let fake = FakeRex::new();
     let repo = fake.dir.path().join("repository");
@@ -527,166 +564,6 @@ fn connect_root_keeps_config_alias_and_exact_live_identity() {
             .count(),
         1
     );
-}
-
-#[test]
-fn root_cli_names_plain_context_and_preserves_literal_dollars() {
-    let fake = FakeRex::new();
-    let path = fake
-        .dir
-        .path()
-        .join("parent/child.$ROOT_LITERAL_UNSET_9183");
-    fs::create_dir_all(&path).unwrap();
-    let live = fake.session("session:root-full", "live", &path);
-    fake.json("sessions.json", json!({"sessions":[live]}));
-    fake.json("context.json", json!({"session_id":"session:root-full"}));
-    let cfg = fake.dir.path().join("root.toml");
-    fs::write(&cfg, "dir_length=2\n").unwrap();
-    for args in [
-        vec!["root"],
-        vec!["root", "session:root-full"],
-        vec!["root", "live"],
-    ] {
-        let r = pane_cli(&fake, &cfg, &args);
-        assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
-        assert_eq!(r.stdout, b"parent/child_$ROOT_LITERAL_UNSET_9183\n");
-    }
-    assert!(
-        !fake
-            .calls()
-            .iter()
-            .any(|args| args.iter().any(|arg| arg == "new"))
-    );
-}
-
-#[test]
-fn root_cli_git_child_substitution_precedes_root_fallback_in_both_modes() {
-    let fake = FakeRex::new();
-    let repo = fake.dir.path().join("project");
-    let child = repo.join("src/pkg");
-    fs::create_dir_all(&child).unwrap();
-    let init = Command::new("git")
-        .args(["init", "--quiet"])
-        .arg(&repo)
-        .output()
-        .unwrap();
-    assert!(
-        init.status.success(),
-        "{}",
-        String::from_utf8_lossy(&init.stderr)
-    );
-    // Colocated JJ metadata must not take precedence over Git.
-    fs::create_dir_all(repo.join(".jj")).unwrap();
-    fs::write(repo.join(".jj/repo"), "../../different/.jj/repo\n").unwrap();
-    let live = fake.session("session:root-full", "live", &child);
-    fake.json("sessions.json", json!({"sessions":[live]}));
-    let cfg = fake.dir.path().join("root.toml");
-    for mode in [false, true] {
-        for (rules, expected) in [
-            (String::new(), "project\n"),
-            (
-                format!(
-                    "[[name_substitution]]\nfind={}\nreplace='child:chosen name'\n",
-                    serde_json::to_string(child.canonicalize().unwrap().to_str().unwrap()).unwrap()
-                ),
-                "child_chosen_name\n",
-            ),
-            (
-                format!(
-                    "[[name_substitution]]\nfind={}\nreplace='  '\n",
-                    serde_json::to_string(child.canonicalize().unwrap().to_str().unwrap()).unwrap()
-                ),
-                "project\n",
-            ),
-        ] {
-            fs::write(&cfg, format!("git_namer_use_worktree_root={mode}\n{rules}")).unwrap();
-            let r = pane_cli(&fake, &cfg, &["root", "session:root-full"]);
-            assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
-            assert_eq!(r.stdout, expected.as_bytes());
-        }
-    }
-    let commit = Command::new("git")
-        .arg("-C")
-        .arg(&repo)
-        .args([
-            "-c",
-            "user.name=Test",
-            "-c",
-            "user.email=test@example.invalid",
-            "-c",
-            "core.hooksPath=/dev/null",
-            "-c",
-            "commit.gpgsign=false",
-            "commit",
-            "--quiet",
-            "--allow-empty",
-            "-m",
-            "fixture",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        commit.status.success(),
-        "{}",
-        String::from_utf8_lossy(&commit.stderr)
-    );
-    let tree = repo.join("ws/feature");
-    let add = Command::new("git")
-        .arg("-C")
-        .arg(&repo)
-        .args([
-            "-c",
-            "core.hooksPath=/dev/null",
-            "worktree",
-            "add",
-            "--quiet",
-            "--detach",
-        ])
-        .arg(&tree)
-        .output()
-        .unwrap();
-    assert!(
-        add.status.success(),
-        "{}",
-        String::from_utf8_lossy(&add.stderr)
-    );
-    let nested = tree.join("src/pkg");
-    fs::create_dir_all(&nested).unwrap();
-    fake.session("session:root-full", "live", &nested);
-    for (mode, expected) in [(false, "project/ws/feature\n"), (true, "feature\n")] {
-        fs::write(&cfg, format!("git_namer_use_worktree_root={mode}\n")).unwrap();
-        let r = pane_cli(&fake, &cfg, &["root", "session:root-full"]);
-        assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
-        assert_eq!(r.stdout, expected.as_bytes());
-    }
-}
-
-#[test]
-fn root_cli_jj_workspace_fallback_respects_mode_and_anchor_length() {
-    let fake = FakeRex::new();
-    let repo = fake.dir.path().join("group/project");
-    let workspace = repo.join("ws/feature");
-    let child = workspace.join("src/pkg");
-    fs::create_dir_all(repo.join(".jj/repo")).unwrap();
-    fs::create_dir_all(workspace.join(".jj")).unwrap();
-    fs::create_dir_all(&child).unwrap();
-    fs::write(workspace.join(".jj/repo"), "../../../.jj/repo\n").unwrap();
-    let live = fake.session("session:root-full", "live", &child);
-    fake.json("sessions.json", json!({"sessions":[live]}));
-    let cfg = fake.dir.path().join("root.toml");
-    for (mode, expected) in [
-        (false, "group/project/ws/feature\n"),
-        (true, "ws/feature\n"),
-    ] {
-        fs::write(
-            &cfg,
-            format!("git_namer_use_worktree_root={mode}\ngit_dir_length=2\n"),
-        )
-        .unwrap();
-        let r = pane_cli(&fake, &cfg, &["root", "session:root-full"]);
-        assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
-        assert_eq!(r.stdout, expected.as_bytes());
-    }
 }
 
 #[test]
@@ -937,120 +814,6 @@ fn environment_values_with_literal_dollars_survive_list_preview_and_repository_i
     assert!(String::from_utf8_lossy(&r.stderr).contains("bad-project"));
 }
 
-#[cfg(target_os = "macos")]
-#[test]
-fn configured_app_activation_respects_foreground_and_background_modes() {
-    let fake = FakeRex::new();
-    let project = fake.dir.path().join("project");
-    fs::create_dir(&project).unwrap();
-    fake.session("session:created-full", "project", &project);
-    let cfg = fake.dir.path().join("activate.toml");
-    let app = "Rex quoted \" name";
-    fs::write(
-        &cfg,
-        format!(
-            "terminal={}\n[[session]]\nname='project'\npath={}\n",
-            serde_json::to_string(app).unwrap(),
-            serde_json::to_string(project.to_str().unwrap()).unwrap()
-        ),
-    )
-    .unwrap();
-    let captured = fake.dir.path().join("activation-args");
-    let osascript = fake.dir.path().join("fake-osascript");
-    executable(
-        &osascript,
-        &format!(
-            "#!/bin/sh\nprintf '%s\\000' \"$@\" > {}\n",
-            shell_quote(captured.to_str().unwrap())
-        ),
-    );
-    let run = |args: &[&str]| {
-        Command::new(env!("CARGO_BIN_EXE_rexue"))
-            .arg("--rex-bin")
-            .arg(&fake.rex.bin)
-            .arg("-C")
-            .arg(&cfg)
-            .args(args)
-            .env("REXUE_OPEN", &osascript)
-            .env("REXUE_STATE_DIR", fake.dir.path().join("activate-state"))
-            .env_remove("REX_SESSION")
-            .output()
-            .unwrap()
-    };
-    for args in [
-        &["list", "--config", "--json"][..],
-        &["--detach", "connect", "project", "--json"][..],
-    ] {
-        let r = run(args);
-        assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
-        assert!(!captured.exists());
-    }
-    let r = run(&["connect", "project", "--json"]);
-    assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
-    let bytes = fs::read(&captured).unwrap();
-    let args: Vec<_> = bytes.split(|b| *b == 0).filter(|b| !b.is_empty()).collect();
-    assert_eq!(args.last().copied(), Some(app.as_bytes()));
-    assert_eq!(args.len(), 2);
-    assert_eq!(args[0], b"-a");
-    fs::remove_file(&captured).unwrap();
-    let r = run(&[
-        "window",
-        "connect",
-        "--target",
-        "session:created-full",
-        "Other",
-        "--background",
-    ]);
-    assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
-    assert!(!captured.exists());
-    executable(
-        &osascript,
-        "#!/bin/sh\necho activation-unavailable >&2\nexit 1\n",
-    );
-    let r = run(&["connect", "project", "--json"]);
-    assert!(r.status.success());
-    assert!(String::from_utf8_lossy(&r.stderr).contains("could not activate"));
-}
-#[test]
-fn baseline_tui_fallbacks_and_terminal_config_do_not_reject_cli_listing() {
-    let d = tempfile::tempdir().unwrap();
-    let cfg = d.path().join("fallbacks.toml");
-    for fields in [
-        "preview_width=0",
-        "preview_width=-1",
-        "preview_width=1000",
-        "preview_min_width=0",
-        "preview_min_width=100000",
-        "preview_border='unknown'",
-        "alias_auto_connect_delay='-1ms'",
-        "window_name_format='#{window_name}'",
-    ] {
-        fs::write(
-            &cfg,
-            format!(
-                "terminal='Rex'\n[tui]\n{fields}\n[[session]]\nname='configured'\npath='/tmp'\n"
-            ),
-        )
-        .unwrap();
-        let r = Command::new(env!("CARGO_BIN_EXE_rexue"))
-            .arg("--rex-bin")
-            .arg("/no-rex-needed")
-            .arg("-C")
-            .arg(&cfg)
-            .args(["list", "--config", "--json"])
-            .env("REXUE_STATE_DIR", d.path().join("state"))
-            .output()
-            .unwrap();
-        assert!(
-            r.status.success(),
-            "{fields}: {}",
-            String::from_utf8_lossy(&r.stderr)
-        );
-        let rows: Value = serde_json::from_slice(&r.stdout).unwrap();
-        assert_eq!(rows[0]["name"], "configured");
-    }
-}
-
 #[test]
 fn nested_shell_placeholders_work_in_cli_preview_and_rex_startup_scripts() {
     let fake = FakeRex::new();
@@ -1059,16 +822,14 @@ fn nested_shell_placeholders_work_in_cli_preview_and_rex_startup_scripts() {
     fs::create_dir(&project).unwrap();
     fake.session("session:created-full", "project", &project);
     let startup_file = fake.dir.path().join("nested-startup");
-    let window_file = fake.dir.path().join("nested-window");
     let preview =
         r#"rexue_path() { printf '%s' "$(basename '{}')"; }; set -- changed; rexue_path other"#;
     let startup = format!(
         "{preview} > {}",
         shell_quote(startup_file.to_str().unwrap())
     );
-    let window = format!("{preview} > {}", shell_quote(window_file.to_str().unwrap()));
     let cfg = fake.dir.path().join("nested-shell.toml");
-    fs::write(&cfg,format!("[frecency]\nadd_command='/usr/bin/true'\n[[window]]\nname='Nested'\nstartup_script={}\n[[session]]\nname='project'\npath={}\npreview_command={}\nstartup_command={}\nwindows=['Nested']\n",serde_json::to_string(&window).unwrap(),serde_json::to_string(project.to_str().unwrap()).unwrap(),serde_json::to_string(preview).unwrap(),serde_json::to_string(&startup).unwrap())).unwrap();
+    fs::write(&cfg,format!("[frecency]\nadd_command='/usr/bin/true'\n[[session]]\nname='project'\npath={}\npreview_command={}\nstartup_command={}\n",serde_json::to_string(project.to_str().unwrap()).unwrap(),serde_json::to_string(preview).unwrap(),serde_json::to_string(&startup).unwrap())).unwrap();
     let run = |args: &[&str]| {
         let r = Command::new(env!("CARGO_BIN_EXE_rexue"))
             .args(["--detach", "--rex-bin"])
@@ -1090,7 +851,7 @@ fn nested_shell_placeholders_work_in_cli_preview_and_rex_startup_scripts() {
         .iter()
         .filter_map(|args| args.iter().position(|a| a == "--").map(|i| &args[i + 1..]))
         .collect();
-    assert_eq!(scripts.len(), 2);
+    assert_eq!(scripts.len(), 1);
     for args in scripts {
         let result = Command::new(&args[0])
             .args(&args[1..])
@@ -1113,11 +874,6 @@ fn nested_shell_placeholders_work_in_cli_preview_and_rex_startup_scripts() {
         fs::read(startup_file).unwrap(),
         name.as_bytes(),
         "Rex session startup nested substitution"
-    );
-    assert_eq!(
-        fs::read(window_file).unwrap(),
-        name.as_bytes(),
-        "Rex window startup nested substitution"
     );
     assert!(
         !project.join("INJECTED").exists(),
@@ -1147,198 +903,6 @@ fn unicode_alias_preview_uses_the_real_cli_resolution_path() {
             String::from_utf8_lossy(&result.stderr)
         );
         assert_eq!(result.stdout, b"unicode-alias-ok");
-    }
-}
-#[test]
-fn pane_icons_and_configured_windows_are_exposed_by_cli() {
-    let fake = FakeRex::new();
-    let cfg = fake.dir.path().join("pane.toml");
-    fs::write(&cfg,"[icons.tmux-pane]\nicon='P'\ncolor='green'\n[[window]]\nname='Logs'\n[[session]]\nname='configured'\npath='/tmp'\nwindows=['Logs']\n").unwrap();
-    fake.json("context.json", json!({"session_id":"session:panes-full"}));
-    fake.json("inspect-session:panes-full.json",json!({"active_window_id":"window:panes","windows":[{"window_id":"window:panes","label":"Editor","focused_block_id":"block:one","layers":[{"blocks":[{"block_id":"block:one","label":"one"}]}]}]}));
-    let run = |args: &[&str]| {
-        let result = Command::new(env!("CARGO_BIN_EXE_rexue"))
-            .arg("--rex-bin")
-            .arg(&fake.rex.bin)
-            .arg("-C")
-            .arg(&cfg)
-            .args(args)
-            .env("REXUE_STATE_DIR", fake.dir.path().join("state"))
-            .output()
-            .unwrap();
-        assert!(
-            result.status.success(),
-            "{}",
-            String::from_utf8_lossy(&result.stderr)
-        );
-        result.stdout
-    };
-    let panes: Value = serde_json::from_slice(&run(&["list", "--panes", "--json"])).unwrap();
-    assert_eq!(panes[0]["source"], "rex-block");
-    assert!(
-        String::from_utf8(run(&["list", "--panes", "--icons", "--no-color"]))
-            .unwrap()
-            .starts_with("P ")
-    );
-    let configured: Value = serde_json::from_slice(&run(&["list", "--config", "--json"])).unwrap();
-    assert_eq!(configured[0]["window_names"], json!(["Logs"]));
-}
-
-fn pane_fixture() -> (FakeRex, std::path::PathBuf) {
-    let fake = FakeRex::new();
-    let cfg = fake.dir.path().join("selector.toml");
-    fs::write(
-        &cfg,
-        "[icons.tmux-pane]\nicon='P'\ncolor='green'\n[[session]]\nname='configured'\npath='/tmp'\n",
-    )
-    .unwrap();
-    fake.json("context.json", json!({"session_id":"session:panes-full"}));
-    fake.json(
-        "sessions.json",
-        json!({"sessions":[{"session_id":"session:panes-full","label":"live"}]}),
-    );
-    fake.json(
-        "process.json",
-        json!({"foreground":{"cwd":fake.dir.path()}}),
-    );
-    fake.json("inspect-session:panes-full.json",json!({"active_window_id":"window:panes","windows":[{"window_id":"window:panes","label":"Editor","focused_block_id":"block:one","layers":[{"blocks":[{"block_id":"block:one","label":"pane one"},{"block_id":"block:two","label":"pane two"}]}]}]}));
-    (fake, cfg)
-}
-#[test]
-fn empty_config_fields_inherit_through_executable_cli() {
-    let fake = FakeRex::new();
-    let cfg = fake.dir.path().join("inherit.toml");
-    fs::write(&cfg, format!(
-            "[frecency]\nadd_command='true'\n[default_session]\nwindows=['Inherited']\npreview_command='printf inherited-preview'\nstartup_command='printf inherited-startup'\n[[window]]\nname='Inherited'\npath=''\nstartup_script='printf inherited-window'\n[[session]]\nname='project'\npath={}\nwindows=[]\npreview_command=''\nstartup_command=''\nalias='ä'\n",
-            serde_json::to_string(fake.dir.path().to_str().unwrap()).unwrap()
-        )).unwrap();
-    let run = |args: &[&str]| {
-        let output = pane_cli(&fake, &cfg, args);
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        output.stdout
-    };
-    let rows: Value = serde_json::from_slice(&run(&["list", "--config", "--json"])).unwrap();
-    assert_eq!(rows[0]["window_names"], json!(["Inherited"]));
-    assert_eq!(run(&["preview", "Ä"]), b"inherited-preview");
-    let created: Value = serde_json::from_slice(&run(&["connect", "Ä", "--json"])).unwrap();
-    assert_eq!(created["created"], true);
-    let reused: Value = serde_json::from_slice(&run(&["connect", "project", "--json"])).unwrap();
-    assert_eq!(reused["created"], false);
-    let calls = fake.calls();
-    let creates: Vec<_> = calls
-        .iter()
-        .filter(|args| {
-            args.iter().any(|arg| arg == "new") && !args.iter().any(|arg| arg == "window")
-        })
-        .collect();
-    assert_eq!(creates.len(), 1);
-    assert!(
-        creates[0]
-            .iter()
-            .any(|arg| arg.contains("printf inherited-startup"))
-    );
-    let windows: Vec<_> = calls
-        .iter()
-        .filter(|args| args.windows(2).any(|pair| pair == ["window", "new"]))
-        .collect();
-    assert_eq!(windows.len(), 1);
-    assert!(
-        windows[0]
-            .iter()
-            .any(|arg| arg.contains("printf inherited-window"))
-    );
-}
-
-#[test]
-fn cli_go_wildcard_classes_select_startup_windows_and_preview() {
-    for (class, matched, aliased) in [
-        ("[^x]", true, false),
-        ("[!x]", false, false),
-        ("[^x]", true, true),
-        ("[!x]", false, true),
-    ] {
-        let fake = FakeRex::new();
-        let actual = fake.dir.path().join("actual");
-        fs::create_dir(&actual).unwrap();
-        let parent = if aliased {
-            let alias = fake.dir.path().join("alias");
-            std::os::unix::fs::symlink(&actual, &alias).unwrap();
-            alias
-        } else {
-            actual
-        };
-        let project = parent.join("rexue");
-        fs::create_dir(&project).unwrap();
-        let project = if aliased {
-            project
-        } else {
-            project.canonicalize().unwrap()
-        };
-        fake.session("session:created-full", "project", &project);
-        let pattern = format!("{}/rexu{class}", project.parent().unwrap().display());
-        let cfg = fake.dir.path().join("go-wildcard.toml");
-        fs::write(&cfg,format!("[frecency]\nadd_command='/usr/bin/true'\n[default_session]\nstartup_command='printf default-startup'\npreview_command='printf default-preview'\nwindows=['Default']\n[[window]]\nname='Default'\nstartup_script='printf default-window'\n[[window]]\nname='Wild'\nstartup_script='printf wild-window'\n[[wildcard]]\npattern={}\nstartup_command='printf wild-startup'\npreview_command='printf wild-preview'\nwindows=['Wild']\nicon='W'\n[[session]]\nname='project'\npath={}\n",serde_json::to_string(&pattern).unwrap(),serde_json::to_string(project.to_str().unwrap()).unwrap())).unwrap();
-        let run = |args: &[&str]| {
-            let r = Command::new(env!("CARGO_BIN_EXE_rexue"))
-                .args(["--detach", "--rex-bin"])
-                .arg(&fake.rex.bin)
-                .arg("-C")
-                .arg(&cfg)
-                .args(args)
-                .env_remove("REX_SESSION")
-                .env("REXUE_STATE_DIR", fake.dir.path().join("state"))
-                .output()
-                .unwrap();
-            assert!(
-                r.status.success(),
-                "{class}: {}",
-                String::from_utf8_lossy(&r.stderr)
-            );
-            r
-        };
-        let listed: Value =
-            serde_json::from_slice(&run(&["list", "--config", "--json"]).stdout).unwrap();
-        assert_eq!(
-            listed[0]["icon"],
-            if matched { json!("W") } else { Value::Null }
-        );
-        let selected = if matched { "wild" } else { "default" };
-        assert_eq!(
-            run(&["preview", "project"]).stdout,
-            format!("{selected}-preview").as_bytes()
-        );
-        run(&["connect", "project", "--json"]);
-        let calls = fake.calls();
-        let creates: Vec<_> = calls
-            .iter()
-            .filter(|a| a.iter().any(|v| v == "new") && !a.iter().any(|v| v == "window"))
-            .collect();
-        assert_eq!(creates.len(), 1);
-        assert!(
-            creates[0]
-                .iter()
-                .any(|arg| arg.contains(&format!("printf {selected}-startup"))),
-            "{class} {calls:#?}"
-        );
-        let windows: Vec<_> = calls
-            .iter()
-            .filter(|a| a.windows(2).any(|p| p[0] == "window" && p[1] == "new"))
-            .collect();
-        assert_eq!(windows.len(), 1);
-        assert!(
-            windows[0]
-                .iter()
-                .any(|arg| arg == if matched { "Wild" } else { "Default" })
-        );
-        assert!(
-            windows[0]
-                .iter()
-                .any(|arg| arg.contains(&format!("printf {selected}-window")))
-        );
     }
 }
 
@@ -1389,7 +953,7 @@ fn cli_startup_and_preview_follow_source_strategy_order() {
         fs::write(&cfg, format!(
             "[frecency]\nadd_command='true'\n[default_session]\nstartup_command='printf default'\nstartup_script=''\npreview_command='printf default-preview'\n[[wildcard]]\npattern={path}\npreview_command='printf wildcard-preview'\nicon='W'\n{wildcard}\n[[wildcard]]\npattern={path}\nstartup_command='printf wrong-second'\npreview_command='printf wrong-second'\n[[session]]\nname='project'\npath={path}\npreview_command=''\nicon=''\n{session}\n"
         )).unwrap();
-        let output = pane_cli(&fake, &cfg, &["list", "--config", "--json"]);
+        let output = session_cli(&fake, &cfg, &["list", "--config", "--json"]);
         assert!(
             output.status.success(),
             "{}",
@@ -1397,14 +961,14 @@ fn cli_startup_and_preview_follow_source_strategy_order() {
         );
         let rows: Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(rows[0]["icon"], "W");
-        let preview = pane_cli(&fake, &cfg, &["preview", "project"]);
+        let preview = session_cli(&fake, &cfg, &["preview", "project"]);
         assert!(
             preview.status.success(),
             "{}",
             String::from_utf8_lossy(&preview.stderr)
         );
         assert_eq!(preview.stdout, b"wildcard-preview");
-        let output = pane_cli(&fake, &cfg, &["connect", "project", "--json"]);
+        let output = session_cli(&fake, &cfg, &["connect", "project", "--json"]);
         assert!(
             output.status.success(),
             "{}",
@@ -1439,65 +1003,7 @@ fn cli_startup_and_preview_follow_source_strategy_order() {
     }
 }
 
-#[test]
-fn cli_nonempty_fields_win_and_empty_wildcard_fields_continue_to_defaults() {
-    let fake = FakeRex::new();
-    let path =
-        serde_json::to_string(fake.dir.path().canonicalize().unwrap().to_str().unwrap()).unwrap();
-    let cfg = fake.dir.path().join("fallbacks.toml");
-    for (session, wildcard, window, preview) in [
-        (
-            "windows=[]\npreview_command=''",
-            "windows=[]\npreview_command=''",
-            "Default",
-            "default-preview",
-        ),
-        (
-            "windows=[]\npreview_command=''",
-            "windows=['Wildcard']\npreview_command='printf wildcard-preview'",
-            "Wildcard",
-            "wildcard-preview",
-        ),
-        (
-            "windows=['Session']\npreview_command='printf session-preview'",
-            "windows=['Wildcard']\npreview_command='printf wildcard-preview'",
-            "Session",
-            "session-preview",
-        ),
-    ] {
-        fs::write(&cfg, format!(
-            "[default_session]\nwindows=['Default']\npreview_command='printf default-preview'\n[[window]]\nname='Default'\n[[window]]\nname='Wildcard'\n[[window]]\nname='Session'\n[[wildcard]]\npattern={path}\n{wildcard}\n[[wildcard]]\npattern={path}\nwindows=['Session']\npreview_command='printf wrong-second'\n[[session]]\nname='project'\npath={path}\n{session}\n"
-        )).unwrap();
-        let output = pane_cli(&fake, &cfg, &["list", "--config", "--json"]);
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let rows: Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(rows[0]["window_names"], json!([window]));
-        let output = pane_cli(&fake, &cfg, &["preview", "project"]);
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert_eq!(output.stdout, preview.as_bytes());
-    }
-    // The preview strategy also continues when a nonempty command succeeds
-    // with no output, as previewer/previewer.go does.
-    fs::write(
-        &cfg,
-        format!("[[session]]\nname='project'\npath={path}\npreview_command='true'\n"),
-    )
-    .unwrap();
-    fs::write(fake.dir.path().join("directory-preview-marker"), "").unwrap();
-    let output = pane_cli(&fake, &cfg, &["preview", "project"]);
-    assert!(output.status.success());
-    assert!(String::from_utf8_lossy(&output.stdout).contains("directory-preview-marker"));
-}
-
-fn pane_cli(fake: &FakeRex, cfg: &Path, args: &[&str]) -> std::process::Output {
+fn session_cli(fake: &FakeRex, cfg: &Path, args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_rexue"))
         .arg("--rex-bin")
         .arg(&fake.rex.bin)
@@ -1508,83 +1014,6 @@ fn pane_cli(fake: &FakeRex, cfg: &Path, args: &[&str]) -> std::process::Output {
         .env("REXUE_STATE_DIR", fake.dir.path().join("state"))
         .output()
         .unwrap()
-}
-#[test]
-fn pane_selector_names_roundtrip_and_union_obeys_blacklist() {
-    let (fake, cfg) = pane_fixture();
-    let run = |args: &[&str]| {
-        let r = pane_cli(&fake, &cfg, args);
-        assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
-        r.stdout
-    };
-    let rows: Value = serde_json::from_slice(&run(&["list", "--panes", "--json"])).unwrap();
-    assert_eq!(rows.as_array().unwrap().len(), 2);
-    let name = rows[0]["name"].as_str().unwrap();
-    assert_eq!(run(&["preview", name]), b"terminal fixture\n");
-    assert_eq!(
-        run(&["preview", &format!("P {name}")]),
-        b"terminal fixture\n"
-    );
-    let connected: Value = serde_json::from_slice(&run(&["connect", name, "--json"])).unwrap();
-    assert_eq!(connected["session_id"], "session:panes-full");
-    assert_eq!(connected["created"], false);
-    let rooted: Value =
-        serde_json::from_slice(&run(&["connect", "--root", name, "--json"])).unwrap();
-    assert_eq!(rooted["session_id"], "session:panes-full");
-    assert_eq!(rooted["created"], false);
-    let calls = fake.calls();
-    assert!(!calls.iter().any(|args| args.iter().any(|a| a == "new")));
-    assert!(calls.iter().any(|args| {
-        args.iter()
-            .any(|a| a.contains("\"window_id\":\"window:panes\""))
-    }));
-    let union: Value =
-        serde_json::from_slice(&run(&["list", "--panes", "--rex", "--config", "--json"])).unwrap();
-    for source in ["rex", "config", "rex-block"] {
-        assert!(
-            union
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|e| e["source"] == source)
-        );
-    }
-    assert_eq!(
-        serde_json::from_slice::<Value>(&run(&["list", "--panes", "--hide-duplicates", "--json"]))
-            .unwrap()
-            .as_array()
-            .unwrap()
-            .len(),
-        2
-    );
-    let text = fs::read_to_string(&cfg).unwrap();
-    fs::write(&cfg, format!("blacklist=['.*']\n{text}")).unwrap();
-    assert_eq!(
-        serde_json::from_slice::<Value>(&run(&["list", "--panes", "--json"])).unwrap(),
-        json!([])
-    );
-    assert_eq!(
-        serde_json::from_slice::<Value>(&run(&["list", "--panes", "--blacklisted", "--json"]))
-            .unwrap()
-            .as_array()
-            .unwrap()
-            .len(),
-        2
-    );
-}
-#[test]
-fn duplicate_pane_names_require_ids_and_full_ids_remain_selectable() {
-    let (fake, cfg) = pane_fixture();
-    let file = fake.dir.path().join("inspect-session:panes-full.json");
-    let mut view: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
-    view["windows"][0]["layers"][0]["blocks"][1]["label"] = json!("pane one");
-    fs::write(file, serde_json::to_vec(&view).unwrap()).unwrap();
-    let r = pane_cli(&fake, &cfg, &["preview", "Editor: pane one"]);
-    assert!(!r.status.success());
-    assert!(String::from_utf8_lossy(&r.stderr).contains("ambiguous"));
-    let r = pane_cli(&fake, &cfg, &["preview", "block:one"]);
-    assert!(r.status.success());
-    assert_eq!(r.stdout, b"terminal fixture\n");
 }
 
 #[test]
@@ -1615,43 +1044,6 @@ fn cli_alias_expansion_is_case_insensitive_and_precedes_live_names() {
             Some("session:project-full")
         );
     }
-}
-
-#[test]
-fn external_launcher_directory_falls_back_to_live_client_history() {
-    let fake = FakeRex::new();
-    let session = fake.session("session:remembered-full", "remembered", fake.dir.path());
-    fake.json("sessions.json", json!({"sessions":[session]}));
-    let cfg = Config {
-        frecency: FrecencyConfig {
-            list_command: Some("true".into()),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let manager = fake.manager(cfg);
-    fs::create_dir_all(&manager.state_dir).unwrap();
-    fs::write(
-        manager.state_dir.join("state.json"),
-        serde_json::to_vec(
-            &json!({"paths":{},"history":{"client:desktop-full":["session:remembered-full"]}}),
-        )
-        .unwrap(),
-    )
-    .unwrap();
-    for context in [json!({}), json!({"session_id":"session:expired-full"})] {
-        fake.json("context.json", context);
-        assert_eq!(
-            manager.current_path().unwrap(),
-            fake.dir.path().canonicalize().unwrap()
-        );
-    }
-    assert!(
-        !fake
-            .calls()
-            .iter()
-            .any(|args| args.iter().any(|arg| arg == "new"))
-    );
 }
 
 // Manager invokes zoxide for combined listings. Run those cases
@@ -1769,7 +1161,6 @@ fn list_skips_disappeared_sessions_but_reports_service_and_json_errors() {
     let entries = fake.rex.list().unwrap();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].session_id.as_deref(), Some("session:live-full"));
-    assert_eq!(entries[0].active_window_name, "Editor");
     assert_eq!(entries[0].path, Path::new("/tmp/a b; literal"));
     let calls = fake.calls();
     assert!(calls.iter().any(|args| args[5..]
@@ -1885,28 +1276,19 @@ fn capability_preflight_rejects_before_creating_or_saving() {
 }
 
 #[test]
-fn connect_creates_selects_then_reuses_without_repeating_startup_or_windows() {
+fn connect_creates_selects_then_reuses_without_repeating_startup() {
     isolated(
-        "connect_creates_selects_then_reuses_without_repeating_startup_or_windows",
+        "connect_creates_selects_then_reuses_without_repeating_startup",
         || {
             let fake = FakeRex::new();
             let project = fake.dir.path().join("project ' ; $(touch INJECTED)");
-            let window_path = fake.dir.path().join("window cwd ; literal");
             fs::create_dir(&project).unwrap();
-            fs::create_dir(&window_path).unwrap();
             fake.session("session:created-full", "project", &project);
             let config = Config {
                 session: vec![SessionConfig {
                     name: "project".into(),
                     path: project.to_str().unwrap().into(),
                     startup_command: Some("printf first {}".into()),
-                    windows: vec!["Editor ; literal".into()],
-                    ..Default::default()
-                }],
-                window: vec![WindowConfig {
-                    name: "Editor ; literal".into(),
-                    path: Some(window_path.to_str().unwrap().into()),
-                    startup_command: Some("printf 'window:%s' {}".into()),
                     ..Default::default()
                 }],
                 ..Default::default()
@@ -1930,35 +1312,6 @@ fn connect_creates_selects_then_reuses_without_repeating_startup_or_windows() {
             let calls = fake.calls();
             let commands: Vec<_> = calls.iter().map(|a| &a[5..]).collect();
             assert_eq!(commands.iter().filter(|a| a[0] == "new").count(), 1);
-            let windows: Vec<_> = commands.iter().filter(|a| a[0] == "window").collect();
-            assert_eq!(windows.len(), 1);
-            assert_eq!(
-                &windows[0][..9],
-                [
-                    "window",
-                    "new",
-                    "-s",
-                    "session:created-full",
-                    "Editor ; literal",
-                    "-c",
-                    window_path.to_str().unwrap(),
-                    "--focus=false",
-                    "--json"
-                ]
-            );
-            let startup = Command::new("/bin/sh")
-                .args(["-c", &windows[0][12], "rexue"])
-                .arg(&window_path)
-                .env("SHELL", "/usr/bin/true")
-                .current_dir(fake.dir.path())
-                .output()
-                .unwrap();
-            assert!(startup.status.success());
-            assert_eq!(
-                String::from_utf8(startup.stdout).unwrap(),
-                format!("window:{}", window_path.display())
-            );
-            assert_eq!(&windows[0][13..], ["rexue", window_path.to_str().unwrap()]);
             let selections: Vec<_> = commands
                 .iter()
                 .enumerate()
@@ -2033,61 +1386,6 @@ fn duplicate_session_labels_require_full_id_for_selection_and_kill() {
             let calls = fake.calls();
             assert_eq!(&calls.last().unwrap()[5..], ["kill", "session:two-full"]);
             assert!(!calls.iter().any(|a| a[5] == "new"));
-        },
-    );
-}
-
-#[test]
-fn failed_window_template_keeps_created_session_discoverable_without_switching() {
-    isolated(
-        "failed_window_template_keeps_created_session_discoverable_without_switching",
-        || {
-            let fake = FakeRex::new();
-            let project = fake.dir.path().join("recoverable project");
-            fs::create_dir(&project).unwrap();
-            fake.session("session:created-full", "project", &project);
-            fs::write(fake.dir.path().join("window.json"), "malformed window JSON").unwrap();
-            let config = Config {
-                session: vec![SessionConfig {
-                    name: "project".into(),
-                    path: project.to_str().unwrap().into(),
-                    windows: vec!["Editor".into()],
-                    ..Default::default()
-                }],
-                window: vec![WindowConfig {
-                    name: "Editor".into(),
-                    ..Default::default()
-                }],
-                ..Default::default()
-            };
-            let manager = fake.manager(config);
-            let error = format!(
-                "{:#}",
-                manager
-                    .connect("project", &ConnectOptions::default())
-                    .unwrap_err()
-            );
-            assert!(
-                error.contains("session session:created-full exists"),
-                "{error}"
-            );
-            assert!(error.contains("invalid Rex window JSON"), "{error}");
-            let state: Value =
-                serde_json::from_slice(&fs::read(manager.state_dir.join("state.json")).unwrap())
-                    .unwrap();
-            assert_eq!(
-                state["paths"]["session:created-full"],
-                json!(project.canonicalize().unwrap())
-            );
-            assert!(!manager.state_dir.join("list.json").exists());
-            let calls = fake.calls();
-            assert_eq!(calls.iter().filter(|a| a[5] == "new").count(), 1);
-            assert!(
-                !calls
-                    .iter()
-                    .any(|a| a.get(7).map(String::as_str) == Some("do"))
-            );
-            assert!(!calls.iter().any(|a| a[5] == "kill"));
         },
     );
 }

@@ -1,0 +1,46 @@
+{
+  "checks": [
+    {
+      "check": "public-commands",
+      "commands": [
+        "list",
+        "connect",
+        "picker",
+        "preview",
+        "last",
+        "worktree",
+        "rename",
+        "completion",
+        "help"
+      ]
+    },
+    {
+      "check": "removed-commands-rejected",
+      "count": 6
+    },
+    {
+      "check": "completion",
+      "shell": "bash"
+    },
+    {
+      "check": "completion",
+      "shell": "zsh"
+    },
+    {
+      "check": "completion",
+      "shell": "fish"
+    },
+    {
+      "check": "completion",
+      "shell": "elvish"
+    },
+    {
+      "check": "completion",
+      "shell": "powershell"
+    },
+    {
+      "check": "example-config-list-without-rex",
+      "count": 1
+    }
+  ]
+}

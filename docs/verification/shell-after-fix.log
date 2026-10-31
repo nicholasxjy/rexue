@@ -1,9 +1,0 @@
-{
-  "shell_placeholder_reproduction": {
-    "script": "printf '%s' \"$(basename '{}')\"",
-    "expected": "rex-bar",
-    "observed": "rex-bar",
-    "matches_shell": true
-  },
-  "expected_broken_baseline": false
-}

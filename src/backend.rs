@@ -6,7 +6,7 @@ use crate::{
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{ffi::OsString, path::PathBuf, process::Command, time::Duration};
+use std::{path::PathBuf, process::Command, time::Duration};
 
 #[derive(Debug, Clone)]
 pub struct Rex {
@@ -104,18 +104,6 @@ impl Rex {
         ])?;
         Ok(())
     }
-    pub fn switch_window(&self, client: &AppClient, session: &str, window: &str) -> Result<()> {
-        self.json(&[
-            "-C",
-            &client.id,
-            "do",
-            "session.select",
-            "--args",
-            &serde_json::json!({"session_id":session,"window_id":window}).to_string(),
-            "--json",
-        ])?;
-        Ok(())
-    }
     pub fn list(&self) -> Result<Vec<Entry>> {
         let response = self.json(&["ls", "--json"])?;
         let sessions = response["sessions"]
@@ -136,25 +124,10 @@ impl Rex {
                 Err(e) if e.to_string().contains("exit 3") => continue,
                 Err(e) => return Err(e),
             };
-            entry.window_names = inspect["windows"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|w| w["label"].as_str().map(str::to_owned))
-                .collect();
-            entry.active_window_index = inspect["windows"]
-                .as_array()
-                .and_then(|rows| {
-                    rows.iter()
-                        .position(|w| w["window_id"] == inspect["active_window_id"])
-                })
-                .map(|i| i + 1)
-                .or_else(|| (!entry.window_names.is_empty()).then_some(1));
-            if let Some(window) = active_window(&inspect) {
-                entry.active_window_name = window["label"].as_str().unwrap_or("").into();
-                if let Some(block) = window["focused_block_id"].as_str() {
-                    entry.path = self.block_path(id, block).unwrap_or_default();
-                }
+            if let Some(window) = active_window(&inspect)
+                && let Some(block) = window["focused_block_id"].as_str()
+            {
+                entry.path = self.block_path(id, block).unwrap_or_default();
             }
             entries.push(entry);
         }
@@ -208,27 +181,6 @@ impl Rex {
             block_id: block.into(),
         })
     }
-    pub fn window(
-        &self,
-        session: &str,
-        name: &str,
-        path: &std::path::Path,
-        startup: Option<&str>,
-    ) -> Result<Value> {
-        let mut cmd = self.command();
-        cmd.args(["window", "new", "-s", session, name, "-c"])
-            .arg(path)
-            .args(["--focus=false", "--json"]);
-        if let Some(script) = startup.filter(|s| !s.is_empty()) {
-            let script = format!(
-                "{}\nexec \"${{SHELL:-/bin/sh}}\" -l",
-                process::path_script(script)
-            );
-            cmd.args(["--", "sh", "-c", &script, "rexue"]).arg(path);
-        }
-        serde_json::from_slice(&process::output(&mut cmd, Duration::from_secs(30))?.stdout)
-            .context("invalid Rex window JSON")
-    }
     pub fn rename(&self, id: &str, name: &str) -> Result<()> {
         self.text(&["session", "rename", id, name])?;
         Ok(())
@@ -246,14 +198,6 @@ impl Rex {
             .and_then(|w| w["focused_block_id"].as_str())
             .context("session has no focused terminal")?;
         self.text(&["capture", "-s", id, "-b", block, "--trim", "--unwrap"])
-    }
-    pub fn send(&self, session: &str, block: &str, script: &str) -> Result<()> {
-        self.text(&["send", "-s", session, "-b", block, script])?;
-        self.text(&["send-key", "-s", session, "-b", block, "enter"])?;
-        Ok(())
-    }
-    pub fn raw(&self, args: &[OsString]) -> Result<String> {
-        process::text(self.command().args(args))
     }
 }
 pub fn active_window(value: &Value) -> Option<&Value> {

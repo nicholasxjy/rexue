@@ -3,13 +3,12 @@ name = "rexue"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.90"
-description = "An fzf session picker for Rex, inspired by sesh"
+description = "Rex session and Worktrunk worktree management with fzf"
 license = "MIT"
 repository = "https://github.com/nicholasxjy/rexue"
 
 [dependencies]
 anyhow = "1.0.104"
-chrono = { version = "0.4.45", features = ["serde"] }
 clap = { version = "4.6.7", features = ["derive", "env"] }
 clap_complete = "4.6.11"
 dirs = "7.0.0"

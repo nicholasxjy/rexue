@@ -2,6 +2,11 @@
   "system_fzf": "0.74.5 (Homebrew)",
   "pty": [
     {
+      "case": "group-separator-lines-skip-headings-and-preserve-selection",
+      "restored": true,
+      "exit": 0
+    },
+    {
       "case": "session-cancel-filter-preview-resize",
       "restored": true,
       "exit": 0
@@ -57,6 +62,36 @@
       "exit": 0
     },
     {
+      "case": "rename-cancel-preserves-name",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "rename-unchanged-is-noop",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "rename-empty-name-rejected",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "rename-config-row-rejected",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "rename-backend-error-retains-list",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "rename-second-duplicate-refreshes-and-keeps-query",
+      "restored": true,
+      "exit": 0
+    },
+    {
       "case": "remove-decline",
       "restored": true,
       "exit": 0
@@ -72,12 +107,37 @@
       "exit": 0
     },
     {
-      "case": "worktree-alias-path-auto-refresh-manual-error-filter-cancel",
+      "case": "worktree-generic-branch-path-refresh-error-filter-cancel",
       "restored": true,
       "exit": 0
     },
     {
-      "case": "worktree-repo-selected-prepared-and-connected",
+      "case": "worktree-selected-path-connects-without-alias-hijack",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "global-worktree-source-connects-actual-checkout",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "worktree-create-cancel-from-empty-results",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "worktree-create-empty-and-existing-branch-errors-recover",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "worktree-create-from-empty-results-configured-path-hooks-once-and-connect",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "worktree-confirm-cancel-then-safe-remove-and-refresh",
       "restored": true,
       "exit": 0
     },

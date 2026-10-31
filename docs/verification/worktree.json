@@ -1,0 +1,27 @@
+{
+  "checks": [
+    "native-hook-approval-in-terminal",
+    "configured-path-template",
+    "approved-project-pre-start-hook",
+    "create-without-rex",
+    "discover-from-linked-checkout-and-icons",
+    "rex-actual-cwd",
+    "rex-session-reuse",
+    "no-create-hook-on-reuse",
+    "global-worktree-source",
+    "list-schema-1-and-2",
+    "existing-arbitrary-detached-checkout",
+    "dirty-checkout-protection",
+    "foreground-remove",
+    "keep-branch",
+    "approved-pre-remove-hook",
+    "keep-rex-session",
+    "live-configuration-change",
+    "worktree-switch-auto-name-collision-and-reuse",
+    "missing-wt-diagnostic",
+    "incompatible-wt-diagnostic",
+    "subprocess-error-propagation"
+  ],
+  "count": 21,
+  "worktrunk": "wt v0.81.0"
+}

@@ -29,8 +29,6 @@ pub struct Alias {
 #[derive(Debug, Clone)]
 pub struct PickerOptions {
     pub show_icons: bool,
-    pub show_windows: bool,
-    pub window_name_format: String,
     pub separator_aware: bool,
     pub prompt: String,
     pub placeholder: String,
@@ -56,8 +54,6 @@ impl Default for PickerOptions {
     fn default() -> Self {
         Self {
             show_icons: true,
-            show_windows: false,
-            window_name_format: "{window_name}".into(),
             separator_aware: false,
             prompt: "> ".into(),
             placeholder: "Filter sessions...".into(),
@@ -968,68 +964,9 @@ fn display(entry: &Entry, options: &PickerOptions) -> String {
             text.push_str(&format!("[{}] ", clean(&alias.alias)));
         }
         text.push_str(&clean(&entry.name));
-        if options.show_windows {
-            let names = if entry.window_names.is_empty() {
-                vec![entry.active_window_name.clone()]
-            } else {
-                entry.window_names.clone()
-            };
-            for (i, name) in names.iter().filter(|s| !s.is_empty()).enumerate() {
-                let active = entry
-                    .active_window_index
-                    .map_or(name == &entry.active_window_name, |index| index == i + 1);
-                text.push_str(&format!(
-                    "  {}",
-                    clean(&window_format(
-                        &options.window_name_format,
-                        entry,
-                        name,
-                        i + 1,
-                        active
-                    ))
-                ));
-            }
-        }
     }
     text
 }
-fn window_format(format: &str, entry: &Entry, name: &str, index: usize, active: bool) -> String {
-    let index = index.to_string();
-    let mut remaining = format;
-    let mut result = String::new();
-    while !remaining.is_empty() {
-        if let Some(rest) = remaining.strip_prefix("{{") {
-            result.push('{');
-            remaining = rest;
-            continue;
-        }
-        if let Some(rest) = remaining.strip_prefix("}}") {
-            result.push('}');
-            remaining = rest;
-            continue;
-        }
-        let found = [
-            ("{window_name}", name),
-            ("{name}", name),
-            ("{session_name}", entry.name.as_str()),
-            ("{active}", if active { "*" } else { "" }),
-            ("{window_index}", index.as_str()),
-            ("{window_active}", if active { "1" } else { "0" }),
-        ]
-        .into_iter()
-        .find(|(key, _)| remaining.starts_with(key));
-        if let Some((key, value)) = found {
-            result.push_str(value);
-            remaining = &remaining[key.len()..];
-        } else {
-            let ch = remaining.chars().next().unwrap();
-            result.push(ch);
-            remaining = &remaining[ch.len_utf8()..];
-        }
-    }
-    result
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1174,21 +1111,5 @@ mod tests {
         assert!(state.candidates("a").0.is_empty());
         assert!(!state.options.aliases.contains_key("a"));
         assert!(state.targets.is_empty());
-    }
-
-    #[test]
-    fn window_data_is_interpreted_once_and_controls_are_removed() {
-        let e = Entry::new("{window_index}", "", Source::Rex);
-        assert_eq!(
-            window_format(
-                "{{{name}}}:{window_index}:{session_name}",
-                &e,
-                "{active}",
-                2,
-                true
-            ),
-            "{{active}}:2:{window_index}"
-        );
-        assert_eq!(clean("x\t\x1b]0;bad\x07y\nz"), "xyz");
     }
 }

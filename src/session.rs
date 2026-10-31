@@ -25,7 +25,6 @@ pub struct ListOptions {
     pub hide_duplicates: bool,
     pub blacklisted: bool,
     pub no_cache: bool,
-    pub panes: bool,
 }
 #[derive(Debug, Clone, Default)]
 pub struct ConnectOptions {
@@ -181,7 +180,7 @@ impl Manager {
         Ok(entries)
     }
     fn collect(&self, opts: &ListOptions) -> Result<Vec<Entry>> {
-        let selected = opts.rex || opts.config || opts.zoxide || opts.panes;
+        let selected = opts.rex || opts.config || opts.zoxide;
         let mut entries = Vec::new();
         let configs = self.config.entries()?;
         if !selected || opts.rex {
@@ -212,9 +211,6 @@ impl Manager {
                     .iter()
                     .map(|e| e.entry()),
             );
-        }
-        if opts.panes {
-            entries.extend(self.panes()?);
         }
         for entry in &mut entries {
             entry.icon = self.entry_icon(entry)?;
@@ -276,35 +272,6 @@ impl Manager {
         }
         Ok(entries)
     }
-    pub fn panes(&self) -> Result<Vec<Entry>> {
-        let id = self.rex.context()?["session_id"]
-            .as_str()
-            .context("not inside a Rex session; use a session target")?
-            .to_owned();
-        let detail = self.rex.inspect(&id)?;
-        let mut entries = Vec::new();
-        for w in detail["windows"].as_array().into_iter().flatten() {
-            for layer in w["layers"].as_array().into_iter().flatten() {
-                for b in layer["blocks"].as_array().into_iter().flatten() {
-                    if let Some(block) = b["block_id"].as_str() {
-                        let mut e = Entry::new(
-                            format!(
-                                "{}: {}",
-                                w["label"].as_str().unwrap_or(""),
-                                b["label"].as_str().unwrap_or(block)
-                            ),
-                            self.rex.block_path(&id, block).unwrap_or_default(),
-                            Source::RexBlock,
-                        );
-                        e.session_id = Some(block.into());
-                        e.active_window_name = w["label"].as_str().unwrap_or("").into();
-                        entries.push(e);
-                    }
-                }
-            }
-        }
-        Ok(entries)
-    }
     pub fn resolve_entry(&self, target: &str) -> Result<Entry> {
         let mut target = clean_target(target, &self.config.entries()?);
         for icon in self
@@ -325,19 +292,6 @@ impl Manager {
             })
         }) {
             target = session.name.clone();
-        }
-        if let Ok(panes) = self.panes() {
-            let matches: Vec<_> = panes
-                .into_iter()
-                .filter(|entry| {
-                    entry.session_id.as_deref() == Some(&target) || entry.name == target
-                })
-                .collect();
-            match matches.as_slice() {
-                [entry] => return Ok(entry.clone()),
-                [] => {}
-                _ => bail!("pane name {target:?} is ambiguous; use a full block ID"),
-            };
         }
         let entries = self.collect(&ListOptions {
             rex: true,
@@ -398,13 +352,6 @@ impl Manager {
         }
         if target.starts_with("session:") {
             bail!("session {target} no longer exists");
-        }
-        if target.starts_with("block:") {
-            return self
-                .panes()?
-                .into_iter()
-                .find(|e| e.session_id.as_deref() == Some(&target))
-                .context("pane no longer exists in the current session");
         }
         match self.frecency("query", &target) {
             Ok(output) => {
@@ -507,62 +454,6 @@ impl Manager {
         };
         let _lock = self.lock()?;
         let mut entry = resolve()?;
-        if entry
-            .session_id
-            .as_deref()
-            .is_some_and(|id| id.starts_with("block:"))
-        {
-            if opts.name.is_some() || opts.command.is_some() {
-                bail!("pane selection does not accept --name or --command");
-            }
-            let session = self.rex.context()?["session_id"]
-                .as_str()
-                .context("pane selection requires a Rex session")?
-                .to_owned();
-            self.rex.text(&[
-                "focus",
-                "-s",
-                &session,
-                entry.session_id.as_deref().unwrap(),
-            ])?;
-            if let Some(client) = client {
-                let view = self.rex.inspect(&session)?;
-                let block = entry.session_id.as_deref().unwrap();
-                let window = view["windows"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .find(|window| {
-                        window["layers"]
-                            .as_array()
-                            .into_iter()
-                            .flatten()
-                            .any(|layer| {
-                                layer["blocks"]
-                                    .as_array()
-                                    .into_iter()
-                                    .flatten()
-                                    .any(|b| b["block_id"] == block)
-                            })
-                    })
-                    .and_then(|w| w["window_id"].as_str())
-                    .context("pane window no longer exists")?;
-                self.rex.switch_window(&client, &session, window)?;
-                let mut state = self.state()?;
-                let history = state.history.entry(client.id).or_default();
-                history.retain(|id| id != &session);
-                history.insert(0, session.clone());
-                history.truncate(20);
-                self.save(&state)?;
-                self.activate_terminal();
-            }
-            return Ok(Connection {
-                session_id: session,
-                name: entry.name,
-                path: entry.path,
-                created: false,
-            });
-        }
         if let Some(name) = &opts.name {
             if name.trim().is_empty() {
                 bail!("session name must not be empty");
@@ -694,44 +585,10 @@ impl Manager {
                 )?
             };
             let created = self.rex.create(&entry.name, &path, startup.as_deref())?;
-            // If a configured window fails, keep the created session discoverable and
-            // report its full ID rather than silently deleting user processes.
+            // Keep a created session discoverable even if app selection fails.
             state.paths.insert(created.session_id.clone(), path.clone());
             self.save(&state)?;
             self.invalidate();
-            for name in &cfg.windows {
-                let window = self
-                    .config
-                    .window
-                    .iter()
-                    .find(|w| &w.name == name)
-                    .with_context(|| {
-                        format!(
-                            "undefined window template {name:?}; session {} exists",
-                            created.session_id
-                        )
-                    })?;
-                let cwd = window
-                    .path
-                    .as_deref()
-                    .filter(|p| !p.is_empty())
-                    .map(|p| relative_path(p, &path))
-                    .transpose()?
-                    .unwrap_or_else(|| path.clone());
-                let script = startup_script_at(
-                    window.startup_command.as_deref(),
-                    window.startup_script.as_deref(),
-                    &cwd,
-                )?;
-                self.rex
-                    .window(&created.session_id, name, &cwd, script.as_deref())
-                    .with_context(|| {
-                        format!(
-                            "window {name:?} failed; session {} exists",
-                            created.session_id
-                        )
-                    })?;
-            }
             Connection {
                 session_id: created.session_id,
                 name: entry.name,
@@ -772,91 +629,10 @@ impl Manager {
         {
             eprintln!("rexue: could not record directory: {error:#}");
         }
-        if client.is_some() {
-            self.activate_terminal();
-        }
         Ok(result)
     }
-    pub fn activate_terminal(&self) {
-        if let Err(error) = process::activate_application(&self.config.terminal) {
-            eprintln!(
-                "rexue: could not activate configured application {:?}: {error:#}",
-                self.config.terminal
-            );
-        }
-    }
-    pub fn note_client_switch(&self, client: &str, id: &str) -> Result<()> {
-        let _lock = self.lock()?;
-        let mut state = self.state()?;
-        let history = state.history.entry(client.into()).or_default();
-        if history.is_empty()
-            && let Ok(previous) = std::env::var("REX_SESSION")
-            && previous != id
-        {
-            history.push(previous);
-        }
-        history.retain(|old| old != id);
-        history.insert(0, id.into());
-        history.truncate(20);
-        self.save(&state)
-    }
-
     pub fn name(&self, path: &Path) -> Result<String> {
         name_path(&self.config, path)
-    }
-    pub fn root_name(&self, path: &Path) -> Result<String> {
-        let path = normalize(path);
-        if let Some(name) = substituted_name(&self.config, &path)? {
-            return Ok(valid_name(&name));
-        }
-        // Root naming has its own strategies: substitutions see the original
-        // path, while only VCS strategies collapse it to a worktree/workspace.
-        let git_name = if self.config.git_namer_use_worktree_root {
-            git_toplevel(&path)
-                .ok()
-                .map(|top| last_components(&top, self.config.git_dir_length))
-        } else {
-            git_anchor(&path).ok().map(|anchor| {
-                let top = git_toplevel(&path).unwrap_or_else(|_| anchor.clone());
-                anchored_root_name(&self.config, &anchor, &top)
-            })
-        };
-        let name = git_name
-            .or_else(|| {
-                jj_roots(&path).map(|(workspace, repo)| {
-                    if self.config.git_namer_use_worktree_root {
-                        last_components(&workspace, self.config.git_dir_length)
-                    } else {
-                        anchored_root_name(&self.config, &repo, &workspace)
-                    }
-                })
-            })
-            .unwrap_or_else(|| last_components(&path, self.config.dir_length));
-        Ok(valid_name(&name))
-    }
-    /// Calling terminal first, then this client's last successful switch for external launchers.
-    pub fn current_path(&self) -> Result<PathBuf> {
-        if let Ok(context) = self.rex.context()
-            && let Some(id) = context["session_id"].as_str()
-            && let Ok(entry) = self.resolve_entry(id)
-            && !entry.path.as_os_str().is_empty()
-        {
-            return Ok(normalize(&entry.path));
-        }
-        let client = self.rex.selected_client()?;
-        let state = self.state()?;
-        let history = state
-            .history
-            .get(&client.id)
-            .context("no session history for the selected Rex client")?;
-        for id in history {
-            if let Ok(entry) = self.resolve_entry(id)
-                && !entry.path.as_os_str().is_empty()
-            {
-                return Ok(normalize(&entry.path));
-            }
-        }
-        bail!("no running session path for the selected Rex client")
     }
     pub fn last(&self) -> Result<Connection> {
         let client = self.rex.selected_client()?;
@@ -874,13 +650,10 @@ impl Manager {
         self.connect(id, &ConnectOptions::default())
     }
     pub fn preview(&self, entry: &Entry) -> Result<String> {
-        if let Some(id) = &entry.session_id {
-            if id.starts_with("session:") {
-                return self.rex.capture(id);
-            }
-            if id.starts_with("block:") {
-                return self.rex.text(&["capture", "-b", id, "--trim", "--unwrap"]);
-            }
+        if let Some(id) = &entry.session_id
+            && id.starts_with("session:")
+        {
+            return self.rex.capture(id);
         }
         let cfg = self.config.resolve(&entry.path, Some(&entry.name))?;
         if let Some(script) = cfg.preview_command.filter(|s| !s.is_empty()) {
@@ -949,7 +722,7 @@ fn git_common_dir(path: &Path) -> Option<PathBuf> {
 }
 
 fn relative_path(input: &str, cwd: &Path) -> Result<PathBuf> {
-    let expanded = shellexpand::full(input).context("could not expand window path")?;
+    let expanded = shellexpand::full(input).context("could not expand startup script path")?;
     let path = PathBuf::from(expanded.as_ref());
     Ok(if path.is_absolute() {
         path
@@ -963,8 +736,7 @@ fn startup_script_at(
     cwd: &Path,
 ) -> Result<Option<String>> {
     if let Some(script) = script.filter(|s| !s.is_empty()) {
-        // Window startup_script is shell text upstream. Retain support for
-        // an existing script file, resolving relative files against its cwd.
+        // Accept shell text or an existing script file relative to the session cwd.
         if let Ok(p) = relative_path(script, cwd)
             && p.is_file()
         {
@@ -1026,11 +798,8 @@ pub fn abbreviate(path: &Path) -> String {
     }
     path.display().to_string()
 }
-pub fn smart_name(path: &Path) -> String {
-    name_path(&Config::default(), path).unwrap_or_else(|_| last_components(path, 1))
-}
-// sesh applies --root to an input directory before aliases/session resolution.
-// Finding no Git/JJ root is an optional miss, never a connection failure.
+// Resolve --root before aliases and session names. A directory outside Git
+// keeps its original path.
 fn connect_root_target(target: &str) -> Option<PathBuf> {
     let literal = Path::new(target);
     let path = if literal.is_dir() {
@@ -1063,16 +832,11 @@ fn connect_root_target(target: &str) -> Option<PathBuf> {
             );
         }
     }
-    git_toplevel(&path)
-        .ok()
-        .or_else(|| jj_roots(&path).map(|(workspace, _)| workspace))
+    git_toplevel(&path).ok()
 }
 
 pub fn git_root(path: &Path) -> Result<PathBuf> {
-    match git_toplevel(path) {
-        Ok(root) => Ok(root),
-        Err(error) => jj_roots(path).map(|(workspace, _)| workspace).ok_or(error),
-    }
+    git_toplevel(path)
 }
 fn git_toplevel(path: &Path) -> Result<PathBuf> {
     let output = process::text(
@@ -1083,40 +847,15 @@ fn git_toplevel(path: &Path) -> Result<PathBuf> {
     )?;
     Ok(normalize(Path::new(output.trim_end())))
 }
-// Read JJ's workspace metadata directly, as upstream does. Ordinary directories
-// require neither a JJ process nor an installed optional executable.
-fn jj_roots(path: &Path) -> Option<(PathBuf, PathBuf)> {
-    let path = normalize(path);
-    let workspace = path.ancestors().find(|p| p.join(".jj").is_dir())?;
-    let repo = fs::read_to_string(workspace.join(".jj/repo"))
-        .ok()
-        .and_then(|pointer| {
-            let pointer = PathBuf::from(pointer.trim());
-            let repo_dir = if pointer.is_absolute() {
-                pointer
-            } else {
-                workspace.join(".jj").join(pointer)
-            };
-            repo_dir.parent()?.parent().map(normalize)
-        })
-        .unwrap_or_else(|| workspace.to_path_buf());
-    Some((workspace.to_path_buf(), repo))
-}
-fn live_name_matches<'a>(entries: &'a [Entry], base: &str) -> Vec<&'a Entry> {
-    let exact: Vec<_> = entries
-        .iter()
-        .filter(|e| e.source == Source::Rex && e.name == base)
-        .collect();
-    if !exact.is_empty() {
-        return exact;
-    }
-    let prefix = format!("{base} — ");
+fn live_name_matches<'a>(entries: &'a [Entry], name: &str) -> Vec<&'a Entry> {
     entries
         .iter()
-        .filter(|e| e.source == Source::Rex && e.name.starts_with(&prefix))
+        .filter(|entry| entry.source == Source::Rex && entry.name == name)
         .collect()
 }
-/// Default names may collide after a terminal changes checkout, or when a\n/// template gives unrelated directories the same leaf name. Path-based reuse\n/// is handled first; never infer that the occupied label owns this directory.
+/// Default names may collide after a terminal changes checkout, or when a
+/// template gives unrelated directories the same leaf name. Path-based reuse
+/// is handled first; never infer that the occupied label owns this directory.
 fn available_directory_name(base: &str, path: &Path, entries: &[Entry]) -> String {
     if live_name_matches(entries, base).is_empty() {
         return base.to_owned();
@@ -1205,16 +944,6 @@ fn last_components(path: &Path, length: usize) -> String {
     }
     parts[parts.len().saturating_sub(length.max(1))..].join("/")
 }
-fn anchored_root_name(config: &Config, anchor: &Path, root: &Path) -> String {
-    // Match upstream's string-prefix semantics, including external workspaces.
-    let root = root.to_string_lossy();
-    let anchor_path = anchor.to_string_lossy();
-    format!(
-        "{}{}",
-        last_components(anchor, config.git_dir_length),
-        root.strip_prefix(anchor_path.as_ref()).unwrap_or(&root)
-    )
-}
 fn valid_name(name: &str) -> String {
     name.replace(['.', ':'], "_")
         .split_whitespace()
@@ -1246,7 +975,7 @@ fn raw_name_path(config: &Config, path: &Path) -> Result<String> {
     if let Some(name) = substituted_name(config, &path)? {
         return Ok(name);
     }
-    // Naming strategies are independent of the VCS selected for cloning.
+    // Anchor Git checkout names to the repository unless configured otherwise.
     {
         let anchor = if config.git_namer_use_worktree_root {
             git_root(&path)
@@ -1274,21 +1003,6 @@ fn raw_name_path(config: &Config, path: &Path) -> Result<String> {
                 });
             }
         }
-    }
-    if let Some((workspace, repo)) = jj_roots(&path) {
-        let anchor = if config.git_namer_use_worktree_root {
-            workspace
-        } else {
-            repo
-        };
-        let base = last_components(&anchor, config.git_dir_length);
-        // Upstream retains the full workspace path when it is outside the repo.
-        let suffix = path.to_string_lossy();
-        let anchor = anchor.to_string_lossy();
-        return Ok(format!(
-            "{base}{}",
-            suffix.strip_prefix(anchor.as_ref()).unwrap_or(&suffix)
-        ));
     }
     Ok(last_components(&path, config.dir_length))
 }
@@ -1351,7 +1065,6 @@ fn order_entries(entries: Vec<Entry>, order: &[SortGroup]) -> Vec<Entry> {
             .into_iter()
             .filter_map(|n| match n.to_ascii_lowercase().as_str() {
                 "rex" => Some(Source::Rex),
-                "rex-block" => Some(Source::RexBlock),
                 "config" => Some(Source::Config),
                 "zoxide" => Some(Source::Zoxide),
                 "directory" => Some(Source::Directory),
@@ -1368,7 +1081,6 @@ fn order_entries(entries: Vec<Entry>, order: &[SortGroup]) -> Vec<Entry> {
         Source::Rex,
         Source::Config,
         Source::Zoxide,
-        Source::RexBlock,
         Source::Directory,
         Source::Worktree,
     ] {
@@ -1453,141 +1165,7 @@ fn now() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn root_naming_plain_directories_and_substitutions_use_the_input_path() {
-        let d = tempfile::tempdir().unwrap();
-        let path = d.path().join("parent/child.$UNSET_ROOT_NAME");
-        fs::create_dir_all(&path).unwrap();
-        let mut manager = isolated(Config::default(), d.path());
-        manager.config.dir_length = 2;
-        assert_eq!(
-            manager.root_name(&path).unwrap(),
-            "parent/child_$UNSET_ROOT_NAME"
-        );
-        assert_eq!(
-            manager.name(&path).unwrap(),
-            manager.root_name(&path).unwrap()
-        );
-        process::text(Command::new("git").args(["init", "--quiet"]).arg(d.path())).unwrap();
-        manager
-            .config
-            .name_substitution
-            .push(crate::config::NameSubstitution {
-                find: abbreviate(&normalize(&path)),
-                replace: "child:chosen name".into(),
-                regex: false,
-            });
-        assert_eq!(manager.root_name(&path).unwrap(), "child_chosen_name");
-        assert_eq!(manager.name(&path).unwrap(), "child_chosen_name");
-        for replacement in ["", " \t "] {
-            manager.config.name_substitution[0].replace = replacement.into();
-            assert_eq!(
-                manager.root_name(&path).unwrap(),
-                last_components(d.path(), 1).replace('.', "_")
-            );
-        }
-    }
 
-    #[test]
-    fn root_naming_does_not_apply_rules_to_the_collapsed_repository_root() {
-        let d = tempfile::tempdir().unwrap();
-        let repo = d.path().join("repo");
-        process::text(Command::new("git").args(["init", "--quiet"]).arg(&repo)).unwrap();
-        let child = repo.join("child");
-        fs::create_dir(&child).unwrap();
-        let mut manager = isolated(Config::default(), d.path());
-        manager
-            .config
-            .name_substitution
-            .push(crate::config::NameSubstitution {
-                find: format!("^{}$", regex::escape(&abbreviate(&normalize(&repo)))),
-                replace: "root-only".into(),
-                regex: true,
-            });
-        assert_eq!(manager.root_name(&child).unwrap(), "repo");
-        assert_eq!(manager.name(&child).unwrap(), "repo/child");
-        assert_eq!(manager.root_name(&repo).unwrap(), "root-only");
-    }
-
-    #[test]
-    fn root_naming_bare_git_and_external_jj_workspaces_follow_reference_modes() {
-        let d = tempfile::tempdir().unwrap();
-        let bare = d.path().join("project/.bare");
-        process::text(
-            Command::new("git")
-                .args(["init", "--quiet", "--bare"])
-                .arg(&bare),
-        )
-        .unwrap();
-        let mut manager = isolated(Config::default(), d.path());
-        assert_eq!(manager.root_name(&bare).unwrap(), "project");
-        manager.config.git_namer_use_worktree_root = true;
-        assert_eq!(manager.root_name(&bare).unwrap(), "_bare");
-
-        let repo = d.path().join("jj-project");
-        let workspace = d.path().join("external");
-        fs::create_dir_all(repo.join(".jj/repo")).unwrap();
-        fs::create_dir_all(workspace.join(".jj")).unwrap();
-        fs::create_dir_all(workspace.join("child")).unwrap();
-        fs::write(
-            workspace.join(".jj/repo"),
-            repo.join(".jj/repo").to_str().unwrap(),
-        )
-        .unwrap();
-        for mode in [false, true] {
-            manager.config.git_namer_use_worktree_root = mode;
-            let expected = if mode {
-                "external".into()
-            } else {
-                valid_name(&format!("jj-project{}", normalize(&workspace).display()))
-            };
-            assert_eq!(
-                manager.root_name(&workspace.join("child")).unwrap(),
-                expected
-            );
-        }
-    }
-
-    #[test]
-    fn jj_metadata_names_workspaces_and_roots_without_a_cli() {
-        let d = tempfile::tempdir().unwrap();
-        let repo = d.path().join("project");
-        let workspace = repo.join("ws/feature");
-        let nested = workspace.join("src/pkg");
-        fs::create_dir_all(repo.join(".jj/repo")).unwrap();
-        fs::create_dir_all(workspace.join(".jj")).unwrap();
-        fs::create_dir_all(&nested).unwrap();
-        // Relative pointers are relative to the workspace's .jj directory.
-        fs::write(workspace.join(".jj/repo"), "../../../.jj/repo\n").unwrap();
-        let mut manager = isolated(Config::default(), d.path());
-        assert_eq!(manager.name(&repo).unwrap(), "project");
-        assert_eq!(manager.name(&nested).unwrap(), "project/ws/feature/src/pkg");
-        assert_eq!(manager.root_name(&nested).unwrap(), "project/ws/feature");
-        assert!(same_path(&git_root(&nested).unwrap(), &workspace));
-        manager.config.git_dir_length = 2;
-        assert!(
-            manager
-                .name(&nested)
-                .unwrap()
-                .ends_with("/project/ws/feature/src/pkg")
-        );
-        manager.config.git_namer_use_worktree_root = true;
-        manager.config.git_dir_length = 1;
-        assert_eq!(manager.name(&nested).unwrap(), "feature/src/pkg");
-        assert_eq!(manager.root_name(&nested).unwrap(), "feature");
-        // Absolute workspace pointers resolve to the same roots.
-        fs::write(
-            workspace.join(".jj/repo"),
-            repo.join(".jj/repo").to_str().unwrap(),
-        )
-        .unwrap();
-        assert_eq!(jj_roots(&nested).unwrap().1, normalize(&repo));
-        let ordinary = d.path().join("ordinary");
-        fs::create_dir(&ordinary).unwrap();
-        assert_eq!(manager.name(&ordinary).unwrap(), "ordinary");
-        assert!(jj_roots(&ordinary).is_none());
-        assert!(git_root(&ordinary).is_err());
-    }
     #[test]
     fn dedup_priority_is_independent_of_display_order_and_preserves_live_rows() {
         let entries = vec![
@@ -1723,56 +1301,6 @@ mod tests {
         }
     }
     #[cfg(unix)]
-    #[test]
-    fn enriched_live_base_reuses_session_and_rejects_ambiguity() {
-        let d = tempfile::tempdir().unwrap();
-        let mut manager = isolated(Config::default(), d.path());
-        manager.rex.bin = fake_rex(d.path());
-        manager.config.frecency.add_command = Some("printf ''".into());
-        let script = fs::read_to_string(&manager.rex.bin).unwrap();
-        fs::write(
-            &manager.rex.bin,
-            script.replace("already-running", "project — issue"),
-        )
-        .unwrap();
-        let entry = manager.resolve_entry("project").unwrap();
-        assert_eq!(entry.name, "project — issue");
-        let connection = manager
-            .connect(
-                "project",
-                &ConnectOptions {
-                    detach: true,
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-        assert!(!connection.created);
-        assert_eq!(connection.session_id, "session:existing");
-        let script = fs::read_to_string(&manager.rex.bin).unwrap();
-        fs::write(&manager.rex.bin, script.replace(
-            "\"label\":\"project — issue\"}",
-            "\"label\":\"project — issue\"},{\"session_id\":\"session:second\",\"label\":\"project — another\"}"
-        )).unwrap();
-        assert!(
-            manager
-                .resolve_entry("project")
-                .unwrap_err()
-                .to_string()
-                .contains("ambiguous")
-        );
-        let entries = vec![
-            Entry::new("project-other — issue", "", Source::Rex),
-            Entry::new("project—issue", "", Source::Rex),
-        ];
-        assert!(live_name_matches(&entries, "project").is_empty());
-        let mut entries = vec![
-            Entry::new("project — issue", "", Source::Rex),
-            Entry::new("project", "", Source::Rex),
-        ];
-        assert_eq!(live_name_matches(&entries, "project")[0].name, "project");
-        entries.push(Entry::new("project", "", Source::Rex));
-        assert_eq!(live_name_matches(&entries, "project").len(), 2);
-    }
     fn isolated(config: Config, root: &Path) -> Manager {
         Manager {
             rex: Rex {
@@ -1989,26 +1517,6 @@ mod tests {
             "repo/feature/sub"
         );
         assert!(same_path(&git_root(&other.join("sub")).unwrap(), &other));
-        let manager = isolated(config.clone(), d.path());
-        // RootName retains upstream's complete suffix for sibling worktrees;
-        // ordinary Name keeps the established repo/feature/sub spelling.
-        assert_eq!(
-            manager.root_name(&other.join("sub")).unwrap(),
-            valid_name(&format!("repo{}", normalize(&other).display()))
-        );
-        assert_eq!(manager.root_name(&main.join("sub")).unwrap(), "repo");
-        let mut root_manager = manager.clone();
-        root_manager.config.git_namer_use_worktree_root = true;
-        assert_eq!(
-            root_manager.root_name(&other.join("sub")).unwrap(),
-            "feature"
-        );
-        root_manager.config.git_dir_length = 2;
-        assert_eq!(
-            root_manager.root_name(&other.join("sub")).unwrap(),
-            valid_name(&last_components(&normalize(&other), 2))
-        );
-        config.vcs = "jj".into();
         assert_eq!(name_path(&config, &main.join("sub")).unwrap(), "repo/sub");
         config.git_namer_use_worktree_root = true;
         assert_eq!(
@@ -2019,7 +1527,7 @@ mod tests {
         assert!(name_path(&config, &other).unwrap().ends_with("/feature"));
     }
     #[test]
-    fn relative_window_scripts_resolve_against_window_cwd() {
+    fn relative_startup_scripts_resolve_against_session_cwd() {
         let d = tempfile::tempdir().unwrap();
         fs::write(d.path().join("setup.sh"), "printf ready").unwrap();
         assert_eq!(
@@ -2095,24 +1603,6 @@ exit 92
             )
             .unwrap_err();
         assert!(error.to_string().contains("already belongs"));
-    }
-    #[cfg(unix)]
-    #[test]
-    fn pane_target_focuses_without_session_creation() {
-        let d = tempfile::tempdir().unwrap();
-        let mut manager = isolated(Config::default(), d.path());
-        manager.rex.bin = fake_rex(d.path());
-        let result = manager
-            .connect(
-                "block:one",
-                &ConnectOptions {
-                    detach: true,
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-        assert_eq!(result.session_id, "session:existing");
-        assert!(!result.created);
     }
     #[cfg(unix)]
     #[test]

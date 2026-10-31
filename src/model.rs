@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use unicode_casefold::{Locale, UnicodeCaseFold, Variant};
 
-/// Unicode simple, non-Turkic folding: aliases follow Go strings.EqualFold.
+/// Unicode simple, non-Turkic folding for case-insensitive aliases.
 /// Keep single-character folds (ß never expands to ss; dotted İ stays distinct).
 pub fn alias_key(value: &str) -> String {
     value
@@ -34,8 +34,6 @@ mod folding_tests {
 #[serde(rename_all = "lowercase")]
 pub enum Source {
     Rex,
-    #[serde(rename = "rex-block")]
-    RexBlock,
     Config,
     Zoxide,
     Directory,
@@ -45,7 +43,6 @@ impl Source {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Rex => "rex",
-            Self::RexBlock => "rex-block",
             Self::Config => "config",
             Self::Zoxide => "zoxide",
             Self::Directory => "directory",
@@ -55,7 +52,6 @@ impl Source {
     pub fn glyph(self) -> &'static str {
         match self {
             Self::Rex => "",
-            Self::RexBlock => "",
             Self::Config => "",
             Self::Zoxide | Self::Directory => "",
             Self::Worktree => "",
@@ -70,12 +66,6 @@ pub struct Entry {
     pub source: Source,
     #[serde(default)]
     pub session_id: Option<String>,
-    #[serde(default)]
-    pub active_window_name: String,
-    #[serde(default)]
-    pub active_window_index: Option<usize>,
-    #[serde(default)]
-    pub window_names: Vec<String>,
     #[serde(default)]
     pub group: usize,
     #[serde(default)]
@@ -94,9 +84,6 @@ impl Entry {
             path: path.into(),
             source,
             session_id: None,
-            active_window_name: String::new(),
-            active_window_index: None,
-            window_names: Vec::new(),
             group: 0,
             icon: None,
             alias: None,
