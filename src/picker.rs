@@ -136,7 +136,7 @@ impl Catalog {
     }
     fn replace(&mut self, mut entries: Vec<Entry>) {
         if self.options.worktree {
-            entries.sort_by_key(|e| worktree_parts(e).0.parse::<u64>().unwrap_or(u64::MAX));
+            entries.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.path.cmp(&b.path)));
         } else {
             for entry in &entries {
                 if let Some(alias) = &entry.alias {
@@ -242,7 +242,7 @@ impl Catalog {
     }
     fn header(&self) -> String {
         let keys = if self.options.worktree {
-            "Enter connect · Esc cancel · Ctrl-R refresh"
+            "Ctrl-W create · Enter connect · Ctrl-R refresh · Ctrl-X remove · Ctrl-O preview · Esc cancel"
         } else {
             "Enter connect · Esc cancel · Ctrl-O preview · Ctrl-R rename · Ctrl-X remove"
         };
@@ -429,8 +429,11 @@ fn rows(state: &Mutex<Catalog>, query: &str) -> Result<Vec<u8>> {
     let mut previous_group = None;
     for (id, entry) in &candidates {
         let search = if options.worktree {
-            let (n, title) = worktree_parts(entry);
-            format!("{n} {title}")
+            format!(
+                "{} {}",
+                clean(&entry.name),
+                clean(&entry.path.display().to_string())
+            )
         } else {
             clean(&entry.name)
         };
@@ -572,13 +575,13 @@ fn finder(options: &PickerOptions, bridge: &Bridge, header: &str, query: &str) -
         .arg(format!("--pointer={}", clean(&options.pointer)))
         .arg(format!("--query={query}"))
         .arg(format!("--header={header}"))
-        .arg(if options.worktree { "--expect=ctrl-r" } else { "--expect=ctrl-r,ctrl-x" })
+        .arg(if options.worktree { "--expect=ctrl-r,ctrl-x,ctrl-w" } else { "--expect=ctrl-r,ctrl-x" })
         .arg(format!("--bind=start:reload({HELPER} rows)"))
         .arg(format!("--bind=change:bg-cancel+reload({HELPER} rows)"))
         .arg(format!("--bind=load:bg-transform({HELPER} loaded)"))
         .arg("--bind=esc:abort,ctrl-c:abort,ctrl-k:up,ctrl-j:down,ctrl-p:up,ctrl-n:down,ctrl-u:half-page-up,ctrl-d:half-page-down");
-    if !options.worktree {
-        for digit in 1..=9 {
+    {
+        for digit in (1..=9).filter(|_| !options.worktree) {
             command.arg(format!("--bind={digit}:transform({HELPER} index {digit})"));
         }
         let border = match options.preview_border.as_str() {
@@ -612,9 +615,10 @@ struct Choice {
     id: Option<String>,
 }
 fn choice(output: Output) -> Result<Option<Choice>> {
-    match output.status.code() {
-        Some(1) | Some(130) => return Ok(None),
-        Some(0) => {}
+    let code = output.status.code();
+    match code {
+        Some(130) => return Ok(None),
+        Some(0) | Some(1) => {}
         code => bail!(
             "fzf exited unexpectedly ({}); check the fzf diagnostics above",
             code.map_or_else(|| "signal".into(), |n| n.to_string())
@@ -623,13 +627,19 @@ fn choice(output: Output) -> Result<Option<Choice>> {
     let text = String::from_utf8(output.stdout).context("fzf returned invalid UTF-8")?;
     let mut fields = text.split('\0');
     let query = fields.next().context("fzf omitted query")?.to_owned();
-    let key = fields.next().context("fzf omitted key")?.to_owned();
+    let key = fields.next();
+    // fzf exits 1 when no row matches, even for an expected action key.
+    // Creation and refresh remain useful without a selected row.
+    if code == Some(1) && !matches!(key, Some("ctrl-r" | "ctrl-w")) {
+        return Ok(None);
+    }
+    let key = key.context("fzf omitted key")?.to_owned();
     let id = fields
         .next()
         .filter(|s| !s.is_empty())
         .and_then(|row| row.split('\t').next())
         .map(str::to_owned);
-    if !matches!(key.as_str(), "" | "ctrl-r" | "ctrl-x") {
+    if !matches!(key.as_str(), "" | "ctrl-r" | "ctrl-x" | "ctrl-w") {
         bail!("unexpected fzf action {key:?}");
     }
     Ok(Some(Choice { query, key, id }))
@@ -687,6 +697,8 @@ fn wait_fzf(child: std::process::Child) -> Result<Output> {
 fn confirm(entry: &Entry) -> Result<bool> {
     let question = if entry.source == Source::Rex {
         "Kill this Rex session?"
+    } else if entry.source == Source::Worktree {
+        "Remove this worktree using Worktrunk? Its Rex session will remain."
     } else {
         "Remove this directory from history?"
     };
@@ -716,6 +728,17 @@ fn confirm(entry: &Entry) -> Result<bool> {
 }
 
 fn rename_prompt(entry: &Entry) -> Result<Option<String>> {
+    text_prompt(
+        &entry.name,
+        "New name > ",
+        &format!(
+            "Rename Rex session\n{}\nEnter save · Esc cancel",
+            clean(entry.target())
+        ),
+    )
+}
+
+fn text_prompt(initial: &str, prompt: &str, header: &str) -> Result<Option<String>> {
     let mut command = Command::new("fzf");
     clean_fzf_env(&mut command);
     command
@@ -727,37 +750,38 @@ fn rename_prompt(entry: &Entry) -> Result<Option<String>> {
             "--no-sort",
             "--layout=reverse",
             "--disabled",
-            "--prompt=New name > ",
         ])
-        .arg(format!("--query={}", clean(&entry.name)))
-        .arg(format!(
-            "--header=Rename Rex session\n{}\nEnter save · Esc cancel",
-            clean(entry.target())
-        ))
+        .arg(format!("--prompt={prompt}"))
+        .arg(format!("--query={}", clean(initial)))
+        .arg(format!("--header={header}"))
         .arg("--bind=esc:abort,ctrl-c:abort");
     let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
-        .context("start fzf rename prompt")?;
+        .context("start fzf text prompt")?;
     child
         .stdin
         .take()
-        .context("missing rename prompt input")?
-        .write_all(b"Save\0")?;
+        .context("missing text prompt input")?
+        .write_all(b"Confirm\0")?;
     let output = wait_fzf(child)?;
     match output.status.code() {
         Some(0) => {
             let text = String::from_utf8(output.stdout).context("fzf returned invalid UTF-8")?;
-            let (name, _) = text
-                .split_once('\0')
-                .context("fzf omitted new session name")?;
-            Ok(Some(name.to_owned()))
+            let (value, _) = text.split_once('\0').context("fzf omitted input text")?;
+            Ok(Some(value.to_owned()))
         }
         Some(1) | Some(130) => Ok(None),
-        code => bail!("fzf rename prompt exited unexpectedly ({code:?})"),
+        code => bail!("fzf text prompt exited unexpectedly ({code:?})"),
     }
+}
+
+#[derive(Debug)]
+pub enum PickOutcome {
+    Selected(Entry),
+    Created(Entry),
 }
 
 pub fn pick(
@@ -767,6 +791,27 @@ pub fn pick(
     rename: impl Fn(&Entry, &str) -> Result<()> + Send + Sync + 'static,
     options: PickerOptions,
 ) -> Result<Option<Entry>> {
+    Ok(pick_with_create(
+        fetch,
+        preview,
+        remove,
+        rename,
+        |_| bail!("creation is not available in this picker"),
+        options,
+    )?
+    .map(|outcome| match outcome {
+        PickOutcome::Selected(entry) | PickOutcome::Created(entry) => entry,
+    }))
+}
+
+pub fn pick_with_create(
+    fetch: impl Fn() -> Result<Vec<Entry>> + Send + 'static,
+    preview: impl Fn(&Entry) -> Result<String> + Send + Sync + 'static,
+    remove: impl Fn(&Entry) -> Result<()> + Send + Sync + 'static,
+    rename: impl Fn(&Entry, &str) -> Result<()> + Send + Sync + 'static,
+    create: impl Fn(&str) -> Result<Entry> + Send + Sync + 'static,
+    options: PickerOptions,
+) -> Result<Option<PickOutcome>> {
     check_fzf()?;
     let _terminal = TerminalState::save();
     let entries = fetch()?;
@@ -785,6 +830,27 @@ pub fn pick(
             return Ok(None);
         };
         query = chosen.query;
+        if chosen.key == "ctrl-w" && options.worktree {
+            if let Some(branch) = text_prompt(
+                "",
+                "Branch > ",
+                "Create worktree\nEnter create and connect · Esc cancel",
+            )? {
+                if branch.trim().is_empty() {
+                    state.lock().unwrap().status = "Branch name must not be empty".into();
+                    continue;
+                }
+                match create(&branch) {
+                    Ok(entry) => return Ok(Some(PickOutcome::Created(entry))),
+                    Err(error) => {
+                        // A hook may fail after wt has created the checkout.
+                        refresh(&state, &fetch);
+                        state.lock().unwrap().status = format!("Create failed: {error:#}");
+                    }
+                }
+            }
+            continue;
+        }
         if chosen.key == "ctrl-r" && options.worktree {
             refresh(&state, &fetch);
             continue;
@@ -823,7 +889,7 @@ pub fn pick(
         if chosen.key == "ctrl-x" {
             if !matches!(
                 entry.source,
-                Source::Rex | Source::Zoxide | Source::Directory
+                Source::Rex | Source::Zoxide | Source::Directory | Source::Worktree
             ) {
                 state.lock().unwrap().status =
                     "Configured sessions cannot be removed here; edit rexue.toml".into();
@@ -840,7 +906,7 @@ pub fn pick(
             }
             continue;
         }
-        return Ok(Some(entry));
+        return Ok(Some(PickOutcome::Selected(entry)));
     }
 }
 
@@ -860,26 +926,6 @@ fn normalize(text: &str) -> String {
             }
         })
         .collect()
-}
-fn worktree_parts(entry: &Entry) -> (String, String) {
-    let name = clean(&entry.name);
-    let number = entry
-        .path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
-        .or_else(|| {
-            name.split_whitespace()
-                .map(|word| word.trim_start_matches('#'))
-                .find(|word| !word.is_empty() && word.bytes().all(|b| b.is_ascii_digit()))
-        })
-        .unwrap_or("")
-        .to_owned();
-    let title = name
-        .split_once(&format!("#{number}"))
-        .map(|(_, title)| title.trim().to_owned())
-        .unwrap_or_else(|| name.clone());
-    (number, title)
 }
 fn display(entry: &Entry, options: &PickerOptions) -> String {
     let mut text = String::new();
@@ -912,16 +958,10 @@ fn display(entry: &Entry, options: &PickerOptions) -> String {
         text.push_str(&" ".repeat(padding + 1));
     }
     if options.worktree {
-        let (number, title) = worktree_parts(entry);
-        let color = match entry.active_window_name.as_str() {
-            "OPEN" => "32",
-            "MERGED" => "35",
-            "CLOSED" => "31",
-            _ => "0",
-        };
         text.push_str(&format!(
-            "#{number}  \x1b[{color}m[{}]\x1b[0m  {title}",
-            clean(&entry.active_window_name)
+            "{}  {}",
+            clean(&entry.name),
+            clean(&entry.path.display().to_string())
         ));
     } else {
         if let Some(alias) = options.aliases.values().find(|a| a.target == entry.name) {
@@ -993,6 +1033,49 @@ fn window_format(format: &str, entry: &Entry, name: &str, index: usize, active: 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    #[test]
+    fn expected_actions_survive_fzf_no_match_exit_status() {
+        use std::os::unix::process::ExitStatusExt;
+        let result = |code, key| Output {
+            status: std::process::ExitStatus::from_raw(code << 8),
+            stdout: format!("missing\0{key}\0").into_bytes(),
+            stderr: Vec::new(),
+        };
+        for code in [0, 1] {
+            for key in ["ctrl-w", "ctrl-r"] {
+                let action = choice(result(code, key)).unwrap().unwrap();
+                assert_eq!(action.key, key);
+                assert_eq!(action.query, "missing");
+                assert!(action.id.is_none());
+            }
+        }
+        assert!(choice(result(1, "")).unwrap().is_none());
+        assert!(choice(result(130, "ctrl-w")).unwrap().is_none());
+        assert!(choice(result(0, "ctrl-q")).is_err());
+    }
+
+    #[test]
+    fn worktree_rows_search_branch_and_path_without_number_assumptions() {
+        let options = PickerOptions {
+            worktree: true,
+            show_icons: false,
+            ..Default::default()
+        };
+        let branch = Entry::new(
+            "feature/widgets",
+            "/custom checkout/widgets",
+            Source::Worktree,
+        );
+        let detached = Entry::new("(detached abc123)", "/elsewhere/review", Source::Worktree);
+        let state = Mutex::new(Catalog::new(options, vec![branch, detached]));
+        let text = String::from_utf8(rows(&state, "checkout").unwrap()).unwrap();
+        assert!(text.contains("feature/widgets") && text.contains("/custom checkout/widgets"));
+        assert!(!text.contains("detached") && !text.contains("#"));
+        let detached = String::from_utf8(rows(&state, "review").unwrap()).unwrap();
+        assert!(detached.contains("detached abc123"));
+    }
+
     #[test]
     fn identity_survives_decorations_duplicates_and_refresh() {
         let name = "同名 '\t\n$(touch /tmp/never)";

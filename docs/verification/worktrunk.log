@@ -1,0 +1,375 @@
+    Checking rexue v0.1.0 (/Users/nick/Projects/rexue)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.16s
+   Compiling rexue v0.1.0 (/Users/nick/Projects/rexue)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.77s
+     Running unittests src/lib.rs (target/debug/deps/rexue-e6a596207c822ff7)
+
+running 101 tests
+test backend::tests::active_window_is_not_first_window ... ok
+test backend::tests::exact_id_precedes_label ... ok
+test cli::tests::bad_formats_are_errors ... ok
+test backend::tests::ambiguity_requires_choice ... ok
+test cli::tests::format_separates_raw_name_and_decorated_name ... ok
+test cli::tests::cli_tree_has_no_conflicting_flags ... ok
+test cli::tests::boolean_flags_do_not_consume_space_separated_values ... ok
+test cli::tests::config_file_does_not_shadow_source_filter ... ok
+test cli::tests::clone_nonempty_values_and_raw_arguments_are_preserved ... ok
+test cli::tests::empty_worktree_selectors_use_effective_defaults ... ok
+test cli::tests::command_and_window_path_empty_overrides_follow_source_defaults ... ok
+test cli::tests::omitted_flags_and_source_free_commands_keep_defaults ... ok
+test cli::tests::json_format_conflict_depends_on_value ... ok
+test cli::tests::worktree_picker_preserves_explicit_icon_override ... ok
+test cli::tests::empty_clone_flags_use_effective_defaults ... ok
+test cli::tests::worktree_picker_empty_strings_remain_explicit_source_overrides ... ok
+test config::tests::alias_delay_matches_go_duration_grammar_and_signed_limits ... ok
+test cli::tests::worktree_selection_preserves_typed_paths_and_rejects_removed_flags ... ok
+test config::tests::defaults_and_worktree_defaults ... ok
+test config::tests::entries_carry_resolved_metadata_and_name_lookup ... ok
+test cli::tests::picker_icon_inventory_includes_unloaded_wildcards_and_ignores_only_ascii_trailing_spaces ... ok
+test cli::tests::picker_and_format_empty_strings_remain_explicit_source_overrides ... ok
+test config::tests::expansion_is_lexical_and_never_executes_commands ... ok
+test cli::tests::worktree_placeholder_resolution_matches_loader_then_fallback_then_explicit_override ... ok
+test cli::tests::picker_boolean_overrides_are_effective_and_negative_preview_wins ... ok
+test config::tests::glob_depth_and_directory_boundaries ... ok
+test cli::tests::empty_window_target_preserves_alias_precedence ... ok
+test config::tests::legacy_pane_icon_maps_to_native_block_source ... ok
+test config::tests::example_is_valid ... ok
+test config::tests::native_window_fields_and_picker_normalization ... ok
+test config::tests::permissive_unknown_fields_still_reject_bad_types ... ok
+test config::tests::explicit_missing_and_malformed_files_are_errors ... ok
+test config::tests::precedence_uses_nonempty_fields_and_first_wildcard ... ok
+test config::tests::resolved_path_data_is_not_expanded_and_entry_errors_are_not_dropped ... ok
+test config::tests::retired_worktree_keys_require_migration_even_in_permissive_mode ... ok
+test config::tests::regex_substitution_and_source_icons ... ok
+test config::tests::startup_extensions_stay_with_the_selected_layer_and_aliases_are_local ... ok
+test config::tests::unicode_aliases_cannot_duplicate_by_simple_fold ... ok
+test config::tests::startup_strategies_match_pinned_source_guards ... ok
+test config::tests::wildcard_go_recursive_suffix_uses_literal_prefix ... ok
+test config::tests::wildcard_false_does_not_clear_default_disable_extension ... ok
+test config::tests::wildcard_go_character_groups_control_all_inherited_fields ... ok
+test config::tests::validation_reports_bad_configuration ... ok
+test config::tests::imports_append_only_three_lists_from_cwd_in_declaration_order ... ok
+test config::tests::wildcard_go_syntax_and_unicode_match_reference ... ok
+test model::folding_tests::unicode_simple_alias_folding ... ok
+test picker::tests::aliases_keep_unicode_folding_hidden_targets_and_prefix_precedence ... ok
+test config::tests::file_loader_rejects_retired_keys_before_permissive_unknown_key_filtering ... ok
+test picker::tests::group_separators_render_on_separate_lines ... ok
+test picker::tests::identity_survives_decorations_duplicates_and_refresh ... ok
+test picker::tests::removing_duplicate_targets_retires_alias_only_after_last_row ... ok
+test picker::tests::window_data_is_interpreted_once_and_controls_are_removed ... ok
+test config::tests::wildcard_go_rejects_malformed_classes_and_accepts_empty_ranges ... ok
+test config::tests::loaded_config_normalizes_pinned_go_fallbacks ... ok
+test config::tests::imports_are_exact_nonrecursive_and_independently_permissive ... ok
+test config::tests::public_load_uses_process_cwd_and_upstream_import_expansion ... ok
+test config::tests::xdg_config_location_and_home_fallback ... ok
+test process::tests::failed_command_has_status_and_diagnostic ... ok
+test process::tests::placeholder_hidden_parameter_command_substitution_runs_in_sh ... ok
+test picker::tests::worktree_rows_search_branch_and_path_without_number_assumptions ... ok
+test process::tests::placeholder_keeps_paths_as_data_in_every_quote_context ... ok
+test process::tests::placeholder_binding_survives_functions_and_positional_reassignment ... ok
+test process::tests::descendant_cannot_keep_output_open_after_deadline ... ok
+test process::tests::placeholder_parameter_pattern_quotes_keep_their_own_scope ... ok
+test process::tests::placeholder_multiple_heredocs_preserve_overridden_expansions_in_sh ... ok
+test session::tests::atomic_state_replaces_existing ... ok
+test session::tests::blacklist_is_regex_and_flag_inverts_selection ... ok
+test process::tests::placeholder_nested_command_substitutions_use_the_inner_quote_context ... ok
+test session::tests::cache_is_opt_in_and_scoped_to_config ... ok
+test session::tests::config_only_never_queries_rex_or_frecency ... ok
+test session::tests::command_arguments_are_data_even_for_non_directory_queries ... ok
+test process::tests::unsupported_placeholder_syntax_fails_explicitly_without_running_script ... ok
+test session::tests::decorated_target_round_trip ... ok
+test session::tests::dedup_priority_is_independent_of_display_order_and_preserves_live_rows ... ok
+test process::tests::placeholder_heredoc_delimiters_use_constants_and_preserve_body_semantics ... ok
+test session::tests::file_names_are_data_in_preview ... ok
+test process::tests::activation_uses_actual_process_arguments_without_script_injection ... ok
+test process::tests::placeholder_preserves_word_boundaries_and_literal_source ... ok
+test session::tests::merged_groups_borrow_scores_and_keep_stable_ties ... ok
+test session::tests::naming_substitution_precedes_directory_length ... ok
+test session::tests::optional_scores_preserve_paths_with_spaces ... ok
+test session::tests::ordering_retains_worktree_sources_and_honors_their_groups ... ok
+test cli::tests::every_boolean_flag_accepts_go_values_and_defaults ... ok
+test session::tests::relative_window_scripts_resolve_against_window_cwd ... ok
+test process::tests::placeholder_respects_shell_scopes_and_literal_heredocs ... ok
+test session::tests::jj_metadata_names_workspaces_and_roots_without_a_cli ... ok
+test session::tests::root_naming_bare_git_and_external_jj_workspaces_follow_reference_modes ... ok
+test session::tests::saved_paths_restore_unknown_cwd_and_canonicalize ... ok
+test session::tests::root_naming_does_not_apply_rules_to_the_collapsed_repository_root ... ok
+test session::tests::enriched_live_base_reuses_session_and_rejects_ambiguity ... ok
+test worktree::tests::accepts_both_worktrunk_schemas_and_detached_checkouts ... ok
+test worktree::tests::rejects_unknown_schema_and_malformed_paths ... ok
+test session::tests::root_naming_plain_directories_and_substitutions_use_the_input_path ... ok
+test session::tests::configured_source_emoji_is_stripped_when_resolving ... ok
+test session::tests::git_worktrees_and_subdirectories_get_distinct_names ... ok
+test session::tests::worktree_icons_follow_repository_identity_and_session_precedence ... ok
+test session::tests::connect_reuses_saved_canonical_path_when_rex_cwd_is_unknown ... ok
+test session::tests::pane_target_focuses_without_session_creation ... ok
+test process::tests::placeholder_multiple_heredocs_run_in_sh ... ok
+test process::tests::placeholder_hidden_parameter_words_preserve_sh_semantics ... ok
+test session::tests::stale_launcher_environment_does_not_override_client_history ... ok
+
+test result: ok. 101 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.96s
+
+     Running unittests src/main.rs (target/debug/deps/rexue-d64783ab1eaeed6d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/backend.rs (target/debug/deps/backend-021aa868398ca5e5)
+
+running 43 tests
+test config_source_does_not_contact_unavailable_rex_or_frecency ... ok
+test capability_preflight_rejects_before_creating_or_saving ... ok
+test configured_frecency_scores_order_merged_sources_before_deduplication ... ok
+test blacklist_inversion_and_source_order_apply_to_selected_sources ... ok
+test cli_uses_explicit_fake_rex_and_isolated_xdg_config ... ok
+test baseline_tui_fallbacks_and_terminal_config_do_not_reject_cli_listing ... ok
+test cli_alias_expansion_is_case_insensitive_and_precedes_live_names ... ok
+test connect_creates_selects_then_reuses_without_repeating_startup_or_windows ... ok
+test connected_app_filter_and_duplicate_client_labels_use_full_ids ... ok
+test connect_root_keeps_config_alias_and_exact_live_identity ... ok
+test cli_nonempty_fields_win_and_empty_wildcard_fields_continue_to_defaults ... ok
+test configured_frecency_query_add_remove_keep_metacharacter_paths_as_data ... ok
+test create_keeps_paths_labels_and_startup_as_separate_arguments ... ok
+test duplicate_pane_names_require_ids_and_full_ids_remain_selectable ... ok
+test connect_root_preserves_plain_directories_with_and_without_git ... ok
+test empty_config_fields_inherit_through_executable_cli ... ok
+test connect_root_detects_git_jj_and_bare_before_selecting_configuration ... ok
+test duplicate_session_labels_require_full_id_for_selection_and_kill ... ok
+test configured_app_activation_respects_foreground_and_background_modes ... ok
+test missing_directory_does_not_gain_a_worktree_icon_by_prefix ... ok
+test environment_values_with_literal_dollars_survive_list_preview_and_repository_icons ... ok
+test empty_frecency_commands_use_all_four_zoxide_defaults ... ok
+test manager_source_filters_and_dedup_preserve_live_identity ... ok
+test external_launcher_directory_falls_back_to_live_client_history ... ok
+test list_skips_disappeared_sessions_but_reports_service_and_json_errors ... ok
+test failed_window_template_keeps_created_session_discoverable_without_switching ... ok
+test empty_frecency_defaults_allow_missing_optional_zoxide ... ok
+test nested_shell_placeholders_work_in_cli_preview_and_rex_startup_scripts ... ok
+test cli_go_wildcard_classes_select_startup_windows_and_preview ... ok
+test pane_icons_and_configured_windows_are_exposed_by_cli ... ok
+test picker_rename_preserves_live_identity_and_rejects_invalid_targets_and_names ... ok
+test resolved_live_entry_does_not_create_when_id_disappeared ... ok
+test resolved_worktree_path_does_not_expand_a_colliding_alias ... ok
+test worktree_repository_path_expansion_is_equivalent_in_config_only_cli_json ... ok
+test synthesized_config_alias_keeps_its_exact_name_and_directory ... ok
+test unicode_alias_preview_uses_the_real_cli_resolution_path ... ok
+test root_cli_jj_workspace_fallback_respects_mode_and_anchor_length ... ok
+test pane_selector_names_roundtrip_and_union_obeys_blacklist ... ok
+test root_cli_names_plain_context_and_preserves_literal_dollars ... ok
+test process_errors_keep_stderr_exit_codes_and_json_context ... ok
+test root_cli_git_child_substitution_precedes_root_fallback_in_both_modes ... ok
+test picker_entry_connect_preserves_literal_names_and_paths ... ok
+test cli_startup_and_preview_follow_source_strategy_order ... ok
+
+test result: ok. 43 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.99s
+
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+{
+  "checks": [
+    "native-hook-approval-in-terminal",
+    "configured-path-template",
+    "approved-project-pre-start-hook",
+    "create-without-rex",
+    "discover-from-linked-checkout-and-icons",
+    "rex-actual-cwd",
+    "rex-session-reuse",
+    "no-create-hook-on-reuse",
+    "global-worktree-source",
+    "list-schema-1-and-2",
+    "existing-arbitrary-detached-checkout",
+    "dirty-checkout-protection",
+    "foreground-remove",
+    "keep-branch",
+    "approved-pre-remove-hook",
+    "keep-rex-session",
+    "live-configuration-change",
+    "missing-wt-diagnostic",
+    "incompatible-wt-diagnostic",
+    "subprocess-error-propagation",
+    "explicit-old-config-migration-errors"
+  ],
+  "count": 21,
+  "worktrunk": "wt v0.81.0"
+}
+PTY: group-separator-lines-skip-headings-and-preserve-selection
+PTY: session-cancel-filter-preview-resize
+PTY: session-sigterm-restores-terminal
+PTY: preview-cli-hidden-then-toggle
+PTY: entry-default
+PTY: entry-pick
+PTY: entry-pk
+PTY: duplicate-name-select-second-id
+PTY: unicode-alias-auto-connect
+PTY: prefilled-alias-does-not-auto-connect
+PTY: disable-alias-auto-and-select
+PTY: index-shortcut-second-id
+PTY: rename-cancel-preserves-name
+PTY: rename-unchanged-is-noop
+PTY: rename-empty-name-rejected
+PTY: rename-config-row-rejected
+PTY: rename-backend-error-retains-list
+PTY: rename-second-duplicate-refreshes-and-keeps-query
+PTY: remove-decline
+PTY: remove-confirm-and-refresh
+PTY: last-duplicate-removal-retires-alias
+PTY: literal-config-name-📁
+PTY: hidden-config-alias-keeps-literal-name-and-path
+PTY: literal-config-name-
+{
+  "system_fzf": "0.74.5 (Homebrew)",
+  "pty": [
+    {
+      "case": "group-separator-lines-skip-headings-and-preserve-selection",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "session-cancel-filter-preview-resize",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "session-sigterm-restores-terminal",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "preview-cli-hidden-then-toggle",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "entry-default",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "entry-pick",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "entry-pk",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "duplicate-name-select-second-id",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "unicode-alias-auto-connect",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "prefilled-alias-does-not-auto-connect",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "disable-alias-auto-and-select",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "index-shortcut-second-id",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "rename-cancel-preserves-name",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "rename-unchanged-is-noop",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "rename-empty-name-rejected",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "rename-config-row-rejected",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "rename-backend-error-retains-list",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "rename-second-duplicate-refreshes-and-keeps-query",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "remove-decline",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "remove-confirm-and-refresh",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "last-duplicate-removal-retires-alias",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "worktree-generic-branch-path-refresh-error-filter-cancel",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "worktree-selected-path-connects-without-alias-hijack",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "global-worktree-source-connects-actual-checkout",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "worktree-confirm-cancel-then-safe-remove-and-refresh",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "literal-config-name-📁",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "hidden-config-alias-keeps-literal-name-and-path",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "literal-config-name-",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "missing-fzf",
+      "exit": 1
+    },
+    {
+      "case": "old-fzf",
+      "exit": 1
+    },
+    {
+      "case": "fzf-error",
+      "exit": 1
+    }
+  ]
+}

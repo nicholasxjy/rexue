@@ -9,7 +9,7 @@ rexue --config-file ./projects.toml list --config
 
 Business boolean flags accept bare flags and explicit Go boolean values such as `--icons=false`. Picker `--icons=false`, `--preview=false`, and `--separator-aware=false` override enabled configuration values; `--no-preview=false` leaves preview enabled.
 
-CLI text flags retain the pinned source's presence rules: explicitly empty picker `--prompt`/`--placeholder` remain empty, and `list --format=` emits empty rows and conflicts with enabled JSON. Empty optional clone parent/directory/VCS and worktree repo/path selectors use their normal fallbacks. Empty window target/path/command and connect/mkdir command values also fall back; an explicitly empty window `--target` still takes precedence over `--session` before selecting the current context. Nonempty values, whitespace and raw trailing Git arguments are preserved. These CLI rules are distinct from configuration inheritance below.
+CLI text flags retain the pinned source's presence rules: explicitly empty picker `--prompt`/`--placeholder` remain empty, and `list --format=` emits empty rows and conflicts with enabled JSON. Empty optional clone parent/directory/VCS and worktree path selectors use their normal fallbacks. Empty window target/path/command and connect/mkdir command values also fall back; an explicitly empty window `--target` still takes precedence over `--session` before selecting the current context. Nonempty values, whitespace and raw trailing Git arguments are preserved. These CLI rules are distinct from configuration inheritance below.
 
 `-C/--config-file` selects the file. `list/picker -c/--config` selects configured session rows. Rex's own `rex -C` selects an app client, so these flags must not be forwarded between tools.
 
@@ -21,7 +21,7 @@ Unknown fields produce a diagnostic and are ignored by default. Set root `strict
 
 Paths expand `~`, `$VARIABLE`, and `${VARIABLE}`. Missing environment variables and `~otheruser` are errors. Empty paths are errors except where a documented default or window inheritance applies. Expansion never executes shell substitutions. Raw configuration strings expand once; characters such as `$` introduced by an environment variable value remain literal path data. Already-resolved paths are normalized without interpreting variables again. Invalid configured entries produce contextual errors rather than disappearing from the list. Relative session paths resolve against **rexue's working directory**. Configured window paths resolve relative to the session directory; relative startup-script filenames resolve against the corresponding terminal directory. Ordinary paths do not resolve relative to the TOML file. Import paths have different semantics below. Matching normalizes paths lexically and session reuse resolves symlinks when possible.
 
-Duplicate session/window names, case-insensitive duplicate aliases, duplicate worktree repos, and references to undefined window templates are errors. Directory lengths at or below zero fall back to 1; VCS must be `git` or `jj`.
+Duplicate session/window names, case-insensitive duplicate aliases, duplicate worktree repository paths, invalid values and references to undefined windows are errors. Retired worktree settings and `[browser]` are errors in both strict and permissive mode; see the migration notes below.
 
 ## Imports
 
@@ -183,35 +183,27 @@ Recognized source icon tables are `[icons.rex]`, `[icons.rex-block]`, `[icons.co
 
 Both pickers show Nerd Font icons by default: `` for live sessions, `` for blocks/panes, `` for configured sessions, `` for directories (including zoxide history), and `` for worktrees. Configured session/wildcard icons override source glyphs in the TUI. Use a Nerd Font to render these glyphs, or disable them with `--icons=false` or `[tui] show_icons = false`. Aliases use ASCII `[a]` labels in either icon mode. Plain `list --icons` intentionally uses resolved source glyphs, not session icons. `list --icons-exclude rex,config` hides selected sources' glyphs; `--no-color` removes ANSI color.
 
-## GitHub worktrees and browser
+## Worktrunk worktrees
+
+Install [Worktrunk](https://worktrunk.dev) **0.81.0 or newer** and put `wt` on PATH, or set `REXUE_WT` to its executable. Missing/older versions produce an actionable error; rexue does not fall back to direct Git worktree management. Both Worktrunk list JSON schemas (1 and 2) are supported.
+
+Repository-scoped commands use `--path REPO` or the current directory, including a linked worktree or nested directory. They do not require registration, a GitHub remote, gh, or authentication. `create BRANCH [--base REF]` creates a branch/checkout and prints its actual path without opening Rex. `connect [BRANCH_OR_PATH]` uses an existing branch (creating its checkout if necessary); without a target it connects the current checkout. `list` includes non-numbered and detached checkouts. `picker` selects a returned path, with Ctrl+W creation, Ctrl+O preview, Ctrl+R refresh and Ctrl+X confirmed removal. Ctrl+W prompts for a new branch name, creates through Worktrunk in the selected repository, restores the picker terminal and connects Rex using the returned path. Esc cancels the prompt without changing the search. Empty names and Worktrunk errors keep the picker open; creation also works with no matching rows. Creation uses Worktrunk defaults/hooks, with no additional switch that would rerun hooks. `--refresh` is accepted for explicit initial refresh; every fetch already reads current local state.
+
+Optional registrations add worktrees to the unfiltered main list/picker and set their icons:
 
 ```toml
 [[worktree]]
-repo = "owner/repo"
 path = "~/Projects/repo"
-worktree_dir = ".wk"
-branch_template = "issue/{number}"
-base_branch = "origin/main"
-fetch = true
-create_command = "npm install"
-startup_command = "nvim"
-icon = "W"
-
-[browser]
-application = "Safari"
-# Optional AppleScript expression, not a shell command:
-url_command = "URL of current tab of front window"
+icon = ""
 ```
 
-A worktree requires `repo = "owner/repo"` and a repository `path`. Defaults are `.wk`, `{number}`, `origin/main`, and `fetch = true`; commands/icon are optional. `worktree_dir` is relative to the configured repository unless absolute/home/environment-prefixed. Resulting directories are numbered. Branch templates substitute `{number}` and must produce a valid Git branch name.
+Only `path` and `icon` belong to rexue. Worktrunk reads its own user and project configuration, environment overrides, path templates, defaults and hooks; rexue does not parse or overwrite them. For example, set `worktree-path = "../{{ repo }}.{{ branch | sanitize }}"` in Worktrunk user configuration. Actual paths always come from wt, so existing checkouts remain discoverable after a template change.
 
-`--repo` selects explicitly and takes precedence over `--path`; otherwise selection detects the configured repository from cwd or a linked worktree. `connect NUMBER` checks GitHub metadata before Git mutation. An issue uses a named branch. An own PR prefers its first closing issue, then a `#N` reference in title/body; otherwise a detached PR checkout is used. A foreign PR uses a detached checkout. Existing registered worktrees are reused; an unregistered directory occupying the target is an error. Fetch errors are propagated and fetch runs when creating a worktree.
+Mutation commands preserve Worktrunk's stdin/stderr for native hook approval. rexue never inserts `--yes` or `--no-hooks`. Approve trusted project commands using Worktrunk's own workflow (`wt config approvals add`) when using a noninteractive caller. Worktrunk may skip unapproved project commands when approval is declined or input is unavailable; its diagnostics remain visible. Rex session startup still uses ordinary session/wildcard/default-session configuration.
 
-`create_command` is selected only for a new worktree and does **not** fall back to `startup_command`. Existing worktrees select `startup_command`. The selected command is handed to session creation and runs only if its Rex session is new. The worktree picker preserves repository/path scope and sends the selected number through worktree preparation before connecting. Configured worktree icons are carried into session and worktree entries.
+`remove BRANCH_OR_PATH` requires an existing registered checkout and waits for completion. Worktrunk decides whether to delete an integrated branch according to its configuration. `--no-delete-branch` retains it; `--force` and `--force-delete` are explicit opt-ins for dirty checkout removal and unmerged branch deletion. None is added by default or by the picker. Removing a worktree keeps its Rex session. When a default directory name is already owned by another checkout, rexue generates an available name with the current branch as a suffix (for example `repo@main`), and reuses that session by actual path on later switches. Detached/non-Git directories use a short path fingerprint; occupied suffixes receive a numeric extension. Explicit `--name` values and configured session names still report cross-directory conflicts; the existing session is never silently retargeted. Worktrunk failures are reported, with previous picker rows retained on refresh failure.
 
-`worktree browse` derives the numbered worktree from process cwd, including nested paths; if cwd is unrelated, it falls back to the calling Rex session or the selected client's recorded session directory. It it opens an issue URL, or obtains a PR URL with `--pr`. `--print` prints without opening a browser. macOS uses `open`, optionally `-a application`; the code has an `xdg-open` fallback, but Linux is not the current real target.
-
-`worktree connect --browser` reads the configured browser's front-window active-tab URL using macOS `osascript`. It accepts a GitHub issue/PR URL and selects its repository and number. A positional number conflicts with `--browser`; an explicit `--repo` overrides the URL repository, and `--pr` can force PR treatment. macOS may ask for Automation permission. Safari defaults to `URL of current tab of front window`; other configured apps default to `URL of active tab of front window`. `url_command` overrides that **AppleScript expression**, not a command-line program.
+Migration from the old GitHub-specific implementation is explicit: remove `repo`, `worktree_dir`, `branch_template`, `base_branch`, `fetch`, `create_command` and `startup_command` from each rexue `[[worktree]]`, retaining `path` and optional `icon`. Move directory templates and lifecycle hooks to Worktrunk, and session startup to Rex session settings. Remove `[browser]`. These retired fields cause a migration error even when `strict_mode = false`. Replace numeric/PR/browser commands with branches or checkout paths; `--repo`, `--pr`, `--browser` and `worktree browse` no longer exist. Existing directories and branches are not moved, renamed or deleted during migration. Old GitHub cache files are no longer read or written.
 
 ## State and cache
 
@@ -219,4 +211,4 @@ Local state records known session paths and per-client session history used by `
 
 `cache = true` caches only frecency entries for five seconds. Rex sessions and resolved configuration remain live. `--no-cache` bypasses reading the cache while allowing refreshed data to be written. `cache refresh` removes the existing frecency cache and synchronously reloads sources. This differs from Sesh's session-cache TTL and background refresh.
 
-GitHub title/state cache is separate: `$XDG_CACHE_HOME/rexue/github-issues-v1.json` when set (including on macOS), otherwise the platform cache directory plus `rexue/github-issues-v1.json`. Positive titles use a 24-hour TTL and negative lookups one hour; listing batches at most 50 numbers per GraphQL request. The worktree picker shows cached rows first, then refreshes in the background. Ctrl+R and `--refresh` bypass the cache; explicit refresh failures are reported while the picker keeps its rows. Ordinary offline listing retains stale titles or bare numbers. Session-cache settings do not disable this cache.
+Worktree lists read current Worktrunk state on each fetch. There is no rexue GitHub title/state cache or background metadata refresh. Ctrl+R reloads Worktrunk state; failures remain visible while the picker keeps its previous rows.

@@ -88,6 +88,41 @@ pub fn output(command: &mut Command, timeout: Duration) -> Result<Output> {
     }
     Ok(result)
 }
+/// Run a Worktrunk mutation with its native hook/approval UI on the terminal.
+/// stdout stays machine-readable; a file avoids blocking hooks on a full pipe.
+/// No --yes/--no-hooks flags are inserted and stdin is inherited deliberately.
+pub fn interactive_text(command: &mut Command) -> Result<String> {
+    use std::io::{Seek, SeekFrom};
+    let mut stdout = tempfile::tempfile()?;
+    let mut child = command
+        .stdin(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .stdout(Stdio::from(stdout.try_clone()?))
+        .spawn()
+        .context("could not start Worktrunk; is wt installed and on PATH?")?;
+    let status = match child.wait_timeout(Duration::from_secs(15 * 60))? {
+        Some(status) => status,
+        None => {
+            let _ = child.kill();
+            let _ = child.wait();
+            bail!("Worktrunk timed out after 15 minutes");
+        }
+    };
+    if !status.success() {
+        bail!(
+            "Worktrunk failed (exit {}); see diagnostics on stderr",
+            status.code().unwrap_or(130)
+        );
+    }
+    if stdout.metadata()?.len() > MAX_OUTPUT as u64 {
+        bail!("Worktrunk output exceeded {} MiB", MAX_OUTPUT / 1024 / 1024);
+    }
+    stdout.seek(SeekFrom::Start(0))?;
+    let mut text = String::new();
+    stdout.read_to_string(&mut text)?;
+    Ok(text)
+}
+
 fn kill_group(pid: u32, child: &mut std::process::Child) {
     #[cfg(unix)]
     {

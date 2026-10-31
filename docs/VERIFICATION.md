@@ -1,4 +1,21 @@
-# Verification record
+# Current Worktrunk verification
+
+The worktree subsystem now uses external **wt ≥ 0.81.0** with generic branches and actual checkout paths. Reproduce the current checks with:
+
+```sh
+cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --lib --tests
+cargo build
+python3 scripts/worktree_smoke.py --binary target/debug/rexue
+python3 scripts/pty_smoke.py --binary target/debug/rexue
+```
+
+`scripts/worktree_smoke.py` uses real Worktrunk/Git, task-private configuration and approved hooks, plus a stateful Rex fake that records actual creation paths. It covers both list schemas, arbitrary/detached checkouts, configuration changes, reuse, dirty-checkout protection, branch retention, foreground removal, missing/old wt and subprocess failures, and every retired configuration field. No GitHub login or personal worktree is used. `scripts/pty_smoke.py` adds real fzf branch/path search, refresh errors, path-scoped connection and cancel/confirm worktree removal with terminal restoration. Current results are recorded in [WORKTRUNK_VERIFICATION.md](WORKTRUNK_VERIFICATION.md).
+
+The receipts and counts below concern earlier implementations; worktree-number, browser and GitHub-cache evidence is superseded by the checks above.
+
+# Historical verification record
 
 **Historical native-TUI record.** The fzf migration supersedes the native picker implementation and its screen/cursor assertions below. See [FZF_VERIFICATION.md](FZF_VERIFICATION.md) for the current picker checks; these archived receipts remain evidence for the unchanged backend workflows.
 
@@ -86,7 +103,7 @@ Only temporary test sessions/directories are created. The Rex test verifies inde
 
 For live preview, a unique command is sent only to the owned test terminal. `preview` must contain both its command echo and executed output; an empty string cannot pass. This avoids relying on startup text surviving the user's login-shell screen clearing. The actual headless Rex size is recorded as 80×24 and preview is enabled at a 60-column threshold. Transient CLI resize requests revert when the caller disconnects, so real wide/narrow resize assertions use the independent PTY.
 
-The VCS test creates a local repository and clone, verifies root naming, queries real public GitHub issue `joshmedeski/sesh#409`, creates/reuses its registered worktree, checks exclusive create-command execution, and verifies title/state cache refresh, icon and URL printing. The fifteenth live VCS check opens the real worktree picker through a Unix PTY using the task-private repository and cache. [Its receipt](verification/worktree-cursor.log) shows virtual reversed cursor cells blinking on/off while the physical cursor remains hidden, an unmatched query without the catalog-empty message, and full cursor/terminal restoration on exit. Forced initial refresh prevents a follow-up worker from recreating removed temporary resources. Own/foreign PR routing, detached checkout, branch validation, rollback, TTL/negative caches and offline failures have isolated tests.
+The earlier VCS receipt below is historical evidence for the retired GitHub-number workflow. Current verification uses `scripts/worktree_smoke.py`: real Worktrunk/Git with isolated configuration, approved project hooks and a stateful Rex fake. It verifies template paths, reuse, actual Rex cwd, both list schemas, existing detached checkouts, safe foreground removal and migration/diagnostic failures.
 
 ## Other verification and limits
 
@@ -94,4 +111,4 @@ Process integration tests use an executable fake Rex with actual separated argum
 
 Nineteen CLI help paths and Bash/Zsh/Fish completion generation were checked. The executable reports `rex-bar 0.1.0`; completion piped to a truncated consumer exits cleanly. `rex --autostart=false config check examples/rex-picker.lua --json` registers one binding/action with no diagnostics, without reloading personal configuration.
 
-Browser URL and AppleScript adapter boundaries use fixtures; no personal browser tab was read or browser opened. Real browser Automation prompts/UI and Linux opening are unverified. JJ naming uses disposable `.jj/repo` fixtures; `jj` is absent, so actual JJ cloning is unverified. The declared minimum Rust is 1.88; full checks ran on 1.99.1. Native JSON, fuzzy scorer/cache policy and Rex history limits are explicitly documented differences, not hidden compatibility claims.
+The worktree browser/AppleScript adapters and GitHub cache are retired. Historical receipts do not establish current Worktrunk behavior. JJ naming still uses disposable fixtures; actual JJ cloning remains unverified.

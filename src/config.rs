@@ -17,7 +17,6 @@ pub struct Config {
     pub window: Vec<WindowConfig>,
     pub wildcard: Vec<WildcardConfig>,
     pub worktree: Vec<WorktreeConfig>,
-    pub browser: Option<BrowserConfig>,
     pub tui: TuiConfig,
     pub default_session: SessionConfig,
     pub blacklist: Vec<String>,
@@ -43,7 +42,6 @@ impl Default for Config {
             window: Vec::new(),
             wildcard: Vec::new(),
             worktree: Vec::new(),
-            browser: None,
             tui: TuiConfig::default(),
             default_session: SessionConfig::default(),
             blacklist: Vec::new(),
@@ -219,40 +217,12 @@ fn nonempty(value: Option<&String>) -> Option<&String> {
     value.filter(|value| !value.is_empty())
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct WorktreeConfig {
-    pub repo: String,
-    pub path: String,
-    pub worktree_dir: String,
-    pub branch_template: String,
-    pub base_branch: String,
-    pub fetch: bool,
-    pub create_command: Option<String>,
-    pub startup_command: Option<String>,
-    pub icon: Option<String>,
-}
-impl Default for WorktreeConfig {
-    fn default() -> Self {
-        Self {
-            repo: String::new(),
-            path: String::new(),
-            worktree_dir: ".wk".into(),
-            branch_template: "{number}".into(),
-            base_branch: "origin/main".into(),
-            fetch: true,
-            create_command: None,
-            startup_command: None,
-            icon: None,
-        }
-    }
-}
-
+/// Repository registration for the global picker. Worktrunk owns lifecycle config.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-pub struct BrowserConfig {
-    pub application: String,
-    pub url_command: Option<String>,
+pub struct WorktreeConfig {
+    pub path: String,
+    pub icon: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -477,24 +447,34 @@ fn normalize_config_value(value: &mut toml::Value) {
             }
         }
     }
-    if let Some(worktrees) = value
-        .get_mut("worktree")
-        .and_then(toml::Value::as_array_mut)
-    {
-        for worktree in worktrees {
-            for (key, default) in [
-                ("worktree_dir", ".wk"),
-                ("branch_template", "{number}"),
-                ("base_branch", "origin/main"),
+}
+
+fn reject_retired_worktree_keys(value: &toml::Value) -> Result<()> {
+    if value.get("browser").is_some() {
+        bail!(
+            "[browser] was removed with the issue/PR worktree workflow; remove it from rexue config. Use generic branches and Worktrunk configuration instead."
+        );
+    }
+    if let Some(rows) = value.get("worktree").and_then(toml::Value::as_array) {
+        for row in rows {
+            for key in [
+                "repo",
+                "worktree_dir",
+                "branch_template",
+                "base_branch",
+                "fetch",
+                "create_command",
+                "startup_command",
             ] {
-                if let Some(raw) = worktree.get_mut(key)
-                    && raw.as_str() == Some("")
-                {
-                    *raw = toml::Value::String(default.into());
+                if row.get(key).is_some() {
+                    bail!(
+                        "[[worktree]].{key} was removed; keep only path/icon in rexue. Move path templates, defaults and hooks to Worktrunk config (worktrunk.dev/config/); use session startup settings for Rex commands."
+                    );
                 }
             }
         }
     }
+    Ok(())
 }
 
 impl Config {
@@ -545,6 +525,7 @@ impl Config {
 
     fn from_value(mut value: toml::Value) -> Result<Self> {
         migrate_source_names(&mut value)?;
+        reject_retired_worktree_keys(&value)?;
         reject_tmux_keys(&value, "")?;
         let strict = value
             .get("strict_mode")
@@ -763,26 +744,13 @@ impl Config {
         }
         let mut repos = HashSet::new();
         for worktree in &self.worktree {
-            let parts: Vec<_> = worktree.repo.split('/').collect();
-            if parts.len() != 2
-                || parts.iter().any(|p| {
-                    p.is_empty() || *p == "." || *p == ".." || p.chars().any(char::is_whitespace)
-                })
-            {
-                bail!("worktree repo must be org/repo: {:?}", worktree.repo);
+            if worktree.path.trim().is_empty() {
+                bail!("worktree path must not be empty");
             }
-            if !repos.insert(worktree.repo.to_lowercase()) {
-                bail!("duplicate worktree repo {:?}", worktree.repo);
-            }
-            expand_path(&worktree.path).context("invalid worktree path")?;
-            if worktree.worktree_dir.trim().is_empty() {
-                bail!("worktree_dir must not be empty");
-            }
-            if worktree.branch_template.trim().is_empty() {
-                bail!("branch_template must not be empty");
-            }
-            if worktree.base_branch.trim().is_empty() {
-                bail!("base_branch must not be empty");
+            let path = expand_path(&worktree.path).context("invalid worktree path")?;
+            let path = path.canonicalize().unwrap_or(path);
+            if !repos.insert(path) {
+                bail!("duplicate worktree path {:?}", worktree.path);
             }
         }
         let tui = &self.tui;
@@ -907,6 +875,10 @@ fn read_config_value(path: &Path, cwd: &Path) -> Result<toml::Value> {
         let mut value: toml::Value =
             toml::from_str(&text).with_context(|| format!("invalid TOML in {}", path.display()))?;
         migrate_source_names(&mut value)?;
+        if !imported {
+            reject_retired_worktree_keys(&value)
+                .with_context(|| format!("in config {}", path.display()))?;
+        }
         reject_tmux_keys(&value, "").with_context(|| format!("in config {}", path.display()))?;
         let strict = !imported
             && value
@@ -959,7 +931,6 @@ fn check_unknown_keys(value: &mut toml::Value, kind: &str, strict: bool) -> Resu
             "window",
             "wildcard",
             "worktree",
-            "browser",
             "tui",
             "default_session",
             "blacklist",
@@ -999,18 +970,7 @@ fn check_unknown_keys(value: &mut toml::Value, kind: &str, strict: bool) -> Resu
             "windows",
             "icon",
         ],
-        "worktree" => &[
-            "repo",
-            "path",
-            "worktree_dir",
-            "branch_template",
-            "base_branch",
-            "fetch",
-            "create_command",
-            "startup_command",
-            "icon",
-        ],
-        "browser" => &["application", "url_command"],
+        "worktree" => &["path", "icon"],
         "tui" => &[
             "show_icons",
             "show_windows",
@@ -1320,6 +1280,63 @@ mod tests {
     use super::*;
 
     #[test]
+    fn retired_worktree_keys_require_migration_even_in_permissive_mode() {
+        for strict in [false, true] {
+            for setting in [
+                "repo='owner/repo'",
+                "worktree_dir=''",
+                "branch_template=''",
+                "base_branch=''",
+                "fetch=false",
+                "create_command='true'",
+                "startup_command='true'",
+            ] {
+                let error = Config::parse(&format!(
+                    "strict_mode={strict}\n[[worktree]]\npath='/repo'\n{setting}"
+                ))
+                .unwrap_err()
+                .to_string();
+                assert!(
+                    error.contains("was removed") && error.contains("Worktrunk"),
+                    "{error}"
+                );
+            }
+            assert!(
+                Config::parse(&format!(
+                    "strict_mode={strict}\n[browser]\napplication='Safari'"
+                ))
+                .unwrap_err()
+                .to_string()
+                .contains("[browser] was removed")
+            );
+        }
+        assert!(Config::parse("[[worktree]]\npath='/repo'\nicon='W'").is_ok());
+        assert!(
+            Config::parse("[[worktree]]\npath='/repo'\n[[worktree]]\npath='/repo'")
+                .unwrap_err()
+                .to_string()
+                .contains("duplicate worktree path")
+        );
+    }
+
+    #[test]
+    fn file_loader_rejects_retired_keys_before_permissive_unknown_key_filtering() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("legacy.toml");
+        for strict in [false, true] {
+            for body in [
+                "[[worktree]]\npath='/repo'\nrepo='owner/repo'",
+                "[[worktree]]\npath='/repo'\nworktree_dir='.wk'",
+                "[browser]\napplication='Safari'",
+            ] {
+                fs::write(&path, format!("strict_mode={strict}\n{body}\n")).unwrap();
+                let error = format!("{:#}", Config::load(Some(&path)).unwrap_err());
+                assert!(error.contains("was removed"), "{error}");
+            }
+        }
+    }
+
+    #[test]
     fn defaults_and_worktree_defaults() {
         let config = Config::parse("").unwrap();
         assert!(
@@ -1331,17 +1348,9 @@ mod tests {
         assert!(config.blacklist.is_empty() && config.sort_order.is_empty());
         assert_eq!(config.tui.alias_auto_connect_delay, "150ms");
         assert_eq!(config.tui.preview_width, 60);
-        let config = Config::parse("[[worktree]]\nrepo='org/repo'\npath='/repo'").unwrap();
-        let wt = &config.worktree[0];
-        assert_eq!(
-            (
-                &*wt.worktree_dir,
-                &*wt.branch_template,
-                &*wt.base_branch,
-                wt.fetch
-            ),
-            (".wk", "{number}", "origin/main", true)
-        );
+        let config = Config::parse("[[worktree]]\npath='/repo'").unwrap();
+        assert_eq!(config.worktree[0].path, "/repo");
+        assert!(config.worktree[0].icon.is_none());
     }
 
     #[test]
@@ -1710,7 +1719,7 @@ windows = []
                 "[[session]]\nname='x'\npath='/x'\nalias='a'\n[[session]]\nname='y'\npath='/y'\nalias='A'",
                 "duplicate alias",
             ),
-            ("[[worktree]]\nrepo='invalid'\npath='/repo'", "org/repo"),
+            ("[[worktree]]\npath=''", "worktree path"),
         ] {
             let error = format!("{:#}", Config::parse(text).unwrap_err());
             assert!(error.contains(message), "{text}: {error}");
@@ -1740,11 +1749,7 @@ preview_width = 0
 preview_min_width = -1
 preview_border = 'unknown'
 [[worktree]]
-repo = 'org/repo'
 path = '/repo'
-worktree_dir = ''
-branch_template = ''
-base_branch = ''
 "#,
         )
         .unwrap();
@@ -1765,11 +1770,7 @@ base_branch = ''
         );
         assert_eq!((tui.preview_width, tui.preview_min_width), (60, 100));
         assert_eq!(tui.preview_border, "line");
-        let wt = &config.worktree[0];
-        assert_eq!(
-            (&*wt.worktree_dir, &*wt.branch_template, &*wt.base_branch),
-            (".wk", "{number}", "origin/main")
-        );
+        assert_eq!(config.worktree[0].path, "/repo");
         for (raw, expected) in [
             (-10, 60),
             (0, 60),
@@ -2147,7 +2148,7 @@ disable_startup_command = true
         assert_eq!(config.vcs, "git");
         assert!(config.blacklist.is_empty() && config.sort_order.is_empty());
         assert!(config.worktree.is_empty() && config.name_substitution.is_empty());
-        assert!(config.icons.is_empty() && config.browser.is_none());
+        assert!(config.icons.is_empty());
         assert!(config.frecency.list_command.is_none());
         assert!(!config.tui.preview);
         assert_eq!(config.tui.prompt, TuiConfig::default().prompt);

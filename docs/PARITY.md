@@ -2,6 +2,8 @@
 
 **Picker migration:** this pinned inventory records the original Sesh/native-TUI target. Both current interactive pickers use system fzf. Native cursor, layout and highlight assertions below are historical; current behavior is described in [README](../README.md#fzf-picker-keys), [configuration](CONFIGURATION.md#tui-and-icons) and [fzf verification](FZF_VERIFICATION.md).
 
+**Worktrunk migration:** the issue/PR, browser, numbered-directory and worktree-cache inventory below is historical upstream research, not the current rexue contract. Those features were intentionally removed. Current worktree commands use generic branches/paths and external wt ≥ 0.81.0; only path/icon registrations remain in rexue. See [the current worktree configuration and migration](CONFIGURATION.md#worktrunk-worktrees) and [interface decisions](DECISIONS.md#worktrunk-interface-evidence).
+
 Pinned upstream inventory for goal `mvv20p1t-tgkq2f`. Source inspection establishes the reference; final implementation evidence is in [VERIFICATION.md](VERIFICATION.md) and native mappings in [DECISIONS.md](DECISIONS.md).
 
 ## Evidence and boundary

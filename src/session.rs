@@ -205,6 +205,14 @@ impl Manager {
         if !selected || opts.zoxide {
             entries.extend(self.frecency_entries(opts.no_cache)?);
         }
+        if !selected {
+            entries.extend(
+                crate::worktree::Worktrees::new(&self.config)
+                    .list_all()?
+                    .iter()
+                    .map(|e| e.entry()),
+            );
+        }
         if opts.panes {
             entries.extend(self.panes()?);
         }
@@ -231,16 +239,22 @@ impl Manager {
             return Ok(session.icon.clone());
         }
         if !entry.path.as_os_str().is_empty() {
-            for worktree in &self.config.worktree {
-                if worktree.path.is_empty()
-                    || !worktree.icon.as_ref().is_some_and(|s| !s.is_empty())
-                {
-                    continue;
-                }
-                let root = normalize(&crate::worktree::worktree_root(worktree)?);
-                let path = normalize(&entry.path);
-                if path != root && path.starts_with(&root) {
-                    return Ok(worktree.icon.clone());
+            let common = if self.config.worktree.iter().any(|w| w.icon.is_some()) {
+                git_common_dir(&entry.path)
+            } else {
+                None
+            };
+            if let Some(common) = common {
+                for worktree in &self.config.worktree {
+                    if worktree.icon.as_ref().is_some_and(|s| !s.is_empty())
+                        && expand_path(&worktree.path)
+                            .ok()
+                            .and_then(|p| git_common_dir(&p))
+                            .as_ref()
+                            == Some(&common)
+                    {
+                        return Ok(worktree.icon.clone());
+                    }
                 }
             }
             return Ok(self.config.resolve(&entry.path, Some(&entry.name))?.icon);
@@ -427,6 +441,17 @@ impl Manager {
     /// Connect a resolved picker row without treating its name as decorated text.
     /// Root conversion belongs to text-target resolution, before calling this API.
     pub fn connect_entry(&self, entry: Entry, opts: &ConnectOptions) -> Result<Connection> {
+        if entry.source == Source::Worktree {
+            let prepared = crate::worktree::Worktrees::new(&self.config).prepare(
+                &crate::worktree::Selection {
+                    path: Some(entry.path.clone()),
+                },
+                &entry.path.to_string_lossy(),
+                false,
+                None,
+            )?;
+            return self.connect_path(&prepared.path, opts);
+        }
         self.connect_resolved(opts, || {
             // Alias-only rows can be synthesized outside the fetched sources.
             // Complete their typed config identity by exact key, never by the
@@ -568,6 +593,16 @@ impl Manager {
             .iter()
             .filter(|e| !path.as_os_str().is_empty() && same_path(&e.path, &path))
             .collect();
+        // A live terminal can move to another checkout without changing its
+        // label. Keep that session intact and disambiguate only automatic
+        // directory names; explicit/configured names retain conflict checks.
+        if opts.name.is_none()
+            && entry.source == Source::Directory
+            && exact.is_none()
+            && same.is_empty()
+        {
+            entry.name = available_directory_name(&entry.name, &path, &existing);
+        }
         let named = if opts.name.is_some() {
             existing.iter().filter(|e| e.name == entry.name).collect()
         } else {
@@ -885,12 +920,34 @@ impl Manager {
             Source::Zoxide | Source::Directory => {
                 self.frecency("remove", &entry.path.to_string_lossy())?;
             }
+            Source::Worktree => {
+                crate::worktree::Worktrees::new(&self.config).remove(
+                    &crate::worktree::Selection {
+                        path: Some(entry.path.clone()),
+                    },
+                    &entry.path.to_string_lossy(),
+                    crate::worktree::RemoveOptions::default(),
+                )?;
+            }
             _ => bail!("configured sessions cannot be removed here; edit rexue.toml"),
         };
         self.invalidate();
         Ok(())
     }
 }
+fn git_common_dir(path: &Path) -> Option<PathBuf> {
+    if !path.is_dir() {
+        return None;
+    }
+    let dir = process::text(Command::new("git").arg("-C").arg(path).args([
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir",
+    ]))
+    .ok()?;
+    Some(normalize(Path::new(dir.trim())))
+}
+
 fn relative_path(input: &str, cwd: &Path) -> Result<PathBuf> {
     let expanded = shellexpand::full(input).context("could not expand window path")?;
     let path = PathBuf::from(expanded.as_ref());
@@ -1059,6 +1116,31 @@ fn live_name_matches<'a>(entries: &'a [Entry], base: &str) -> Vec<&'a Entry> {
         .filter(|e| e.source == Source::Rex && e.name.starts_with(&prefix))
         .collect()
 }
+/// Default names may collide after a terminal changes checkout, or when a\n/// template gives unrelated directories the same leaf name. Path-based reuse\n/// is handled first; never infer that the occupied label owns this directory.
+fn available_directory_name(base: &str, path: &Path, entries: &[Entry]) -> String {
+    if live_name_matches(entries, base).is_empty() {
+        return base.to_owned();
+    }
+    let branch = process::text(Command::new("git").arg("-C").arg(path).args([
+        "symbolic-ref",
+        "--quiet",
+        "--short",
+        "HEAD",
+    ]))
+    .ok()
+    .map(|value| valid_name(value.trim()))
+    .filter(|value| !value.is_empty());
+    let suffix = branch.unwrap_or_else(|| fingerprint(&normalize(path))[..8].to_owned());
+    let stem = format!("{base}@{suffix}");
+    let mut candidate = stem.clone();
+    let mut index = 2;
+    while !live_name_matches(entries, &candidate).is_empty() {
+        candidate = format!("{stem}-{index}");
+        index += 1;
+    }
+    candidate
+}
+
 fn dedup_entries(entries: Vec<Entry>) -> Vec<Entry> {
     let live_names: HashSet<_> = entries
         .iter()
@@ -1076,11 +1158,14 @@ fn dedup_entries(entries: Vec<Entry>) -> Vec<Entry> {
         .into_iter()
         .filter(|e| match e.source {
             Source::Config => !live_names.contains(&e.name),
-            Source::Zoxide => e.path.as_os_str().is_empty() || !paths.contains(&normalize(&e.path)),
+            Source::Zoxide | Source::Worktree => {
+                e.path.as_os_str().is_empty() || !paths.contains(&normalize(&e.path))
+            }
             _ => true,
         })
         .collect()
 }
+// A naming query only; lifecycle and discovery for managed entries use wt.
 fn git_anchor(path: &Path) -> Result<PathBuf> {
     let output = process::text(Command::new("git").arg("-C").arg(path).args([
         "worktree",
@@ -1269,6 +1354,8 @@ fn order_entries(entries: Vec<Entry>, order: &[SortGroup]) -> Vec<Entry> {
                 "rex-block" => Some(Source::RexBlock),
                 "config" => Some(Source::Config),
                 "zoxide" => Some(Source::Zoxide),
+                "directory" => Some(Source::Directory),
+                "worktree" => Some(Source::Worktree),
                 _ => None,
             })
             .filter(|s| seen.insert(s.as_str()))
@@ -1282,6 +1369,8 @@ fn order_entries(entries: Vec<Entry>, order: &[SortGroup]) -> Vec<Entry> {
         Source::Config,
         Source::Zoxide,
         Source::RexBlock,
+        Source::Directory,
+        Source::Worktree,
     ] {
         if seen.insert(source.as_str()) {
             groups.push(vec![source]);
@@ -1548,128 +1637,90 @@ mod tests {
         assert!(!kept.iter().any(|e| e.name == "free"));
     }
     #[test]
-    fn worktree_icon_root_expansion_matches_workflow_for_absolute_home_and_env() {
-        let d = tempfile::tempdir().unwrap();
-        let home = dirs::home_dir().unwrap();
-        let leaf = format!("rexue-icon-fixture-{}", std::process::id());
-        let root = home.join(&leaf);
-        let child = root.join("123");
-        for spelling in [
-            root.display().to_string(),
-            format!("~/{leaf}"),
-            format!("${{HOME}}/{leaf}"),
-            format!("$HOME/{leaf}"),
-        ] {
-            let cfg = Config {
-                session: vec![crate::config::SessionConfig {
-                    name: "tree".into(),
-                    path: child.display().to_string(),
-                    ..Default::default()
-                }],
-                worktree: vec![crate::config::WorktreeConfig {
-                    repo: "org/repo".into(),
-                    path: d.path().display().to_string(),
-                    worktree_dir: spelling.clone(),
-                    icon: Some("W".into()),
-                    ..Default::default()
-                }],
-                ..Default::default()
-            };
-            let rows = isolated(cfg, d.path())
-                .list(&ListOptions {
-                    config: true,
-                    ..Default::default()
-                })
-                .unwrap();
-            assert_eq!(rows[0].icon.as_deref(), Some("W"), "{spelling}");
-        }
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn missing_worktree_child_resolves_existing_symlink_ancestors() {
-        let d = tempfile::tempdir().unwrap();
-        let actual = d.path().join("actual");
-        let alias = d.path().join("alias");
-        fs::create_dir(&actual).unwrap();
-        std::os::unix::fs::symlink(&actual, &alias).unwrap();
-        let child = alias.join("123");
-        assert!(!child.exists());
-        assert_eq!(
-            normalize(&child),
-            actual.canonicalize().unwrap().join("123")
+    fn ordering_retains_worktree_sources_and_honors_their_groups() {
+        let tree = Entry::new("feature/widgets", "/custom/widgets", Source::Worktree);
+        let live = Entry::new("live", "/live", Source::Rex);
+        let directory = Entry::new("dir", "/directory", Source::Directory);
+        let rows = order_entries(vec![live.clone(), tree.clone(), directory.clone()], &[]);
+        assert_eq!(rows.len(), 3);
+        let ordered = order_entries(
+            vec![live, tree, directory],
+            &[
+                SortGroup::Source("worktree".into()),
+                SortGroup::Source("directory".into()),
+            ],
         );
-        let cfg = Config {
-            session: vec![crate::config::SessionConfig {
-                name: "tree".into(),
-                path: child.display().to_string(),
-                ..Default::default()
-            }],
-            worktree: vec![crate::config::WorktreeConfig {
-                repo: "org/repo".into(),
-                path: d.path().display().to_string(),
-                worktree_dir: actual.display().to_string(),
-                icon: Some("W".into()),
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
-        let rows = isolated(cfg, d.path())
-            .list(&ListOptions {
-                config: true,
-                ..Default::default()
-            })
-            .unwrap();
-        assert_eq!(rows[0].icon.as_deref(), Some("W"));
+        assert_eq!(ordered[0].source, Source::Worktree);
+        assert_eq!(ordered[1].source, Source::Directory);
+        assert_eq!(ordered[2].source, Source::Rex);
     }
 
     #[test]
-    fn worktree_icons_precede_wildcards_but_follow_explicit_session_icons() {
+    fn worktree_icons_follow_repository_identity_and_session_precedence() {
         let d = tempfile::tempdir().unwrap();
-        let root = d.path().join("trees");
-        fs::create_dir_all(root.join("42/sub")).unwrap();
+        let repo = d.path().join("repo");
+        let tree = d.path().join("arbitrary checkout");
+        process::text(Command::new("git").args(["init", "-b", "main"]).arg(&repo)).unwrap();
+        process::text(Command::new("git").arg("-C").arg(&repo).args([
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "seed",
+        ]))
+        .unwrap();
+        process::text(
+            Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args(["worktree", "add", "-b", "feature/custom"])
+                .arg(&tree),
+        )
+        .unwrap();
+        fs::create_dir(tree.join("sub")).unwrap();
         let mut config = Config::default();
         config.worktree.push(crate::config::WorktreeConfig {
-            path: d.path().to_string_lossy().into_owned(),
-            worktree_dir: "trees".into(),
+            path: repo.display().to_string(),
             icon: Some("tree".into()),
-            ..Default::default()
         });
         config.wildcard.push(crate::config::WildcardConfig {
             pattern: format!("{}/**", d.path().display()),
             icon: Some("wild".into()),
             ..Default::default()
         });
-        config.session.push(crate::config::SessionConfig {
-            name: "saved".into(),
-            path: root.join("42/sub").to_string_lossy().into_owned(),
+        let mut manager = isolated(config, d.path());
+        let entry = Entry::new("custom", tree.join("sub"), Source::Directory);
+        assert_eq!(manager.entry_icon(&entry).unwrap().as_deref(), Some("tree"));
+        manager.config.session.push(crate::config::SessionConfig {
+            name: "custom".into(),
+            path: tree.join("sub").display().to_string(),
+            icon: Some("session".into()),
             ..Default::default()
         });
-        let mut manager = isolated(config, d.path());
-        let opts = ListOptions {
-            config: true,
-            ..Default::default()
-        };
         assert_eq!(
-            manager.list(&opts).unwrap()[0].icon.as_deref(),
-            Some("tree")
-        );
-        manager.config.session[0].icon = Some("session".into());
-        assert_eq!(
-            manager.list(&opts).unwrap()[0].icon.as_deref(),
+            manager.entry_icon(&entry).unwrap().as_deref(),
             Some("session")
         );
-        let sibling = Entry::new("sibling", d.path().join("trees-other/42"), Source::Zoxide);
+        let outside = d.path().join("outside");
+        fs::create_dir(&outside).unwrap();
         assert_eq!(
-            manager.entry_icon(&sibling).unwrap().as_deref(),
+            manager
+                .entry_icon(&Entry::new("outside", outside, Source::Directory))
+                .unwrap()
+                .as_deref(),
             Some("wild")
         );
-        manager.config.worktree[0].worktree_dir = root.to_string_lossy().into_owned();
-        manager.config.session[0].icon = None;
-        assert_eq!(
-            manager.list(&opts).unwrap()[0].icon.as_deref(),
-            Some("tree")
-        );
+        #[cfg(unix)]
+        {
+            let alias = d.path().join("alias");
+            std::os::unix::fs::symlink(&tree, &alias).unwrap();
+            assert_eq!(git_common_dir(&alias.join("sub")), git_common_dir(&repo));
+        }
     }
     #[cfg(unix)]
     #[test]

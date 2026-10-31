@@ -4,7 +4,7 @@ use crate::{
     model::{Entry, Source},
     picker, process,
     session::{ConnectOptions, ListOptions, Manager},
-    worktree::{Selection, Worktrees},
+    worktree::{RemoveOptions, Selection, Worktrees},
 };
 use anyhow::{Context, Result, bail};
 use clap::{ArgAction, Args, CommandFactory, Parser, Subcommand, builder::TypedValueParser};
@@ -94,7 +94,7 @@ pub enum Commands {
         #[command(subcommand)]
         command: WindowCommand,
     },
-    /// Manage GitHub issue/PR worktrees and their sessions.
+    /// Manage branch worktrees with Worktrunk and connect their Rex sessions.
     #[command(alias = "wt")]
     Worktree {
         #[command(subcommand)]
@@ -309,69 +309,61 @@ impl WindowCommand {
 }
 #[derive(Debug, Args, Clone, Default)]
 pub struct RepoArgs {
-    #[arg(short = 'r', long)]
-    pub repo: Option<String>,
+    /// Repository or worktree directory; defaults to the current directory.
     #[arg(long, value_parser = clap::builder::OsStringValueParser::new().map(PathBuf::from))]
     pub path: Option<PathBuf>,
 }
 impl RepoArgs {
     fn selection(&self) -> Result<Selection> {
-        let repo = self.repo.clone().filter(|s| !s.is_empty());
         Ok(Selection {
-            path: if repo.is_some() {
-                None
-            } else {
-                self.path
-                    .as_ref()
-                    .filter(|p| !p.as_os_str().is_empty())
-                    .map(|p| expand_path(&p.to_string_lossy()))
-                    .transpose()?
-            },
-            repo,
+            path: self
+                .path
+                .as_ref()
+                .filter(|p| !p.as_os_str().is_empty())
+                .map(|p| crate::config::absolute_path(p))
+                .transpose()?,
         })
     }
 }
 #[derive(Debug, Subcommand)]
 pub enum WorktreeCommand {
-    #[command(alias = "c")]
-    Connect {
-        number: Option<u64>,
+    /// Create a branch and worktree using Worktrunk configuration (no Rex session).
+    Create {
+        branch: String,
+        #[arg(short = 'b', long)]
+        base: Option<String>,
         #[command(flatten)]
         repo: RepoArgs,
-        #[arg(short = 'p', long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
-        #[arg(default_value_t = false)]
-        pr: bool,
-        #[arg(short = 's', long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
-        #[arg(default_value_t = false)]
-        switch: bool,
-        #[arg(short = 'b', long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
-        #[arg(default_value_t = false)]
-        browser: bool,
-        #[arg(long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
-        #[arg(default_value_t = false)]
+        #[arg(long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool, default_value_t = false)]
         json: bool,
     },
+    /// Connect a branch/path to Rex; omitted target connects the current worktree.
+    #[command(alias = "c")]
+    Connect {
+        target: Option<String>,
+        /// Explicit Rex name, useful when a retained session owns the old path.
+        #[arg(long)]
+        name: Option<String>,
+        #[command(flatten)]
+        repo: RepoArgs,
+        #[arg(long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool, default_value_t = false)]
+        json: bool,
+    },
+    /// List all registered worktrees, including detached checkouts.
     #[command(aliases=["l","ls"])]
     List {
         #[command(flatten)]
         repo: RepoArgs,
-        #[arg(short = 'j', long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
-        #[arg(default_value_t = false)]
+        #[arg(short = 'j', long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool, default_value_t = false)]
         json: bool,
-        #[arg(long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
-        #[arg(default_value_t = false)]
-        refresh: bool,
     },
+    /// Select and connect Rex (Ctrl+W creates; Ctrl+X removes with confirmation).
     #[command(aliases=["pick","pk","p"])]
     Picker {
         #[command(flatten)]
         repo: RepoArgs,
-        #[arg(long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
-        #[arg(default_value_t = false)]
+        #[arg(long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool, default_value_t = false)]
         refresh: bool,
-        #[arg(short = 's', long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
-        #[arg(default_value_t = false)]
-        switch: bool,
         #[arg(short = 'i', long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
         icons: Option<bool>,
         #[arg(short = 'p', long)]
@@ -381,14 +373,20 @@ pub enum WorktreeCommand {
         #[arg(short = 'q', long)]
         query: Option<String>,
     },
-    #[command(alias = "b")]
-    Browse {
-        #[arg(short = 'p', long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
-        #[arg(default_value_t = false)]
-        pr: bool,
-        #[arg(long = "print", action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
-        #[arg(default_value_t = false)]
-        print_only: bool,
+    /// Remove a selected worktree using Worktrunk protections; keep its Rex session.
+    #[command(aliases=["rm","r"])]
+    Remove {
+        target: String,
+        #[command(flatten)]
+        repo: RepoArgs,
+        #[arg(long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool, default_value_t = false)]
+        force: bool,
+        #[arg(short = 'D', long, conflicts_with = "no_delete_branch", action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool, default_value_t = false)]
+        force_delete: bool,
+        #[arg(long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool, default_value_t = false)]
+        no_delete_branch: bool,
+        #[arg(long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool, default_value_t = false)]
+        json: bool,
     },
 }
 pub fn run(cli: Cli) -> Result<()> {
@@ -1003,85 +1001,80 @@ fn window_command(manager: &Manager, mut command: WindowCommand, detach: bool) -
 fn worktree_command(manager: Manager, command: WorktreeCommand, detach: bool) -> Result<()> {
     let worktrees = Worktrees::new(&manager.config);
     match command {
-        WorktreeCommand::Connect {
-            number,
+        WorktreeCommand::Create {
+            branch,
+            base,
             repo,
-            pr,
-            browser,
             json,
-            ..
         } => {
-            if browser && number.is_some() {
-                bail!("an issue/PR number and --browser cannot be used together");
-            }
-            let (selection, number, pr) = if browser {
-                let r = worktrees.active_browser_ref()?;
-                (
-                    Selection {
-                        repo: repo.repo.filter(|s| !s.is_empty()).or(Some(r.repo)),
-                        path: repo.path,
-                    },
-                    r.number,
-                    pr || r.is_pr,
-                )
+            let prepared = worktrees.prepare(&repo.selection()?, &branch, true, base.as_deref())?;
+            if json {
+                out(&serde_json::to_string_pretty(&prepared)?)?;
             } else {
-                (
-                    repo.selection()?,
-                    number.context("provide an issue/PR number or --browser")?,
-                    pr,
-                )
+                out(&prepared.path.display().to_string())?;
+            }
+        }
+        WorktreeCommand::Connect {
+            target,
+            repo,
+            name,
+            json,
+        } => {
+            let selection = repo.selection()?;
+            let prepared = if let Some(target) = target {
+                worktrees.prepare(&selection, &target, false, None)?
+            } else {
+                let current = worktrees.current(&selection)?;
+                worktrees.prepare(&selection, &current.path.to_string_lossy(), false, None)?
             };
-            let prepared = worktrees.prepare(&selection, number, pr)?;
-            let c = manager.connect(
-                &prepared.path.display().to_string(),
+            let c = manager.connect_path(
+                &prepared.path,
                 &ConnectOptions {
                     detach,
-                    command: prepared.startup_command,
+                    name,
                     ..Default::default()
                 },
             )?;
             connection_out(&c, json)?;
         }
-        WorktreeCommand::List {
-            repo,
-            json,
-            refresh,
-        } => {
-            let entries = worktrees.list(&repo.selection()?, refresh)?;
+        WorktreeCommand::List { repo, json } => {
+            let entries = worktrees.list(&repo.selection()?)?;
             if json {
                 out(&serde_json::to_string_pretty(&entries)?)?;
             } else {
-                for e in entries {
-                    out(&format!("{}  {}  {}", e.number, e.state, e.title))?;
+                for entry in entries {
+                    out(&format!("{}  {}", entry.entry().name, entry.path.display()))?;
                 }
             }
         }
-        WorktreeCommand::Browse { pr, print_only } => {
-            let cwd = std::env::current_dir()?;
-            let url = match worktrees.browse_url(&cwd, pr) {
-                Ok(url) => url,
-                Err(error) => {
-                    let path = manager.current_path().with_context(|| {
-                        format!("{error:#}; no current Rex worktree path is available")
-                    })?;
-                    worktrees.browse_url(&path, pr)?
-                }
-            };
-            if !print_only {
-                worktrees.open_url(&url)?;
-            }
-            if print_only {
-                out(&url)?;
+        WorktreeCommand::Remove {
+            target,
+            repo,
+            force,
+            force_delete,
+            no_delete_branch,
+            json,
+        } => {
+            let result = worktrees.remove(
+                &repo.selection()?,
+                &target,
+                RemoveOptions {
+                    force,
+                    force_delete,
+                    no_delete_branch,
+                },
+            )?;
+            if json {
+                out(&serde_json::to_string_pretty(&result)?)?;
             }
         }
         WorktreeCommand::Picker {
             repo,
-            refresh,
+            refresh: _,
             icons,
             prompt,
             placeholder,
             query,
-            ..
         } => {
             let opts = PickerArgs {
                 icons,
@@ -1091,41 +1084,57 @@ fn worktree_command(manager: Manager, command: WorktreeCommand, detach: bool) ->
                 ..Default::default()
             };
             let mut options = picker_options_for(&manager.config, &opts, true)?;
-            options.auto_refresh = !refresh;
+            options.auto_refresh = false;
             let fetch_cfg = manager.config.clone();
+            let remove_cfg = manager.config.clone();
+            let create_cfg = manager.config.clone();
             let selection = repo.selection()?;
-            let selected_repo = selection.clone();
+            let fetch_selection = selection.clone();
+            let remove_selection = selection.clone();
+            let create_selection = selection.clone();
             let preview = manager.clone();
-            let first = std::cell::Cell::new(true);
-            let chosen = picker::pick(
+            let chosen = picker::pick_with_create(
                 move || {
-                    let wt = Worktrees::new(&fetch_cfg);
-                    let initial = first.replace(false);
-                    let rows = if initial && !refresh {
-                        wt.list_cached(&selection)?
-                    } else {
-                        wt.refresh(&selection)?
-                    };
-                    Ok(rows.iter().map(|e| e.entry()).collect())
+                    Ok(Worktrees::new(&fetch_cfg)
+                        .list(&fetch_selection)?
+                        .iter()
+                        .map(|e| e.entry())
+                        .collect())
                 },
                 move |e| preview.preview(e),
-                |_| bail!("worktrees cannot be deleted from this picker"),
+                move |e| {
+                    Worktrees::new(&remove_cfg).remove(
+                        &remove_selection,
+                        &e.path.to_string_lossy(),
+                        RemoveOptions::default(),
+                    )?;
+                    Ok(())
+                },
                 |_, _| bail!("worktrees cannot be renamed from this picker"),
+                move |branch| {
+                    let prepared = Worktrees::new(&create_cfg).prepare(
+                        &create_selection,
+                        branch,
+                        true,
+                        None,
+                    )?;
+                    Ok(Entry::new(branch, prepared.path, Source::Worktree))
+                },
                 options,
             )?;
-            if let Some(e) = chosen {
-                let number = e
-                    .path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .and_then(|n| n.parse::<u64>().ok())
-                    .context("selected worktree has no issue number")?;
-                let prepared = worktrees.prepare(&selected_repo, number, false)?;
+            if let Some(outcome) = chosen {
+                let path = match outcome {
+                    picker::PickOutcome::Selected(entry) => {
+                        worktrees
+                            .prepare(&selection, &entry.path.to_string_lossy(), false, None)?
+                            .path
+                    }
+                    picker::PickOutcome::Created(entry) => entry.path,
+                };
                 let c = manager.connect_path(
-                    &prepared.path,
+                    &path,
                     &ConnectOptions {
                         detach,
-                        command: prepared.startup_command,
                         ..Default::default()
                     },
                 )?;
@@ -1404,36 +1413,14 @@ mod tests {
     }
 
     #[test]
-    fn worktree_nonempty_repo_precedence_and_typed_paths_are_preserved() {
+    fn worktree_selection_preserves_typed_paths_and_rejects_removed_flags() {
         let root = tempfile::tempdir().unwrap();
-        for repo in ["org/repo", " "] {
-            let Some(Commands::Worktree {
-                command: WorktreeCommand::List { repo: args, .. },
-            }) = Cli::try_parse_from([
-                "rexue",
-                "worktree",
-                "list",
-                "--repo",
-                repo,
-                "--path",
-                "${REXUE_UNUSED_SELECTION_PATH}",
-            ])
-            .unwrap()
-            .command
-            else {
-                panic!("expected worktree list")
-            };
-            let selection = args.selection().unwrap();
-            assert_eq!(selection.repo.as_deref(), Some(repo));
-            assert_eq!(selection.path, None);
-        }
         let Some(Commands::Worktree {
             command: WorktreeCommand::List { repo, .. },
         }) = Cli::try_parse_from([
             "rexue",
             "worktree",
             "list",
-            "--repo=",
             "--path",
             root.path().to_str().unwrap(),
         ])
@@ -1442,10 +1429,15 @@ mod tests {
         else {
             panic!("expected worktree list")
         };
-        assert_eq!(repo.path.as_deref(), Some(root.path()));
-        let selection = repo.selection().unwrap();
-        assert_eq!(selection.repo, None);
-        assert_eq!(selection.path.as_deref(), Some(root.path()));
+        assert_eq!(repo.selection().unwrap().path.as_deref(), Some(root.path()));
+        for args in [
+            vec!["list", "--repo=owner/repo"],
+            vec!["connect", "feature", "--pr"],
+            vec!["connect", "--browser"],
+            vec!["browse"],
+        ] {
+            assert!(Cli::try_parse_from(["rexue", "worktree"].into_iter().chain(args)).is_err());
+        }
     }
 
     #[test]
@@ -1496,19 +1488,11 @@ mod tests {
     #[test]
     fn empty_worktree_selectors_use_effective_defaults() {
         for command in ["list", "picker", "connect"] {
-            for flags in [
-                vec![],
-                vec!["--repo="],
-                vec!["--path="],
-                vec!["--repo=", "--path="],
-            ] {
-                let Some(Commands::Worktree { command }) = Cli::try_parse_from(
-                    ["rexue", "worktree", command]
-                        .into_iter()
-                        .chain(flags.iter().copied()),
-                )
-                .unwrap()
-                .command
+            for flags in [vec![], vec!["--path="]] {
+                let Some(Commands::Worktree { command }) =
+                    Cli::try_parse_from(["rexue", "worktree", command].into_iter().chain(flags))
+                        .unwrap()
+                        .command
                 else {
                     panic!("expected worktree")
                 };
@@ -1518,20 +1502,9 @@ mod tests {
                     | WorktreeCommand::Connect { repo, .. } => repo,
                     _ => unreachable!(),
                 };
-                let selection = repo.selection().unwrap();
-                assert!(selection.repo.is_none(), "{flags:?}");
-                assert!(selection.path.is_none(), "{flags:?}");
+                assert!(repo.selection().unwrap().path.is_none());
             }
         }
-        let root = tempfile::tempdir().unwrap();
-        let selection = RepoArgs {
-            repo: Some(String::new()),
-            path: Some(root.path().into()),
-        }
-        .selection()
-        .unwrap();
-        assert_eq!(selection.repo, None);
-        assert_eq!(selection.path.as_deref(), Some(root.path()));
     }
 
     #[test]
@@ -1849,7 +1822,14 @@ mod tests {
         assert!(args.sources.configs && args.json && !args.icons);
         assert!(args.validate().is_ok());
         assert!(
-            Cli::try_parse_from(["rexue", "worktree", "connect", "42", "--browser=false"]).is_ok()
+            Cli::try_parse_from([
+                "rexue",
+                "worktree",
+                "connect",
+                "feature/widgets",
+                "--json=false"
+            ])
+            .is_ok()
         );
     }
 

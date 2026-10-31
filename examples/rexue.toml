@@ -61,20 +61,11 @@ startup_command = ""
 disable_startup_command = false
 windows = []
 
+# Worktrunk owns worktree-path, base/default branches, hooks and approvals.
+# Install wt >=0.81.0; see https://worktrunk.dev/config/
 [[worktree]]
-repo = "example/project"
 path = "~/projects/project"
-worktree_dir = ".wk"
-branch_template = "{number}"
-base_branch = "origin/main"
-fetch = true
-create_command = "git status --short"
-startup_command = "git status --short"
-
-[browser]
-application = "Safari"
-# Optional AppleScript fragment for reading the current tab:
-# url_command = "URL of current tab of front window"
+icon = ""
 
 [tui]
 show_icons = true

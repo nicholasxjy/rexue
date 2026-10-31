@@ -690,7 +690,111 @@ fn root_cli_jj_workspace_fallback_respects_mode_and_anchor_length() {
 }
 
 #[test]
-fn uncreated_worktree_child_through_symlink_keeps_icon_in_cli() {
+fn worktree_switch_does_not_fail_when_repo_name_is_owned_by_another_checkout() {
+    let fake = FakeRex::new();
+    let repo = fake.dir.path().join("zed-bar.nvim");
+    let previous = repo.join(".worktrees/wk-test");
+    fs::create_dir_all(&previous).unwrap();
+    assert!(
+        Command::new("git")
+            .args(["init", "--quiet", "-b", "main"])
+            .arg(&repo)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let live = fake.session("session:previous-full", "zed-bar_nvim", &previous);
+    fake.json("sessions.json", json!({"sessions":[live.clone()]}));
+    let wt = fake.dir.path().join("fake wt");
+    executable(
+        &wt,
+        &format!(
+            "#!/bin/sh\nif [ \"$1\" = --version ]; then printf 'wt v0.81.0\\n'; else printf '%s\\n' {}; fi\n",
+            shell_quote(&json!({"action":"existing","path":repo}).to_string())
+        ),
+    );
+    let config = fake.dir.path().join("worktree.toml");
+    fs::write(
+        &config,
+        "git_namer_use_worktree_root=true\n[frecency]\nadd_command='true'\n",
+    )
+    .unwrap();
+    let run = |extra: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_rexue"))
+            .args(["--detach", "--rex-bin"])
+            .arg(&fake.rex.bin)
+            .arg("-C")
+            .arg(&config)
+            .args(["worktree", "connect", "main", "--json", "--path"])
+            .arg(&repo)
+            .args(extra)
+            .env("REXUE_WT", &wt)
+            .env("REXUE_STATE_DIR", fake.dir.path().join("state"))
+            .output()
+            .unwrap()
+    };
+    let output = run(&[]);
+    assert!(
+        output.status.success(),
+        "worktree switching must create a distinct session instead of failing: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let connection: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        connection["path"],
+        repo.canonicalize().unwrap().to_str().unwrap()
+    );
+    assert!(connection["created"].as_bool().unwrap());
+    assert_eq!(connection["name"], "zed-bar_nvim@main");
+    assert!(
+        !fake
+            .calls()
+            .iter()
+            .any(|args| args.iter().any(|a| a == "kill")
+                || args.windows(2).any(|pair| pair == ["session", "rename"]))
+    );
+
+    // Reopening the same directory reuses its ID even under the fallback label.
+    let created = fake.session("session:created-full", "zed-bar_nvim@main", &repo);
+    fake.json("sessions.json", json!({"sessions":[created]}));
+    let reused = run(&[]);
+    assert!(
+        reused.status.success(),
+        "{}",
+        String::from_utf8_lossy(&reused.stderr)
+    );
+    let reused: Value = serde_json::from_slice(&reused.stdout).unwrap();
+    assert_eq!(reused["session_id"], connection["session_id"]);
+    assert_eq!(reused["created"], false);
+    assert_eq!(
+        fake.calls()
+            .iter()
+            .filter(|args| args.iter().any(|a| a == "new"))
+            .count(),
+        1
+    );
+
+    // Explicit names and configured session labels still cannot steal a directory.
+    fake.session("session:previous-full", "zed-bar_nvim", &previous);
+    fake.json("sessions.json", json!({"sessions":[live]}));
+    let explicit = run(&["--name", "zed-bar_nvim"]);
+    assert!(!explicit.status.success());
+    assert!(String::from_utf8_lossy(&explicit.stderr).contains("already belongs"));
+    fs::write(
+        &config,
+        format!(
+            "[frecency]\nadd_command='true'\n[[session]]\nname='zed-bar_nvim'\npath={}\n",
+            serde_json::to_string(repo.to_str().unwrap()).unwrap()
+        ),
+    )
+    .unwrap();
+    let configured = run(&[]);
+    assert!(!configured.status.success());
+    assert!(String::from_utf8_lossy(&configured.stderr).contains("already belongs"));
+}
+
+#[test]
+fn missing_directory_does_not_gain_a_worktree_icon_by_prefix() {
     let d = tempfile::tempdir().unwrap();
     let actual = d.path().join("actual");
     let alias = d.path().join("alias");
@@ -698,7 +802,15 @@ fn uncreated_worktree_child_through_symlink_keeps_icon_in_cli() {
     std::os::unix::fs::symlink(&actual, &alias).unwrap();
     let cfg = d.path().join("icon.toml");
     let quote = |p: &Path| serde_json::to_string(p.to_str().unwrap()).unwrap();
-    fs::write(&cfg,format!("[[worktree]]\nrepo='org/repo'\npath={}\nworktree_dir={}\nicon='W'\n[[session]]\nname='not-created-yet'\npath={}\n",quote(d.path()),quote(&actual),quote(&alias.join("123")))).unwrap();
+    fs::write(
+        &cfg,
+        format!(
+            "[[worktree]]\npath={}\nicon='W'\n[[session]]\nname='not-created-yet'\npath={}\n",
+            quote(&actual),
+            quote(&alias.join("feature"))
+        ),
+    )
+    .unwrap();
     let r = Command::new(env!("CARGO_BIN_EXE_rexue"))
         .args(["--rex-bin", "/nonexistent-rex-icon-test"])
         .arg("-C")
@@ -709,26 +821,43 @@ fn uncreated_worktree_child_through_symlink_keeps_icon_in_cli() {
         .unwrap();
     assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
     let rows: Value = serde_json::from_slice(&r.stdout).unwrap();
-    assert_eq!(rows[0]["icon"], "W");
+    assert!(rows[0]["icon"].is_null());
 }
 
 #[test]
-fn worktree_icon_expansion_is_equivalent_in_config_only_cli_json() {
+fn worktree_repository_path_expansion_is_equivalent_in_config_only_cli_json() {
     let dir = tempfile::tempdir().unwrap();
-    let leaf = format!("rexue-cli-icon-fixture-{}", std::process::id());
-    let root = dirs::home_dir().unwrap().join(&leaf);
+    let repo = dir.path().join("repository with spaces");
+    assert!(
+        Command::new("git")
+            .args(["init", "--quiet"])
+            .arg(&repo)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let project = repo.join("feature/sub");
+    fs::create_dir_all(&project).unwrap();
     let cfg = dir.path().join("icons.toml");
     for spelling in [
-        root.display().to_string(),
-        format!("~/{leaf}"),
-        format!("${{HOME}}/{leaf}"),
+        repo.display().to_string(),
+        "${REXUE_ICON_REPO_FIXTURE}".into(),
     ] {
-        fs::write(&cfg,format!("[[worktree]]\nrepo='org/repo'\npath={}\nworktree_dir={}\nicon='W'\n[[session]]\nname='tree-project'\npath={}\n",serde_json::to_string(dir.path().to_str().unwrap()).unwrap(),serde_json::to_string(&spelling).unwrap(),serde_json::to_string(root.join("123").to_str().unwrap()).unwrap())).unwrap();
+        fs::write(
+            &cfg,
+            format!(
+                "[[worktree]]\npath={}\nicon='W'\n[[session]]\nname='tree-project'\npath={}\n",
+                serde_json::to_string(&spelling).unwrap(),
+                serde_json::to_string(project.to_str().unwrap()).unwrap()
+            ),
+        )
+        .unwrap();
         let r = Command::new(env!("CARGO_BIN_EXE_rexue"))
             .args(["--rex-bin", "/nonexistent-rex-icon-test"])
             .arg("-C")
             .arg(&cfg)
             .args(["list", "--config", "--json"])
+            .env("REXUE_ICON_REPO_FIXTURE", &repo)
             .env("REXUE_STATE_DIR", dir.path().join("state"))
             .output()
             .unwrap();
@@ -739,55 +868,53 @@ fn worktree_icon_expansion_is_equivalent_in_config_only_cli_json() {
 }
 
 #[test]
-fn environment_values_with_literal_dollars_survive_list_preview_and_worktree_roots() {
+fn environment_values_with_literal_dollars_survive_list_preview_and_repository_icons() {
     const PROJECT: &str = "REXUE_LITERAL_PROJECT_734129";
-    const ROOT: &str = "REXUE_LITERAL_ROOT_734129";
     const REPO: &str = "REXUE_LITERAL_REPO_734129";
     const UNSET: &str = "REXUE_UNSET_LITERAL_734129";
     let fake = FakeRex::new();
     let repo = fake.dir.path().join(format!("repo-${UNSET}"));
-    let root = repo.join(".wk");
-    let project = root.join("409");
+    assert!(
+        Command::new("git")
+            .args(["init", "--quiet"])
+            .arg(&repo)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let root = repo.join("custom roots");
+    let project = root.join("feature");
     fs::create_dir_all(&project).unwrap();
     let cfg = fake.dir.path().join("literal.toml");
-    let run = |args: &[&str], project_value: &Path| {
+    let run = |args: &[&str], path: &Path| {
         Command::new(env!("CARGO_BIN_EXE_rexue"))
             .arg("--rex-bin")
             .arg(&fake.rex.bin)
             .arg("-C")
             .arg(&cfg)
             .args(args)
-            .env(PROJECT, project_value)
-            .env(ROOT, &root)
+            .env(PROJECT, path)
             .env(REPO, &repo)
             .env_remove(UNSET)
             .env("REXUE_STATE_DIR", fake.dir.path().join("literal-state"))
             .output()
             .unwrap()
     };
-    for (repo_value, dir_value) in [
-        (
-            serde_json::to_string(fake.dir.path().to_str().unwrap()).unwrap(),
-            format!("'${{{ROOT}}}'"),
-        ),
-        (format!("'${{{REPO}}}'"), "'.wk'".into()),
-    ] {
-        fs::write(&cfg,format!("[[worktree]]\nrepo='org/repo'\npath={repo_value}\nworktree_dir={dir_value}\nicon='W'\n[[session]]\nname='literal-project'\npath='${{{PROJECT}}}'\npreview_command=\"printf '%s' {{}}\"\n")).unwrap();
-        for path in [&project, &root.join("not-created")] {
-            let r = run(&["list", "--config", "--json"], path);
-            assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
-            let rows: Value = serde_json::from_slice(&r.stdout).unwrap();
-            assert_eq!(rows.as_array().unwrap().len(), 1);
-            assert_eq!(rows[0]["path"], path.to_str().unwrap());
-            assert_eq!(rows[0]["icon"], "W");
-        }
-        let r = run(&["preview", "literal-project"], &project);
+    fs::write(&cfg,format!("[[worktree]]\npath='${{{REPO}}}'\nicon='W'\n[[session]]\nname='literal-project'\npath='${{{PROJECT}}}'\npreview_command=\"printf '%s' {{}}\"\n")).unwrap();
+    for (path, icon) in [(&project, Some("W")), (&root.join("not-created"), None)] {
+        let r = run(&["list", "--config", "--json"], path);
         assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
-        assert_eq!(
-            String::from_utf8(r.stdout).unwrap(),
-            project.to_str().unwrap()
-        );
+        let rows: Value = serde_json::from_slice(&r.stdout).unwrap();
+        assert_eq!(rows.as_array().unwrap().len(), 1);
+        assert_eq!(rows[0]["path"], path.to_str().unwrap());
+        assert_eq!(rows[0]["icon"].as_str(), icon);
     }
+    let r = run(&["preview", "literal-project"], &project);
+    assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+    assert_eq!(
+        String::from_utf8(r.stdout).unwrap(),
+        project.to_str().unwrap()
+    );
     let r = run(
         &["--detach", "connect", project.to_str().unwrap(), "--json"],
         &project,

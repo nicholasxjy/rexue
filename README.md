@@ -33,9 +33,9 @@ Other tools are optional, depending on your workflow:
 | Rex | Required for live sessions, creation, preview capture, and app switching. Config-only listing can run independently. |
 | zoxide | Directory history and frecency; absent zoxide yields an empty history source. Custom frecency commands can replace it. |
 | git | Git naming/root detection, Git clone, and worktrees. |
-| gh | Authenticated GitHub issue/PR worktrees, titles, and enriched names; authenticate separately with `gh auth login`. |
+| gh | Optional GitHub title enrichment via `rename --enrich`; authenticate separately with `gh auth login`. Generic worktree management does not use gh. |
 | jj | `clone --vcs jj`; workspace naming also reads `.jj/repo` metadata without requiring a running JJ process. |
-| Browser | Opening worktree issue/PR URLs; macOS active-tab lookup also uses `osascript` and a configured browser. |
+| wt ≥ 0.81.0 | [Worktrunk](https://worktrunk.dev) manages worktree paths, configuration, hooks and lifecycle. Override its executable with `REXUE_WT` when needed. |
 | Nerd Font | Renders the source icons shown by default; use `--icons=false` or `[tui] show_icons = false` for plain text. |
 
 ## Choose the Rex app
@@ -101,9 +101,10 @@ Both pickers use system fzf for the terminal interface. Rexue keeps source colle
 | Down / Ctrl+J / Ctrl+N | Move down one row. |
 | PageUp / PageDown | Move one page. |
 | Ctrl+U / Ctrl+D | Move half a page. |
-| Ctrl+O | Session picker: toggle preview. |
-| Ctrl+X | Session picker: open a separate fzf Yes/No confirmation before killing a live session or removing a history row. Configured rows cannot be removed. |
-| Ctrl+R | Session picker: rename the highlighted live session. Worktree picker: refresh metadata. Both retain the query; errors appear in the header. |
+| Ctrl+W | Worktree picker: enter a new branch name, create its worktree with Worktrunk, then connect Rex. Esc cancels the input. |
+| Ctrl+O | Toggle preview in either picker. |
+| Ctrl+X | Confirm killing a live Rex session, removing a history row, or safely removing a Worktrunk checkout. Configured sessions cannot be removed. |
+| Ctrl+R | Session picker: rename the highlighted live session. Worktree picker: reload Worktrunk state. Both retain the query and report errors in the header. |
 | Left/Right, Home/End, Backspace/Delete | Use fzf's query editing. |
 
 The rename prompt starts with the current session name. Edit it and press Enter to save, or Esc/Ctrl+C to cancel. Empty or whitespace-only names are rejected. Configured sessions, directories and pane rows cannot be renamed here. Saving refreshes the list without connecting to the session.
@@ -112,7 +113,7 @@ The confirmation initially selects **Yes**. Enter accepts the selected choice, Y
 
 A leading `/` filters configured aliases (change `alias_filter_prefix` to customize it). Exact alias matching uses Unicode case folding. An exact alias in alias mode connects after `alias_auto_connect_delay`; outside that mode it also requires `alias_auto_connect = true`. `--no-alias-auto` disables both. A prefilled `--query` does not arm auto-connect. `#` enters index mode: filter by name, then press 1–9 to select that result directly; if `#` is the alias prefix, alias mode takes priority.
 
-The worktree picker shows numeric order, titles and colored OPEN/CLOSED/MERGED badges. It opens cached rows and refreshes metadata once in the background unless `--refresh` already requested fresh rows. Session aliases, index shortcuts, preview and removal are disabled there. Repository and path selection continue through normal worktree preparation when a row is accepted.
+The worktree picker shows branch names and actual checkout paths, including detached worktrees, in branch/path order. Ctrl+W opens a branch-name prompt, creates with Worktrunk configuration and connects the new checkout; it also works when the current search has no matches. Empty names and creation errors return to the picker with a diagnostic. Ctrl+O toggles preview, Ctrl+R reloads local Worktrunk state, and Ctrl+X offers confirmed removal with Worktrunk's normal protections. Aliases and numbered shortcuts remain session-picker features. Selecting a worktree uses its returned path to connect Rex.
 
 Existing picker CLI options and `[tui]` configuration remain available, including icons, window labels, prompt, placeholder, pointer and preview sizing. Source-group separators appear on their own line above the first item in each group; they do not add selectable entries. Preview border styles map to fzf equivalents. Fzf owns query editing, cursor appearance, clipping, layout and preview cancellation; the old native palette, precise dialog geometry and input caret behavior are no longer used. See [configuration](docs/CONFIGURATION.md#tui-and-icons) for details.
 
@@ -134,10 +135,11 @@ Every command supports `--help`. Aliases below are accepted spellings.
 | `mkdir` (`md`) | `PATH`; `-s/--switch`, `-c/--command SCRIPT`, `--json`. Creates parents then connects. |
 | `window` (`w`) `list` (`l`, `ls`) | `-t/--target SESSION` (also `--session`), `-j/--json`. |
 | `window` (`w`) `connect` (`cn`, `c`) | `[NAME]`; `-t/--target SESSION` (also `--session`), `-c/--command SCRIPT`, `-p/--path DIR`, `-b/--background`, `-s/--switch`, `--new`. |
-| `worktree` (`wt`) `connect` (`c`) | `[NUMBER]`; `-r/--repo OWNER/REPO`, `--path DIR`, `-p/--pr`, `-s/--switch`, `-b/--browser`, `--json`. |
-| `worktree` (`wt`) `list` (`l`, `ls`) | `-r/--repo OWNER/REPO`, `--path DIR`, `-j/--json`, `--refresh`. |
-| `worktree` (`wt`) `picker` (`pick`, `pk`, `p`) | `-r/--repo OWNER/REPO`, `--path DIR`, `--refresh`, `-s/--switch`, `-i/--icons`, `-p/--prompt TEXT`, `--placeholder TEXT`, `-q/--query TEXT`. |
-| `worktree` (`wt`) `browse` (`b`) | `-p/--pr`, `--print`. Uses current working directory inside a configured numbered worktree. |
+| `worktree` (`wt`) `create` | `BRANCH`; `-b/--base REF`, `--path REPO`, `--json`. Creates a branch/checkout without opening Rex. |
+| `worktree` (`wt`) `connect` (`c`) | `[BRANCH_OR_PATH]`; `--path REPO`, `--name NAME`, `--json`. Omitted target connects the current worktree. |
+| `worktree` (`wt`) `list` (`l`, `ls`) | `--path REPO`, `-j/--json`. Lists all registered checkouts, including detached ones. |
+| `worktree` (`wt`) `picker` (`pick`, `pk`, `p`) | `--path REPO`, `--refresh`, `-i/--icons`, `-p/--prompt TEXT`, `--placeholder TEXT`, `-q/--query TEXT`. |
+| `worktree` (`wt`) `remove` (`rm`, `r`) | `BRANCH_OR_PATH`; `--path REPO`, `--force`, `-D/--force-delete`, `--no-delete-branch`, `--json`. Keeps Rex sessions. |
 | `rename` | `[TARGET]`; `--enrich` or `--to NAME`. Without either, no-op. |
 | `cache refresh` | Invalidate and synchronously reload the list; see cache scope below. |
 | `completion` | `bash`, `elvish`, `fish`, `powershell`, or `zsh`; print a shell script. |
@@ -158,15 +160,15 @@ rexue preview app
 rexue preview app --watch --interval 1s
 rexue window connect editor --target app --path ~/Projects/app
 rexue clone owner/repo --cmd-dir ~/Projects
-rexue worktree connect 42 --repo owner/repo
-rexue worktree connect 43 --repo owner/repo --pr
-rexue worktree connect --browser
-rexue worktree browse --print
+rexue worktree create feature/widgets --path ~/Projects/app
+rexue worktree connect feature/widgets --path ~/Projects/app
+rexue worktree picker --path ~/Projects/app
+rexue worktree remove feature/widgets --path ~/Projects/app --no-delete-branch
 ```
 
 `preview --watch` repeatedly captures a live session, repainting only changed nonempty output; Ctrl+C stops it. Directory/config previews render once even with `--watch`. The picker's preview pane is debounced on selection changes and keeps the last displayed preview until its replacement arrives. It does not continuously watch terminal output.
 
-GitHub workflows require a configured `[[worktree]]`. Own PRs prefer a linked issue number; other PRs use detached checkouts. Metadata errors stop creation. The worktree's `create_command` is chosen for a newly created worktree, `startup_command` for an existing one; neither reruns when its Rex session already exists. Listing can retain cached titles when GitHub is unavailable. See [configuration](docs/CONFIGURATION.md) for browser and cache details.
+Worktrees use the external Worktrunk CLI. No GitHub account or `[[worktree]]` registration is needed for repository-scoped commands; use `--path` or run inside a checkout. Optional `[[worktree]]` path/icon registrations add repository worktrees to the main list and picker. Worktrunk owns directory templates, defaults, hooks and removal policy; its configuration and approval behavior remain active. Old issue/PR numbering, browser flows and rexue worktree lifecycle settings were removed; see [migration](docs/CONFIGURATION.md#worktrunk-worktrees).
 
 ## Shell completion
 

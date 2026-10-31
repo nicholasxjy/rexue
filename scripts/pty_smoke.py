@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real system-fzf acceptance in a controlling PTY; isolated Rex/GitHub fixtures."""
+"""Real system-fzf acceptance in a controlling PTY; isolated Rex/Worktrunk fixtures."""
 import argparse
 import errno
 import fcntl
@@ -325,7 +325,8 @@ else:
         # Restore only the private fake session for the following worktree case.
         (root/'killed').write_text('session:first\n')
 
-        # Private local repository directories + fake gh; no network or real Rex.
+        # Real Worktrunk/Git with an isolated user config; no network or real Rex.
+        import shutil
         repo = root / 'repo'
         repo.mkdir()
         def git(*args):
@@ -334,43 +335,120 @@ else:
         (repo/'seed').write_text('fixture\n')
         git('add', 'seed')
         git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-m', 'fixture')
-        git('worktree', 'add', '-b', 'fixture-42', str(repo/'.wk'/'42'))
-        executable(bin_dir / 'gh', '#!' + sys.executable + '\n' + '''import json,pathlib,sys
+        tree = root/'custom checkout'
+        git('worktree', 'add', '-b', 'feature/scoped', str(tree))
+        real_wt = shutil.which('wt')
+        assert real_wt, 'Worktrunk >=0.81.0 is required'
+        wt_config=root/'wt.toml'
+        wt_config.write_text('worktree-path = "../picker trees/{{ branch | sanitize }}"\npre-switch = "printf switched >> {{ repo_path }}/picker-switch-hooks"\npre-start = "printf created >> {{ repo_path }}/picker-create-hooks"\n')
+        executable(bin_dir/'wt-wrapper', '#!'+sys.executable+'\n'+'''import os,pathlib,sys
 root=pathlib.Path(__file__).parent.parent
-with (root/'gh-calls').open('a') as f:f.write('call\\n')
-if (root/'gh-fail').exists():print('offline fixture',file=sys.stderr);sys.exit(7)
-print(json.dumps({'data':{'repository':{'n42':{'title':'Scoped worktree title','state':'OPEN'},'issueOrPullRequest':{'__typename':'Issue','number':42,'title':'Scoped worktree title','body':''}}}}))
+if (root/'wt-fail').exists() and sys.argv[1:2]==['list']:
+ print('offline wt fixture',file=sys.stderr);sys.exit(7)
+os.execv('''+repr(real_wt)+''',['wt','--config','''+repr(str(wt_config))+''',*sys.argv[1:]])
 ''')
-        cfg.write_text(config + '\n[[worktree]]\nrepo="owner/repo"\npath=' + json.dumps(str(repo)) + '\nfetch=false\n')
-        env = {'PATH': str(bin_dir) + os.pathsep + os.environ['PATH']}
+        cfg.write_text(config + '\n[[worktree]]\npath=' + json.dumps(str(repo)) + '\n')
+        env = {'PATH': str(bin_dir) + os.pathsep + os.environ['PATH'], 'REXUE_WT':str(bin_dir/'wt-wrapper')}
         s = Session(binary, cfg, root, arguments=[*base, 'wt', 'pk', '--path', str(repo)], env_extra=env)
         try:
-            s.expect('#42')
-            s.expect('Scoped worktree title')
-            s.until(lambda: (root/'gh-calls').exists(), 'automatic metadata refresh did not run')
-            initial_calls = len((root / 'gh-calls').read_text().splitlines())
-            (root / 'gh-fail').touch()
+            s.expect('feature/scoped')
+            s.send(b'custom checkout')
+            s.expect('custom checkout')
+            s.expect('1/1')
+            (root/'wt-fail').touch()
             s.send(b'\x12')
             s.expect('Refresh failed:')
-            assert len((root / 'gh-calls').read_text().splitlines()) > initial_calls
             s.send(b'zzzero-worktree')
             s.expect('zzzero-worktree')
             s.send(b'\x1b')
-            checks.append({'case': 'worktree-alias-path-auto-refresh-manual-error-filter-cancel', **s.finish()})
+            checks.append({'case': 'worktree-generic-branch-path-refresh-error-filter-cancel', **s.finish()})
         finally:
             s.close()
-
-        (root/'gh-fail').unlink()
+        (root/'wt-fail').unlink()
         trap = root/'alias-trap'; trap.mkdir()
-        cfg.write_text(cfg.read_text()+'\n[[session]]\nname="alias-trap"\npath='+json.dumps(str(trap))+'\nalias='+json.dumps(str(repo/'.wk'/'42'))+'\n')
-        (root/'fixture.json').write_text(json.dumps({'name': name, 'path': str(repo/'.wk'/'42')}))
-        s = Session(binary, cfg, root, arguments=[*base, 'worktree', 'picker', '--repo', 'owner/repo', '--refresh'], env_extra=env)
+        cfg.write_text(cfg.read_text()+'\n[[session]]\nname="alias-trap"\npath='+json.dumps(str(trap))+'\nalias='+json.dumps(str(tree))+'\n')
+        (root/'fixture.json').write_text(json.dumps({'name': name, 'path': str(tree)}))
+        s = Session(binary, cfg, root, arguments=[*base, 'worktree', 'picker', '--path', str(repo), '--query=feature/scoped', '--refresh'], env_extra=env)
         try:
-            s.expect('Scoped worktree title')
+            s.expect('feature/scoped')
             s.send(b'\r')
             report = s.finish()
             assert 'session:second' in s.text(), s.text()[-2000:]
-            checks.append({'case': 'worktree-repo-selected-prepared-and-connected', **report})
+            checks.append({'case': 'worktree-selected-path-connects-without-alias-hijack', **report})
+        finally:
+            s.close()
+        s = Session(binary, cfg, root, arguments=[*base, 'picker', '--query=feature/scoped'], env_extra=env)
+        try:
+            s.expect('feature/scoped'); s.send(b'\r')
+            report = s.finish()
+            assert 'session:second' in s.text(), s.text()[-2000:]
+            checks.append({'case':'global-worktree-source-connects-actual-checkout',**report})
+        finally:
+            s.close()
+        def open_branch_prompt(session):
+            offset = len(session.capture)
+            session.send(b'\x17')
+            session.until(lambda: b'Branch >' in session.capture[offset:], 'Ctrl-W branch prompt missing')
+        def created_calls():
+            return [json.loads(line) for line in (root/'rex-calls.jsonl').read_text().splitlines() if json.loads(line)[0]=='new']
+        before_create = len(created_calls())
+        s = Session(binary, cfg, root, arguments=[*base, 'wt', 'pk', '--path', str(repo), '--query=zz-no-current'], env_extra=env)
+        try:
+            s.expect('0/0'); open_branch_prompt(s)
+            s.send(b'feature/canceled')
+            offset = len(s.capture); s.send(b'\x1b')
+            s.until(lambda: b'Enter connect' in s.capture[offset:], 'picker did not reopen after canceling create')
+            s.expect('zz-no-current'); s.send(b'\x1b')
+            checks.append({'case':'worktree-create-cancel-from-empty-results',**s.finish()})
+            assert len(created_calls()) == before_create
+            assert subprocess.run(['git','-C',str(repo),'show-ref','--verify','refs/heads/feature/canceled'],capture_output=True).returncode != 0
+        finally:
+            s.close()
+        s = Session(binary, cfg, root, arguments=[*base, 'wt', 'pk', '--path', str(repo)], env_extra=env)
+        try:
+            s.expect('feature/scoped'); open_branch_prompt(s); s.send(b'\r')
+            s.expect('Branch name must not be empty')
+            open_branch_prompt(s); s.send(b'main\r')
+            s.expect('Create failed:'); s.send(b'\x1b')
+            checks.append({'case':'worktree-create-empty-and-existing-branch-errors-recover',**s.finish()})
+            assert len(created_calls()) == before_create
+        finally:
+            s.close()
+        (repo/'picker-switch-hooks').write_text('')
+        (repo/'picker-create-hooks').write_text('')
+        s = Session(binary, cfg, root, arguments=[*base, 'wt', 'pk', '--path', str(repo), '--query=zz-no-current'], env_extra=env)
+        try:
+            s.expect('0/0'); open_branch_prompt(s)
+            s.send(b'feature/picker-created\r')
+            report = s.finish()
+            assert 'session:new' in s.text(),s.text()[-2000:]
+            new_tree=root/'picker trees/feature-picker-created'
+            assert (new_tree/'.git').is_file()
+            branch=subprocess.check_output(['git','-C',str(new_tree),'symbolic-ref','--short','HEAD'],text=True).strip()
+            assert branch=='feature/picker-created'
+            calls=created_calls()[before_create:]
+            assert len(calls)==1,calls
+            assert pathlib.Path(calls[0][calls[0].index('-c')+1]).resolve()==new_tree.resolve(),calls
+            assert (repo/'picker-create-hooks').read_text()=='created'
+            assert (repo/'picker-switch-hooks').read_text()=='switched'
+            checks.append({'case':'worktree-create-from-empty-results-configured-path-hooks-once-and-connect',**report})
+        finally:
+            s.close()
+        s = Session(binary, cfg, root, arguments=[*base, 'wt', 'pk', '--path', str(repo), '--query=feature/scoped'], env_extra=env)
+        try:
+            s.expect('feature/scoped'); s.send(b'\x18')
+            s.expect('Remove this worktree using Worktrunk?')
+            canceled_at = len(s.capture)
+            s.send(b'n')
+            s.until(lambda: b'Enter connect' in s.capture[canceled_at:], 'worktree picker did not reopen after cancel')
+            assert tree.is_dir()
+            confirm_at = len(s.capture)
+            s.send(b'\x18')
+            s.until(lambda: b'Confirm' in s.capture[confirm_at:], 'second removal confirmation missing')
+            s.send(b'y')
+            s.until(lambda: not tree.exists(), 'worktree confirmation did not remove checkout')
+            s.expect('0/0'); s.send(b'\x1b')
+            checks.append({'case':'worktree-confirm-cancel-then-safe-remove-and-refresh',**s.finish()})
         finally:
             s.close()
 
