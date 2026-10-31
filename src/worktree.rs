@@ -100,7 +100,10 @@ pub struct Worktrees<'a> {
 }
 impl<'a> Worktrees<'a> {
     pub fn new(config: &'a Config) -> Self {
-        let cache = dirs::cache_dir().unwrap_or_else(std::env::temp_dir);
+        let cache = std::env::var_os("XDG_CACHE_HOME")
+            .map(PathBuf::from)
+            .or_else(dirs::cache_dir)
+            .unwrap_or_else(std::env::temp_dir);
         Self {
             config,
             binaries: Binaries::default(),

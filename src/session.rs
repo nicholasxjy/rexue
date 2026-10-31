@@ -412,7 +412,67 @@ impl Manager {
         bail!("no session, configuration, or directory matches {target:?}")
     }
     pub fn connect(&self, target: &str, opts: &ConnectOptions) -> Result<Connection> {
-        // Preflight client/capability before creating anything.
+        self.connect_resolved(opts, || {
+            let rooted = if opts.root {
+                connect_root_target(target)
+            } else {
+                None
+            };
+            let rooted = rooted
+                .as_ref()
+                .map(|path| path.to_string_lossy().into_owned());
+            self.resolve_entry(rooted.as_deref().unwrap_or(target))
+        })
+    }
+    /// Connect a resolved picker row without treating its name as decorated text.
+    /// Root conversion belongs to text-target resolution, before calling this API.
+    pub fn connect_entry(&self, entry: Entry, opts: &ConnectOptions) -> Result<Connection> {
+        self.connect_resolved(opts, || {
+            // Alias-only rows can be synthesized outside the fetched sources.
+            // Complete their typed config identity by exact key, never by the
+            // human-target parser that strips decoration or expands aliases.
+            if entry.source == Source::Config
+                && entry.session_id.is_none()
+                && entry.path.as_os_str().is_empty()
+            {
+                return self
+                    .config
+                    .entries()?
+                    .into_iter()
+                    .find(|configured| configured.name == entry.name)
+                    .context("configured picker target no longer exists");
+            }
+            Ok(entry)
+        })
+    }
+    /// Connect a known directory without interpreting it as an alias or label.
+    pub fn connect_path(&self, path: &Path, opts: &ConnectOptions) -> Result<Connection> {
+        self.connect_resolved(opts, || {
+            if let Some(entry) = self
+                .config
+                .entries()?
+                .into_iter()
+                .find(|e| same_path(&e.path, path))
+            {
+                return Ok(entry);
+            }
+            if !path.is_dir() {
+                bail!("session directory does not exist: {}", path.display());
+            }
+            Ok(Entry::new(
+                self.name(path)?,
+                normalize(path),
+                Source::Directory,
+            ))
+        })
+    }
+
+    fn connect_resolved(
+        &self,
+        opts: &ConnectOptions,
+        resolve: impl FnOnce() -> Result<Entry>,
+    ) -> Result<Connection> {
+        // Preflight and lock both text and resolved-entry workflows identically.
         let client = if opts.detach {
             None
         } else {
@@ -421,15 +481,7 @@ impl Manager {
             Some(c)
         };
         let _lock = self.lock()?;
-        let rooted = if opts.root {
-            connect_root_target(target)
-        } else {
-            None
-        };
-        let rooted = rooted
-            .as_ref()
-            .map(|path| path.to_string_lossy().into_owned());
-        let mut entry = self.resolve_entry(rooted.as_deref().unwrap_or(target))?;
+        let mut entry = resolve()?;
         if entry
             .session_id
             .as_deref()
@@ -501,6 +553,17 @@ impl Manager {
                 .iter()
                 .find(|e| e.session_id.as_deref() == Some(id))
         });
+        if entry
+            .session_id
+            .as_deref()
+            .is_some_and(|id| id.starts_with("session:"))
+            && exact.is_none()
+        {
+            bail!(
+                "session {} no longer exists",
+                entry.session_id.as_deref().unwrap()
+            );
+        }
         let same: Vec<_> = existing
             .iter()
             .filter(|e| !path.as_os_str().is_empty() && same_path(&e.path, &path))

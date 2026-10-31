@@ -1,5 +1,7 @@
 # Sesh → Rex parity contract
 
+**Picker migration:** this pinned inventory records the original Sesh/native-TUI target. Both current interactive pickers use system fzf. Native cursor, layout and highlight assertions below are historical; current behavior is described in [README](../README.md#fzf-picker-keys), [configuration](CONFIGURATION.md#tui-and-icons) and [fzf verification](FZF_VERIFICATION.md).
+
 Pinned upstream inventory for goal `mvv20p1t-tgkq2f`. Source inspection establishes the reference; final implementation evidence is in [VERIFICATION.md](VERIFICATION.md) and native mappings in [DECISIONS.md](DECISIONS.md).
 
 ## Evidence and boundary

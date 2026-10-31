@@ -1,5 +1,7 @@
 # Verification record
 
+**Historical native-TUI record.** The fzf migration supersedes the native picker implementation and its screen/cursor assertions below. See [FZF_VERIFICATION.md](FZF_VERIFICATION.md) for the current picker checks; these archived receipts remain evidence for the unchanged backend workflows.
+
 The project and executable are now named `rexue`. This historical record and its archived receipts retain the former `rex-bar` name. To rerun the recorded commands, use the `rexue` executable and `REXUE_*` environment variables in place of `rex-bar` and `REX_BAR_*`.
 
 Verified on **2026-10-30–31**, macOS, Rust `1.99.1`, Rex server `0.0.1793359647-g966596`, and the connected `home-mac` app. Sesh reference: `9f9a7ad682d3c1a5917af2ff66fba7d0f4a9456a`. See [native decisions](DECISIONS.md) and [the pinned inventory](PARITY.md).

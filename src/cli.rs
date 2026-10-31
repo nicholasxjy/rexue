@@ -2,9 +2,8 @@ use crate::{
     backend::Rex,
     config::{Config, expand_path},
     model::{Entry, Source},
-    process,
+    picker, process,
     session::{ConnectOptions, ListOptions, Manager},
-    tui,
     worktree::{Selection, Worktrees},
 };
 use anyhow::{Context, Result, bail};
@@ -19,8 +18,8 @@ use std::{
 #[derive(Debug, Parser)]
 #[command(
     version,
-    about = "A native terminal session picker for Rex",
-    long_about = "Manage Rex sessions with a native TUI inspired by sesh. With no command, opens the picker."
+    about = "An fzf session picker for Rex",
+    long_about = "Manage Rex sessions with the system fzf picker. With no command, opens the picker."
 )]
 pub struct Cli {
     /// Config file (source filters use --config/-c on list and picker).
@@ -42,13 +41,19 @@ pub struct Cli {
 }
 #[derive(Debug, Subcommand)]
 pub enum Commands {
+    #[command(name = "__picker", hide = true)]
+    PickerHelper {
+        socket: PathBuf,
+        action: String,
+        id: Option<String>,
+    },
     /// List live sessions, configured projects and frequent directories.
     #[command(alias = "l")]
     List(ListArgs),
     /// Create or reuse a project session and display it in Rex.
     #[command(alias = "cn")]
     Connect(ConnectArgs),
-    /// Search and select sessions in the native terminal picker.
+    /// Search and select sessions using system fzf.
     #[command(aliases=["pick","pk"])]
     Picker(PickerArgs),
     /// Print the containing Git/JJ workspace session name.
@@ -387,6 +392,9 @@ pub enum WorktreeCommand {
     },
 }
 pub fn run(cli: Cli) -> Result<()> {
+    if let Some(Commands::PickerHelper { socket, action, id }) = &cli.command {
+        return picker::helper(socket, action, id.as_deref());
+    }
     if let Some(Commands::Completion { shell }) = &cli.command {
         let mut script = Vec::new();
         clap_complete::generate(*shell, &mut Cli::command(), "rexue", &mut script);
@@ -406,7 +414,7 @@ pub fn run(cli: Cli) -> Result<()> {
         .command
         .unwrap_or(Commands::Picker(PickerArgs::default()))
     {
-        Commands::Completion { .. } => unreachable!(),
+        Commands::Completion { .. } | Commands::PickerHelper { .. } => unreachable!(),
         Commands::Doctor => {
             let data = serde_json::json!({"context":manager.rex.context()?,"clients":manager.rex.clients()?,"state_dir":manager.state_dir});
             out(&serde_json::to_string_pretty(&data)?)?;
@@ -532,15 +540,15 @@ fn pick_session(manager: Manager, args: PickerArgs, detach: bool) -> Result<()> 
     let fetch = manager.clone();
     let preview = manager.clone();
     let remove = manager.clone();
-    let chosen = tui::pick(
+    let chosen = picker::pick(
         move || fetch.list(&opts),
         move |e| preview.preview(e),
         move |e| remove.remove(e),
         options,
     )?;
     if let Some(e) = chosen {
-        let c = manager.connect(
-            e.target(),
+        let c = manager.connect_entry(
+            e,
             &ConnectOptions {
                 detach,
                 ..Default::default()
@@ -550,7 +558,7 @@ fn pick_session(manager: Manager, args: PickerArgs, detach: bool) -> Result<()> 
     }
     Ok(())
 }
-fn picker_options(cfg: &Config, args: &PickerArgs) -> Result<tui::PickerOptions> {
+fn picker_options(cfg: &Config, args: &PickerArgs) -> Result<picker::PickerOptions> {
     picker_options_for(cfg, args, false)
 }
 
@@ -558,7 +566,7 @@ fn picker_options_for(
     cfg: &Config,
     args: &PickerArgs,
     worktree: bool,
-) -> Result<tui::PickerOptions> {
+) -> Result<picker::PickerOptions> {
     let entries = cfg.entries()?;
     let aliases = entries
         .iter()
@@ -566,7 +574,7 @@ fn picker_options_for(
             e.alias.as_ref().map(|a| {
                 (
                     crate::model::alias_key(a),
-                    tui::Alias {
+                    picker::Alias {
                         alias: a.clone(),
                         target: e.name.clone(),
                         auto_connect: e.alias_auto_connect,
@@ -608,7 +616,7 @@ fn picker_options_for(
         .max()
         .unwrap_or(1)
         .max(1);
-    Ok(tui::PickerOptions {
+    Ok(picker::PickerOptions {
         show_icons: args.icons.unwrap_or(cfg.tui.show_icons),
         show_windows: cfg.tui.show_windows,
         separator_aware: args.separator_aware.unwrap_or(cfg.separator_aware),
@@ -762,7 +770,7 @@ fn source_color(source: Source) -> u8 {
         Source::Worktree => 36,
     }
 }
-fn ansi_color(color: &str) -> Option<u8> {
+pub(crate) fn ansi_color(color: &str) -> Option<u8> {
     Some(match color {
         "black" => 30,
         "red" => 31,
@@ -1087,7 +1095,7 @@ fn worktree_command(manager: Manager, command: WorktreeCommand, detach: bool) ->
             let selected_repo = selection.clone();
             let preview = manager.clone();
             let first = std::cell::Cell::new(true);
-            let chosen = tui::pick(
+            let chosen = picker::pick(
                 move || {
                     let wt = Worktrees::new(&fetch_cfg);
                     let initial = first.replace(false);
@@ -1110,8 +1118,8 @@ fn worktree_command(manager: Manager, command: WorktreeCommand, detach: bool) ->
                     .and_then(|n| n.parse::<u64>().ok())
                     .context("selected worktree has no issue number")?;
                 let prepared = worktrees.prepare(&selected_repo, number, false)?;
-                let c = manager.connect(
-                    &prepared.path.display().to_string(),
+                let c = manager.connect_path(
+                    &prepared.path,
                     &ConnectOptions {
                         detach,
                         command: prepared.startup_command,

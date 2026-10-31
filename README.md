@@ -1,12 +1,12 @@
 # rexue
 
-A native terminal **session picker for [Rex](https://www.superlogical.com/rex)**, inspired by [Sesh](https://github.com/joshmedeski/sesh). Find running sessions, named projects, and frequently visited directories in one fuzzy list; select a project to create or reuse its Rex session. The picker runs in your terminal and needs no fzf or external launcher.
+An **fzf session picker for [Rex](https://www.superlogical.com/rex)**, inspired by [Sesh](https://github.com/joshmedeski/sesh). Find running sessions, named projects, and frequently visited directories in one fuzzy list; select a project to create or reuse its Rex session. Both session and worktree pickers directly use the system `fzf` executable.
 
-**macOS is the current verified platform.** The Rust port includes native session/worktree pickers and the Rex workflows described below. See [verification evidence](docs/VERIFICATION.md), [native mapping decisions](docs/DECISIONS.md), and the [pinned upstream parity inventory](docs/PARITY.md) for the exact scope and platform limits.
+**macOS is the current verified platform.** The Rust implementation includes fzf session/worktree pickers and the Rex workflows described below. See [verification evidence](docs/VERIFICATION.md), [mapping decisions](docs/DECISIONS.md), and the [pinned upstream parity inventory](docs/PARITY.md) for the exact scope and platform limits.
 
 ## Install and start
 
-Install Rust **1.88 or newer**, a C compiler (provided by Xcode Command Line Tools on macOS), and Rex; make the `rex` CLI available on `PATH`. The C compiler builds the bundled shell parser; running rexue requires no Go or JavaScript runtime. Open Rex before using the picker: rexue deliberately does not autostart its server.
+Install Rust **1.88 or newer**, a C compiler (provided by Xcode Command Line Tools on macOS), **fzf 0.63 or newer** (`brew install fzf` on macOS), and Rex; make the `rex` CLI available on `PATH`. The C compiler builds the bundled shell parser; running rexue requires no Go or JavaScript runtime. Open Rex before using the picker: rexue deliberately does not autostart its server.
 
 From this checkout:
 
@@ -23,19 +23,20 @@ cargo run --release
 cargo run --release -- picker --preview
 ```
 
-**No arguments opens the native picker.** Type to filter, use Up/Down to select, and press Enter to connect. Esc cancels. With one connected Rex app, selection switches that app to the chosen session.
+**No arguments opens the fzf session picker.** Type to filter, use Up/Down to select, and press Enter to connect. Esc cancels. With one connected Rex app, selection switches that app to the chosen session.
 
 Other tools are optional, depending on your workflow:
 
 | Tool | Used for |
 | --- | --- |
+| fzf ≥ 0.63 | Required for both interactive pickers; `list`, `connect` and other noninteractive commands work independently. |
 | Rex | Required for live sessions, creation, preview capture, and app switching. Config-only listing can run independently. |
 | zoxide | Directory history and frecency; absent zoxide yields an empty history source. Custom frecency commands can replace it. |
 | git | Git naming/root detection, Git clone, and worktrees. |
 | gh | Authenticated GitHub issue/PR worktrees, titles, and enriched names; authenticate separately with `gh auth login`. |
 | jj | `clone --vcs jj`; workspace naming also reads `.jj/repo` metadata without requiring a running JJ process. |
 | Browser | Opening worktree issue/PR URLs; macOS active-tab lookup also uses `osascript` and a configured browser. |
-| Nerd Font | Optional source glyphs and alias chip caps; normal text mode works without one. |
+| Nerd Font | Optional source glyphs; normal text mode works without one. |
 
 ## Choose the Rex app
 
@@ -88,31 +89,32 @@ rexue picker --rex --hide-attached --no-cache
 
 Pane rows also round-trip through external pickers: `rexue list --panes` names can be passed directly to `rexue preview NAME` or `rexue connect NAME`. Combine `--panes` with `--config`, `--rex`, or `--zoxide`; sorting and blacklist rules apply to the combined list. Duplicate pane names require the full `block:` ID from JSON.
 
-## Native picker keys
+## fzf picker keys
 
-These are the current native bindings. The [parity notes](docs/PARITY.md) record upstream Sesh's exact bindings; native mapping differences are listed in [DECISIONS](docs/DECISIONS.md).
+Both pickers use system fzf for the terminal interface. Rexue keeps source collection, aliases and connection logic in Rust; fuzzy ranking uses `fzf --filter` with case-insensitive matching and stable ties. The visible finder receives the ranked results through `reload`, so it does not add a second filtering pass or draw fuzzy-match highlights. Initial source collection finishes before fzf opens. No native TUI fallback is bundled.
 
 | Key | Action |
 | --- | --- |
-| Enter | Connect highlighted row; ignored during loading; empty results exit. |
-| Esc / Ctrl+C | Cancel. |
+| Enter | Connect the highlighted row. |
+| Esc / Ctrl+C | Cancel without connecting. |
 | Up / Ctrl+K / Ctrl+P | Move up one row. |
 | Down / Ctrl+J / Ctrl+N | Move down one row. |
-| PageUp / PageDown | Move one visible page up/down. |
-| Ctrl+U / Ctrl+D | Move half the visible rows up/down; preserve the filter. |
-| Ctrl+O | Session picker: toggle preview; hidden in terminals narrower than the configured minimum. |
-| Ctrl+R | Worktree picker: reload entries; inert during an active refresh. |
-| Ctrl+X | Session picker: confirm killing a live session or removing a zoxide entry. Configured rows cannot be removed here. |
-| Left/Ctrl+B, Right/Ctrl+F; Home/Ctrl+A; End/Ctrl+E | Edit query caret position. |
-| Backspace / Delete | Delete previous/next character. |
+| PageUp / PageDown | Move one page. |
+| Ctrl+U / Ctrl+D | Move half a page. |
+| Ctrl+O | Session picker: toggle preview. |
+| Ctrl+X | Session picker: open a separate fzf Yes/No confirmation before killing a live session or removing a history row. Configured rows cannot be removed. |
+| Ctrl+R | Worktree picker: refresh metadata, retaining the query. Errors retain the previous rows and appear in the header. |
+| Left/Right, Home/End, Backspace/Delete | Use fzf's query editing. |
 
-Movement clamps at the ends. Tab does not navigate list rows. In the removal dialog, **Yes is selected initially**: Enter applies it, Y/y confirms, N/n/q/Esc cancels; Left/Right/Tab/Shift+Tab/h/l toggles the button. Ctrl+C exits the picker.
+The confirmation initially selects **Yes**. Enter accepts the selected choice, Y confirms, and N/q/Esc cancels. Up/Down, Left/Right and Tab/Shift+Tab move between choices. Canceling confirmation returns to the picker; deletion refreshes the list. A refreshed/reopened picker retains its query; cursor position and preview toggles return to their configured defaults.
 
-A leading `/` filters aliases (configurable with `alias_filter_prefix`); `#` enters index mode unless used as the alias prefix. Exact aliases match case-insensitively. Normal-mode timed auto-connect requires `alias_auto_connect = true`; an exact alias in alias mode auto-connects after the configured delay regardless of that opt-in. `--no-alias-auto` disables this. A prefilled `--query` does not trigger auto-connect by itself.
+A leading `/` filters configured aliases (change `alias_filter_prefix` to customize it). Exact alias matching uses Unicode case folding. An exact alias in alias mode connects after `alias_auto_connect_delay`; outside that mode it also requires `alias_auto_connect = true`. `--no-alias-auto` disables both. A prefilled `--query` does not arm auto-connect. `#` enters index mode: filter by name, then press 1–9 to select that result directly; if `#` is the alias prefix, alias mode takes priority.
 
-The worktree picker uses a full-width number/state/title layout, with numeric ordering, red fuzzy-match highlights, and OPEN/CLOSED/MERGED badges. It supports Ctrl+R refresh; session aliases, index mode, preview, and removal are disabled. Remaining refresh and editing differences are tracked in [DECISIONS](docs/DECISIONS.md).
+The worktree picker shows numeric order, titles and colored OPEN/CLOSED/MERGED badges. It opens cached rows and refreshes metadata once in the background unless `--refresh` already requested fresh rows. Session aliases, index shortcuts, preview and removal are disabled there. Repository and path selection continue through normal worktree preparation when a row is accepted.
 
-Enable icons with `picker --icons`, `list --icons`, or `[tui] show_icons = true`. Select a Nerd Font in Rex if glyphs appear as boxes; leave icons off for ASCII alias chips. `list --no-color` removes ANSI color while preserving enabled glyphs. TUI settings include window labels, prompt, placeholder, pointer, source glyphs, group separators, and preview sizing; see [configuration](docs/CONFIGURATION.md).
+Existing picker CLI options and `[tui]` configuration remain available, including icons, window labels, prompt, placeholder, pointer and preview sizing. Source-group separators decorate the first row of each group. Preview border styles map to fzf equivalents. Fzf owns query editing, cursor appearance, clipping, layout and preview cancellation; the old native palette, precise dialog geometry and input caret behavior are no longer used. See [configuration](docs/CONFIGURATION.md#tui-and-icons) for details.
+
+Rexue clears `FZF_DEFAULT_OPTS`, `FZF_DEFAULT_OPTS_FILE` and `FZF_DEFAULT_COMMAND` for its child processes so personal fzf defaults cannot change the selection protocol or run unexpected bindings. It creates a private temporary callback socket and removes it on exit. Display text is kept separate from row IDs, so duplicate names, ANSI decoration, spaces and shell punctuation do not change which target is selected. Missing/old fzf and abnormal exit statuses are reported explicitly.
 
 ## Command reference
 

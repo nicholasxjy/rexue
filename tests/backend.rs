@@ -158,6 +158,160 @@ fn client(id: &str, label: &str, kind: &str, connection: &str) -> Value {
 }
 
 #[test]
+fn picker_entry_connect_preserves_literal_names_and_paths() {
+    for name in [
+        "📁 chosen",
+        " chosen",
+        " chosen ",
+        "session:chosen",
+        "block:chosen",
+    ] {
+        let fake = FakeRex::new();
+        let wanted = fake.dir.path().join("wanted");
+        let wrong = fake.dir.path().join("wrong");
+        fs::create_dir(&wanted).unwrap();
+        fs::create_dir(&wrong).unwrap();
+        let mut config = Config::default();
+        config.frecency.add_command = Some("/usr/bin/true".into());
+        config.session = vec![
+            SessionConfig {
+                name: name.into(),
+                path: wanted.display().to_string(),
+                ..Default::default()
+            },
+            SessionConfig {
+                name: "chosen".into(),
+                path: wrong.display().to_string(),
+                ..Default::default()
+            },
+        ];
+        let selected = config
+            .entries()
+            .unwrap()
+            .into_iter()
+            .find(|e| e.name == name)
+            .unwrap();
+        let connection = fake
+            .manager(config)
+            .connect_entry(
+                selected,
+                &ConnectOptions {
+                    detach: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(connection.name, name);
+        assert_eq!(connection.path, wanted.canonicalize().unwrap());
+        let calls = fake.calls();
+        let creation = calls.iter().find(|a| a.iter().any(|v| v == "new")).unwrap();
+        let at = creation.iter().position(|v| v == "new").unwrap();
+        assert_eq!(creation[at + 1], name);
+        let cwd = creation.iter().position(|v| v == "-c").unwrap();
+        assert_eq!(
+            Path::new(&creation[cwd + 1]),
+            wanted.canonicalize().unwrap()
+        );
+    }
+}
+
+#[test]
+fn resolved_worktree_path_does_not_expand_a_colliding_alias() {
+    let fake = FakeRex::new();
+    let wanted = fake.dir.path().join("wanted");
+    let wrong = fake.dir.path().join("wrong");
+    fs::create_dir(&wanted).unwrap();
+    fs::create_dir(&wrong).unwrap();
+    let mut config = Config::default();
+    config.frecency.add_command = Some("/usr/bin/true".into());
+    config.session = vec![
+        SessionConfig {
+            name: "wanted".into(),
+            path: wanted.display().to_string(),
+            ..Default::default()
+        },
+        SessionConfig {
+            name: "wrong".into(),
+            path: wrong.display().to_string(),
+            alias: Some(wanted.display().to_string()),
+            ..Default::default()
+        },
+    ];
+    let connection = fake
+        .manager(config)
+        .connect_path(
+            &wanted,
+            &ConnectOptions {
+                detach: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(connection.name, "wanted");
+    assert_eq!(connection.path, wanted.canonicalize().unwrap());
+    let calls = fake.calls();
+    let creation = calls.iter().find(|a| a.iter().any(|v| v == "new")).unwrap();
+    let at = creation.iter().position(|v| v == "new").unwrap();
+    assert_eq!(creation[at + 1], "wanted");
+}
+
+#[test]
+fn synthesized_config_alias_keeps_its_exact_name_and_directory() {
+    let fake = FakeRex::new();
+    let wanted = fake.dir.path().join("wanted");
+    let wrong = fake.dir.path().join("wrong");
+    fs::create_dir(&wanted).unwrap();
+    fs::create_dir(&wrong).unwrap();
+    let mut config = Config::default();
+    config.frecency.add_command = Some("/usr/bin/true".into());
+    config.session = vec![
+        SessionConfig {
+            name: "📁 chosen".into(),
+            path: wanted.display().to_string(),
+            alias: Some("hidden".into()),
+            ..Default::default()
+        },
+        SessionConfig {
+            name: "chosen".into(),
+            path: wrong.display().to_string(),
+            ..Default::default()
+        },
+    ];
+    let alias_row = rexue::model::Entry::new("📁 chosen", "", Source::Config);
+    let connection = fake
+        .manager(config)
+        .connect_entry(
+            alias_row,
+            &ConnectOptions {
+                detach: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(connection.name, "📁 chosen");
+    assert_eq!(connection.path, wanted.canonicalize().unwrap());
+}
+
+#[test]
+fn resolved_live_entry_does_not_create_when_id_disappeared() {
+    let fake = FakeRex::new();
+    let mut selected = rexue::model::Entry::new("project", fake.dir.path(), Source::Rex);
+    selected.session_id = Some("session:gone".into());
+    let error = fake
+        .manager(Config::default())
+        .connect_entry(
+            selected,
+            &ConnectOptions {
+                detach: true,
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("session:gone no longer exists"));
+    assert!(fake.calls().iter().all(|a| !a.iter().any(|v| v == "new")));
+}
+
+#[test]
 fn connect_root_preserves_plain_directories_with_and_without_git() {
     for no_git in [false, true] {
         let fake = FakeRex::new();

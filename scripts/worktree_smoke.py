@@ -4,16 +4,14 @@ import argparse,json,os,pathlib,subprocess,tempfile
 from pty_smoke import Session
 
 def worktree_cursor_probe(binary,cfg,root,env):
-    # --refresh forces the one initial fetch and disables a follow-up worker,
-    # so the private repository/cache cannot be recreated after cleanup.
     arguments=['--rex-bin','/usr/bin/false','--detach','-C',str(cfg),'worktree','picker','--repo','joshmedeski/sesh','--refresh']
-    session=Session(binary,cfg,root,arguments=arguments,env_extra=env,virtual_cursor=True)
+    session=Session(binary,cfg,root,arguments=arguments,env_extra=env)
     try:
-        grid=session.grid;session.until(lambda:'409' in grid.text() and grid.reverse_cells[0][4] and not grid.cursor_visible,'worktree virtual cursor did not appear',timeout=8);visible=grid.receipt()
-        session.until(lambda:not grid.reverse_cells[0][4] and not grid.cursor_visible,'worktree virtual cursor did not blink off');hidden=grid.receipt()
-        query='zzzero-match-734129';session.send(query.encode());session.until(lambda:query in grid.lines()[0] and '409' not in '\n'.join(grid.lines()[2:]),'worktree unmatched filter did not repaint');assert 'No worktrees found' not in grid.text(),'unmatched filter was misreported as an empty catalog';unmatched=grid.receipt()
-        session.send(b'\x1b');report=session.finish()
-        return {'virtual_cursor_visible':visible,'virtual_cursor_hidden':hidden,'unmatched_filter':unmatched,**report}
+        session.expect('#409')
+        query='zzzero-match-734129';session.send(query.encode());session.expect(query)
+        session.expect('0/0')
+        session.send(b'\x1b')
+        return {'finder':'system fzf','unmatched_query':query,**session.finish()}
     finally:session.close()
 
 def main():
@@ -57,7 +55,7 @@ def main():
             url=run([*base,'worktree','browse','--print'],cwd=path,env=env).strip();assert url=='https://github.com/joshmedeski/sesh/issues/409',url
             cached=json.loads(bar('worktree','list','--repo','joshmedeski/sesh','--json'));assert cached==rows
             cursor=worktree_cursor_probe(binary,cfg,root,env)
-            print(json.dumps({'checks':['local-repository-connect','local-git-clone-connect','git-root-name','plain-directory-root-name','subdirectory-root-name-substitution','connect-root-plain-create-and-reuse','connect-root-git-child-reuses-root','real-github-issue-metadata','local-git-worktree-create','create-command-exclusive','existing-session-reuse','title-state-refresh-and-cache','worktree-icon','browse-print-url','native-worktree-virtual-cursor-and-unmatched-filter'],'row':row,'url':url,'worktree_cursor':cursor},ensure_ascii=False,indent=2))
+            print(json.dumps({'checks':['local-repository-connect','local-git-clone-connect','git-root-name','plain-directory-root-name','subdirectory-root-name-substitution','connect-root-plain-create-and-reuse','connect-root-git-child-reuses-root','real-github-issue-metadata','local-git-worktree-create','create-command-exclusive','existing-session-reuse','title-state-refresh-and-cache','worktree-icon','browse-print-url','fzf-worktree-filter-and-cancel'],'row':row,'url':url,'worktree_cursor':cursor},ensure_ascii=False,indent=2))
         finally:
             for sid in sessions:
                 try:run(['rex','kill',sid])
