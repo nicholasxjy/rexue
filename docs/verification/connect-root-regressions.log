@@ -1,0 +1,31 @@
+# Public connect --root behavior, optional git, named/pane identities and query fallback
+$ cargo fmt --all && cargo test --test backend connect_root -- --nocapture && cargo test --test backend empty_frecency -- --nocapture && cargo test --test backend pane_selector_names_roundtrip_and_union_obeys_blacklist -- --exact
+exit_status=0
+   Compiling rex-bar v0.1.0 (/Users/nick/Projects/rex-bar)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.59s
+     Running tests/backend.rs (target/debug/deps/backend-e67c71da8804a389)
+
+running 3 tests
+test connect_root_keeps_config_alias_and_exact_live_identity ... ok
+test connect_root_preserves_plain_directories_with_and_without_git ... ok
+test connect_root_detects_git_jj_and_bare_before_selecting_configuration ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 33 filtered out; finished in 1.30s
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running tests/backend.rs (target/debug/deps/backend-e67c71da8804a389)
+
+running 2 tests
+test empty_frecency_commands_use_all_four_zoxide_defaults ... ok
+test empty_frecency_defaults_allow_missing_optional_zoxide ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 34 filtered out; finished in 1.46s
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running tests/backend.rs (target/debug/deps/backend-e67c71da8804a389)
+
+running 1 test
+test pane_selector_names_roundtrip_and_union_obeys_blacklist ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 35 filtered out; finished in 1.09s
+

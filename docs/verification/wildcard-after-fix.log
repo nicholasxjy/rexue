@@ -1,0 +1,17 @@
+{
+  "wildcard_reproduction": [
+    {
+      "pattern": "/Users/nick/Projects/rex-ba[^x]",
+      "expected_go_icon": "W",
+      "observed_icon": "W",
+      "matches_go": true
+    },
+    {
+      "pattern": "/Users/nick/Projects/rex-ba[!x]",
+      "expected_go_icon": null,
+      "observed_icon": null,
+      "matches_go": true
+    }
+  ],
+  "expected_broken_baseline": false
+}

@@ -1,0 +1,211 @@
+Root naming correction verification
+UTC: 2026-10-30T17:47:40.416482+00:00
+CWD: /Users/nick/Projects/rex-bar
+
+$ cargo fmt --check
+
+exit_status=0
+
+$ cargo clippy --all-targets --all-features -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+
+exit_status=0
+
+$ cargo test
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.14s
+     Running unittests src/lib.rs (target/debug/deps/rex_bar-c85d9f6c4fd2e769)
+
+running 101 tests
+test backend::tests::exact_id_precedes_label ... ok
+test backend::tests::active_window_is_not_first_window ... ok
+test cli::tests::bad_formats_are_errors ... ok
+test backend::tests::ambiguity_requires_choice ... ok
+test cli::tests::format_separates_raw_name_and_decorated_name ... ok
+test config::tests::alias_delay_matches_go_duration_grammar_and_signed_limits ... ok
+test cli::tests::config_file_does_not_shadow_source_filter ... ok
+test config::tests::defaults_and_worktree_defaults ... ok
+test cli::tests::cli_tree_has_no_conflicting_flags ... ok
+test config::tests::expansion_is_lexical_and_never_executes_commands ... ok
+test cli::tests::boolean_flags_do_not_consume_space_separated_values ... ok
+test config::tests::entries_carry_resolved_metadata_and_name_lookup ... ok
+test config::tests::glob_depth_and_directory_boundaries ... ok
+test cli::tests::worktree_picker_preserves_explicit_icon_override ... ok
+test config::tests::legacy_pane_icon_maps_to_native_block_source ... ok
+test config::tests::example_is_valid ... ok
+test config::tests::explicit_missing_and_malformed_files_are_errors ... ok
+test cli::tests::json_format_conflict_depends_on_value ... ok
+test config::tests::permissive_unknown_fields_still_reject_bad_types ... ok
+test cli::tests::omitted_flags_and_source_free_commands_keep_defaults ... ok
+test config::tests::native_window_fields_and_picker_normalization ... ok
+test config::tests::resolved_path_data_is_not_expanded_and_entry_errors_are_not_dropped ... ok
+test config::tests::precedence_preserves_explicit_empty_false_and_first_match ... ok
+test config::tests::unicode_aliases_cannot_duplicate_by_simple_fold ... ok
+test config::tests::wildcard_false_and_empty_override_default ... ok
+test config::tests::regex_substitution_and_source_icons ... ok
+test model::folding_tests::unicode_simple_alias_folding ... ok
+test config::tests::validation_reports_bad_configuration ... ok
+test config::tests::imports_append_only_three_lists_from_cwd_in_declaration_order ... ok
+test config::tests::imports_are_exact_nonrecursive_and_independently_permissive ... ok
+test config::tests::loaded_config_normalizes_pinned_go_fallbacks ... ok
+test session::tests::blacklist_is_regex_and_flag_inverts_selection ... ok
+test session::tests::atomic_state_replaces_existing ... ok
+test cli::tests::picker_boolean_overrides_are_effective_and_negative_preview_wins ... ok
+test session::tests::config_only_never_queries_rex_or_frecency ... ok
+test config::tests::public_load_uses_process_cwd_and_upstream_import_expansion ... ok
+test session::tests::command_arguments_are_data_even_for_non_directory_queries ... ok
+test session::tests::decorated_target_round_trip ... ok
+test session::tests::dedup_priority_is_independent_of_display_order_and_preserves_live_rows ... ok
+test config::tests::xdg_config_location_and_home_fallback ... ok
+test process::tests::failed_command_has_status_and_diagnostic ... ok
+test session::tests::file_names_are_data_in_preview ... ok
+test session::tests::cache_is_opt_in_and_scoped_to_config ... ok
+test session::tests::merged_groups_borrow_scores_and_keep_stable_ties ... ok
+test session::tests::missing_worktree_child_resolves_existing_symlink_ancestors ... ok
+test process::tests::placeholder_keeps_paths_as_data_in_every_quote_context ... ok
+test session::tests::optional_scores_preserve_paths_with_spaces ... ok
+test session::tests::naming_substitution_precedes_directory_length ... ok
+test session::tests::relative_window_scripts_resolve_against_window_cwd ... ok
+test session::tests::jj_metadata_names_workspaces_and_roots_without_a_cli ... ok
+test session::tests::root_naming_bare_git_and_external_jj_workspaces_follow_reference_modes ... ok
+test process::tests::descendant_cannot_keep_output_open_after_deadline ... ok
+test session::tests::saved_paths_restore_unknown_cwd_and_canonicalize ... ok
+test session::tests::root_naming_does_not_apply_rules_to_the_collapsed_repository_root ... ok
+test session::tests::worktree_icon_root_expansion_matches_workflow_for_absolute_home_and_env ... ok
+test session::tests::worktree_icons_precede_wildcards_but_follow_explicit_session_icons ... ok
+test tui::tests::alias_modes_missing_targets_and_debounce ... ok
+test tui::tests::blank_query_order_separators_and_navigation ... ok
+test tui::tests::config_window_names_render_before_creation_and_blocks_are_green ... ok
+test tui::tests::configured_source_colors_and_defaults_match_upstream ... ok
+test tui::tests::confirmation_owns_keys_and_removal_preserves_failed_rows ... ok
+test tui::tests::expanded_literal_dollar_project_remains_selectable ... ok
+test tui::tests::expanded_worktree_icons_render_for_all_equivalent_roots ... ok
+test tui::tests::groups_can_merge_different_sources_and_split_same_source ... ok
+test tui::tests::half_page_keys_preserve_filter_and_input_shortcuts_edit ... ok
+test tui::tests::index_mode_and_alias_precedence ... ok
+test tui::tests::large_valid_preview_threshold_does_not_force_a_split ... ok
+test tui::tests::ordinary_tmux_window_fields_map_to_real_native_labels ... ok
+test tui::tests::preview_debounce_invalidates_moves_and_toggle ... ok
+test tui::tests::render_80x24_and_120x30_preview_and_narrow_sizes ... ok
+test tui::tests::safe_ansi_preview_resets_each_line_and_discards_terminal_commands ... ok
+test tui::tests::stale_preview_results_never_overwrite_current_selection ... ok
+test tui::tests::unicode_filter_edit_and_highlight ... ok
+test tui::tests::unicode_word_editing_and_paste_are_modal ... ok
+test tui::tests::window_format_preserves_data_and_supports_hash_escape ... ok
+test tui::tests::window_labels_format_and_elide_to_available_cells ... ok
+test tui::tests::worktree_full_width_badges_red_matches_and_refresh_preserve_position ... ok
+test tui::tests::worktree_startup_refresh_runs_once_and_can_be_disabled ... ok
+test worktree::tests::apple_script_quotes_application_and_handles_safari ... ok
+test worktree::tests::atomic_cache_merges_and_scopes_repositories ... ok
+test session::tests::root_naming_plain_directories_and_substitutions_use_the_input_path ... ok
+test worktree::tests::cache_ttl_boundaries_distinguish_positive_and_negative_entries ... ok
+test worktree::tests::cached_first_listing_never_runs_gh_and_carries_icons ... ok
+test session::tests::git_worktrees_and_subdirectories_get_distinct_names ... ok
+test cli::tests::every_boolean_flag_accepts_go_values_and_defaults ... ok
+test session::tests::pane_target_focuses_without_session_creation ... ok
+test worktree::tests::batched_cache_warm_offline_negative_and_refresh ... ok
+test session::tests::configured_source_emoji_is_stripped_when_resolving ... ok
+test worktree::tests::listing_batches_fifty_numbers_per_request ... ok
+test worktree::tests::create_reuse_select_and_browse_local_worktree ... ok
+test worktree::tests::relative_worktree_root_expands_embedded_environment ... ok
+test worktree::tests::strict_github_urls_and_issue_references ... ok
+test session::tests::connect_reuses_saved_canonical_path_when_rex_cwd_is_unknown ... ok
+test worktree::tests::manual_offline_refresh_errors_and_preserves_cached_rows ... ok
+test worktree::tests::negative_cache_expires_after_one_hour_while_positive_lasts_a_day ... ok
+test session::tests::enriched_live_base_reuses_session_and_rejects_ambiguity ... ok
+test worktree::tests::metadata_failure_and_existing_directory_never_create_worktree ... ok
+test worktree::tests::existing_branch_is_reused_and_failed_foreign_checkout_is_removed ... ok
+test process::tests::activation_uses_actual_process_arguments_without_script_injection ... ok
+test worktree::tests::own_pr_uses_closing_issue_and_foreign_pr_is_detached ... ok
+test session::tests::stale_launcher_environment_does_not_override_client_history ... ok
+
+test result: ok. 101 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.62s
+
+     Running unittests src/main.rs (target/debug/deps/rex_bar-ef5ffadc919d7f05)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/backend.rs (target/debug/deps/backend-e67c71da8804a389)
+
+running 28 tests
+test config_source_does_not_contact_unavailable_rex_or_frecency ... ok
+test configured_frecency_scores_order_merged_sources_before_deduplication ... ok
+test capability_preflight_rejects_before_creating_or_saving ... ok
+test cli_uses_explicit_fake_rex_and_isolated_xdg_config ... ok
+test baseline_tui_fallbacks_and_terminal_config_do_not_reject_cli_listing ... ok
+test cli_alias_expansion_is_case_insensitive_and_precedes_live_names ... ok
+test duplicate_pane_names_require_ids_and_full_ids_remain_selectable ... ok
+test create_keeps_paths_labels_and_startup_as_separate_arguments ... ok
+test connected_app_filter_and_duplicate_client_labels_use_full_ids ... ok
+test blacklist_inversion_and_source_order_apply_to_selected_sources ... ok
+test connect_creates_selects_then_reuses_without_repeating_startup_or_windows ... ok
+test external_launcher_directory_falls_back_to_live_client_history ... ok
+test failed_window_template_keeps_created_session_discoverable_without_switching ... ok
+test list_skips_disappeared_sessions_but_reports_service_and_json_errors ... ok
+test manager_source_filters_and_dedup_preserve_live_identity ... ok
+test pane_icons_and_configured_windows_are_exposed_by_cli ... ok
+test uncreated_worktree_child_through_symlink_keeps_icon_in_cli ... ok
+test configured_frecency_query_add_remove_keep_metacharacter_paths_as_data ... ok
+test worktree_icon_expansion_is_equivalent_in_config_only_cli_json ... ok
+test environment_values_with_literal_dollars_survive_list_preview_and_worktree_roots ... ok
+test duplicate_session_labels_require_full_id_for_selection_and_kill ... ok
+test configured_app_activation_respects_foreground_and_background_modes ... ok
+test unicode_alias_preview_uses_the_real_cli_resolution_path ... ok
+test root_cli_jj_workspace_fallback_respects_mode_and_anchor_length ... ok
+test root_cli_names_plain_context_and_preserves_literal_dollars ... ok
+test pane_selector_names_roundtrip_and_union_obeys_blacklist ... ok
+test process_errors_keep_stderr_exit_codes_and_json_context ... ok
+test root_cli_git_child_substitution_precedes_root_fallback_in_both_modes ... ok
+
+test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.16s
+
+   Doc-tests rex_bar
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+exit_status=0
+
+$ cargo build --release
+    Finished `release` profile [optimized] target(s) in 0.06s
+
+exit_status=0
+
+$ python3 scripts/worktree_smoke.py --binary target/release/rex-bar
+{
+  "checks": [
+    "local-repository-connect",
+    "local-git-clone-connect",
+    "git-root-name",
+    "plain-directory-root-name",
+    "subdirectory-root-name-substitution",
+    "real-github-issue-metadata",
+    "local-git-worktree-create",
+    "create-command-exclusive",
+    "existing-session-reuse",
+    "title-state-refresh-and-cache",
+    "worktree-icon",
+    "browse-print-url"
+  ],
+  "row": {
+    "repo": "joshmedeski/sesh",
+    "number": 409,
+    "path": "/var/folders/s4/w15lgx5132v1vbvtqssgb4680000gn/T/rex-bar-gh-live-hzwdii54/repo/.wk/409",
+    "title": "Add git worktree support: `sesh worktree`",
+    "state": "CLOSED",
+    "icon": "🌿"
+  },
+  "url": "https://github.com/joshmedeski/sesh/issues/409"
+}
+cleanup_command=["rex", "kill", "session:01a18ded-18f3-7ef0-975d-af9b57373371"] exit_status=0
+cleanup_command=["rex", "kill", "session:01a18ded-1b39-7c7b-a79e-61852f48899b"] exit_status=0
+cleanup_command=["rex", "kill", "session:01a18ded-20b5-7f36-8a8d-6dec9c0f561f"] exit_status=0
+cleanup_command=["rex", "kill", "session:01a18ded-26fd-70fa-8327-64a36de4a081"] exit_status=0
+cleanup_command=["rex", "kill", "session:01a18ded-342d-725d-aa82-1a687d0a88be"] exit_status=0
+exit_status=0
+script_temporary_directories=[{"path": "/var/folders/s4/w15lgx5132v1vbvtqssgb4680000gn/T/rex-bar-gh-live-hzwdii54", "exists_after_run": false}]
+script_session_cleanup=[["session:01a18ded-18f3-7ef0-975d-af9b57373371", 0], ["session:01a18ded-1b39-7c7b-a79e-61852f48899b", 0], ["session:01a18ded-20b5-7f36-8a8d-6dec9c0f561f", 0], ["session:01a18ded-26fd-70fa-8327-64a36de4a081", 0], ["session:01a18ded-342d-725d-aa82-1a687d0a88be", 0]]
+workspace_wk_artifacts=[]

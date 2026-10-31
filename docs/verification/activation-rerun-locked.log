@@ -1,0 +1,9 @@
+# Repeated strict check after unrelated config/TUI changes; desktop relocked. Prior actual successful activation retained separately.
+Traceback (most recent call last):
+  File "/Users/nick/Projects/rex-bar/scripts/rex_smoke.py", line 125, in <module>
+    if __name__=='__main__':main()
+                            ~~~~^^
+  File "/Users/nick/Projects/rex-bar/scripts/rex_smoke.py", line 20, in main
+    if a.require_activation and desktop_locked:raise RuntimeError('macOS screen is locked; unlock it before requiring foreground activation')
+                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: macOS screen is locked; unlock it before requiring foreground activation

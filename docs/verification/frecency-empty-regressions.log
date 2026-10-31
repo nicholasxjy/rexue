@@ -1,0 +1,13 @@
+# Targeted regression: four empty frecency commands and optional dependency behavior
+$ cargo fmt --all && cargo test --test backend empty_frecency -- --nocapture
+exit_status=0
+   Compiling rex-bar v0.1.0 (/Users/nick/Projects/rex-bar)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.38s
+     Running tests/backend.rs (target/debug/deps/backend-e67c71da8804a389)
+
+running 2 tests
+test empty_frecency_commands_use_all_four_zoxide_defaults ... ok
+test empty_frecency_defaults_allow_missing_optional_zoxide ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 31 filtered out; finished in 1.18s
+

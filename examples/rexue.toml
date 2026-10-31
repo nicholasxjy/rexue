@@ -1,0 +1,92 @@
+# Save as $XDG_CONFIG_HOME/rexue/rexue.toml
+# (or ~/.config/rexue/rexue.toml). Explicit --config-file paths must exist.
+# Unknown keys warn by default; strict_mode makes them errors. Replace sesh's
+# tmux/tmuxp/tmuxinator options with native Rex windows and startup commands.
+# Commands run only on connect/preview. Exact import filenames resolve from
+# the process working directory; only sessions/windows/wildcards append.
+# Nested imports and other imported settings are ignored; globs are literal.
+cache = false
+strict_mode = true
+import = [] # e.g. ["sessions/work.toml", "personal.toml"]
+blacklist = ["scratch"]
+sort_order = ["rex", ["config", "zoxide"], "directory", "worktree"]
+dir_length = 1
+git_dir_length = 1
+git_namer_use_worktree_root = false
+separator_aware = false
+vcs = "git"
+# terminal = "Rex" # Optional macOS app activation after foreground connections.
+
+[[name_substitution]]
+find = '^~/projects/(.*)$'
+replace = '$1'
+regex = true
+
+[icons.rex]
+icon = ""
+color = "blue"
+
+[icons.config]
+icon = ""
+color = "bright-black"
+
+[default_session]
+startup_command = "ls"
+preview_command = "ls -la {}"
+windows = ["editor"]
+
+[[window]]
+name = "editor"
+startup_command = "${EDITOR:-vi}"
+# startup_script = "~/scripts/editor.sh"
+# path = "~/projects"
+
+# First matching wildcard wins. A single * matches one path component;
+# a trailing /** matches descendants at any depth, excluding the root itself.
+[[wildcard]]
+pattern = "~/projects/**"
+startup_command = "git status --short"
+icon = ""
+
+# Explicit session > first matching wildcard > default_session.
+# Empty commands/windows fall through to the matching wildcard/defaults.
+# disable_startup_command controls the default strategy; explicit commands still run.
+[[session]]
+name = "projects"
+path = "~/projects"
+alias = "p"
+alias_auto_connect = true
+icon = ""
+startup_command = ""
+disable_startup_command = false
+windows = []
+
+[[worktree]]
+repo = "example/project"
+path = "~/projects/project"
+worktree_dir = ".wk"
+branch_template = "{number}"
+base_branch = "origin/main"
+fetch = true
+create_command = "git status --short"
+startup_command = "git status --short"
+
+[browser]
+application = "Safari"
+# Optional AppleScript fragment for reading the current tab:
+# url_command = "URL of current tab of front window"
+
+[tui]
+show_icons = true
+show_windows = true
+window_name_format = "{window_name}"
+prompt = "> "
+placeholder = "Filter Sessions..."
+pointer = "> "
+alias_auto_connect_delay = "150ms"
+alias_filter_prefix = "/" # Empty disables alias filtering.
+preview = true
+preview_width = 60 # <=0 defaults to 60; positive values clamp to 10–90.
+preview_min_width = 100
+preview_border = "line" # none, line, thick, double
+group_separator = false

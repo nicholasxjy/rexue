@@ -1,0 +1,24 @@
+  > Filter Sessions...                  │
+                                        │
+> [wp] rex-bar-test-c82b3244            │ /var/folders/s4/w15lgx5132v1vbvtqssgb4
+                                        │
+                                        │ nested-startup
+                                        │ nested-window
+                                        │ startup-count
+                                        │
+                                        │
+                                        │
+                                        │
+                                        │
+                                        │
+                                        │
+                                        │
+                                        │
+                                        │
+                                        │
+                                        │
+                                        │
+                                        │
+                                        │
+                                        │
+                                        │

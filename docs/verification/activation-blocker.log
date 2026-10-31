@@ -1,0 +1,16 @@
+# Required macOS foreground verification: awaiting unlocked desktop
+$ python3 scripts/rex_smoke.py --binary target/release/rex-bar --client home-mac --require-activation
+exit_status=1
+Traceback (most recent call last):
+  File "/Users/nick/Projects/rex-bar/scripts/rex_smoke.py", line 125, in <module>
+    if __name__=='__main__':main()
+                            ~~~~^^
+  File "/Users/nick/Projects/rex-bar/scripts/rex_smoke.py", line 20, in main
+    if a.require_activation and desktop_locked:raise RuntimeError('macOS screen is locked; unlock it before requiring foreground activation')
+                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: macOS screen is locked; unlock it before requiring foreground activation
+
+# Latest continuation: read-only IORegistry check
+{"console_locked":true,"screen_locked":[true]}
+
+No foreground success is claimed. Unlock the Mac and resume the goal before rerunning the required assertion. All other verification: see root-corrections.log (129 tests and 12 live Rex/VCS checks).
