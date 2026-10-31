@@ -165,6 +165,22 @@ else:
             finally:
                 s.close()
 
+        cfg.write_text(config.replace('[tui]\n', '[tui]\ngroup_separator=true\n') + 'preview_command="printf GROUP_CONFIG_PREVIEW"\n')
+        def grouped_navigation(s):
+            s.expect('── rex ──')
+            s.expect('── config ──')
+            s.expect('3/3')
+            s.expect('PREVIEW_session:first')
+            s.send(b'\x1b[B')
+            s.expect('PREVIEW_session:second')
+            s.send(b'\x1b[B')
+            s.expect('GROUP_CONFIG_PREVIEW')
+            s.send(b'\x1b[A')
+            s.send(b'\r')
+        text = run_case('group-separator-lines-skip-headings-and-preserve-selection', ['picker', '--rex', '--config'], grouped_navigation)
+        assert 'session:second' in text
+        cfg.write_text(config)
+
         def cancel(s):
             s.expect(name)
             s.expect('PREVIEW_session:first')

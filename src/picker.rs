@@ -441,7 +441,8 @@ fn rows(state: &Mutex<Catalog>, query: &str) -> Result<Vec<u8>> {
         };
         let mut display = display(entry, &options);
         if options.group_separator && query.is_empty() && previous_group != Some(entry.group) {
-            display = format!("── {} ──  {display}", entry.source.as_str());
+            // fzf --read0 displays newlines within one selectable record.
+            display = format!("── {} ──\n{display}", entry.source.as_str());
         }
         previous_group = Some(entry.group);
         write!(input, "{id}\t{search}\t{display}\0")?;
@@ -1011,6 +1012,39 @@ mod tests {
         );
         assert!(target(&state, Some("9999")).is_err());
     }
+    #[test]
+    fn group_separators_render_on_separate_lines() {
+        let options = PickerOptions {
+            group_separator: true,
+            show_icons: false,
+            ..Default::default()
+        };
+        let first = Entry::new("live first", "/first", Source::Rex);
+        let second = Entry::new("live second", "/second", Source::Rex);
+        let mut project = Entry::new("configured project", "/project", Source::Config);
+        project.group = 1;
+        let state = Mutex::new(Catalog::new(options, vec![first, second, project]));
+        let text = String::from_utf8(rows(&state, "").unwrap()).unwrap();
+        let records: Vec<_> = text.split('\0').filter(|row| !row.is_empty()).collect();
+        // Titles occupy a display line, never a selectable record or search field.
+        assert_eq!(records.len(), 3);
+        let fields: Vec<_> = records
+            .iter()
+            .map(|row| row.splitn(3, '\t').collect::<Vec<_>>())
+            .collect();
+        assert_eq!(fields[0][1], "live first");
+        assert_eq!(fields[0][2], "── rex ──\nlive first");
+        assert_eq!(fields[1][2], "live second");
+        assert_eq!(fields[2][2], "── config ──\nconfigured project");
+        for fields in &fields {
+            assert_eq!(target(&state, Some(fields[0])).unwrap().name, fields[1]);
+        }
+        let numbered = String::from_utf8(rows(&state, "#").unwrap()).unwrap();
+        assert!(!numbered.contains("──"));
+        assert!(numbered.contains("#1 live first"));
+        assert!(numbered.contains("#3 configured project"));
+    }
+
     #[test]
     fn aliases_keep_unicode_folding_hidden_targets_and_prefix_precedence() {
         let mut opts = PickerOptions::default();
