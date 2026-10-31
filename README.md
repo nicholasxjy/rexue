@@ -6,7 +6,7 @@ An **fzf session picker for [Rex](https://www.superlogical.com/rex)**, inspired 
 
 ## Install and start
 
-Install Rust **1.88 or newer**, a C compiler (provided by Xcode Command Line Tools on macOS), **fzf 0.63 or newer** (`brew install fzf` on macOS), and Rex; make the `rex` CLI available on `PATH`. The C compiler builds the bundled shell parser; running rexue requires no Go or JavaScript runtime. Open Rex before using the picker: rexue deliberately does not autostart its server.
+Install Rust **1.90 or newer**, a C compiler (provided by Xcode Command Line Tools on macOS), **fzf 0.63 or newer** (`brew install fzf` on macOS), and Rex; make the `rex` CLI available on `PATH`. The C compiler builds the bundled shell parser; running rexue requires no Go or JavaScript runtime. Open Rex before using the picker: rexue deliberately does not autostart its server.
 
 From this checkout:
 

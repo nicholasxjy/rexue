@@ -366,7 +366,7 @@ fn compile_path_script(script: &str, binding: &str) -> Result<String> {
             )
         {
             let closing = node
-                .child(node.child_count() as u32 - 1)
+                .child(node.child_count() - 1)
                 .context("missing parameter end")?;
             let range = operator.end_byte()..closing.start_byte();
             let word = &source[range.clone()];

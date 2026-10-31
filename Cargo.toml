@@ -2,35 +2,35 @@
 name = "rexue"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.90"
 description = "An fzf session picker for Rex, inspired by sesh"
 license = "MIT"
 repository = "https://github.com/nicholasxjy/rexue"
 
 [dependencies]
-anyhow = "1"
-chrono = { version = "0.4", features = ["serde"] }
-clap = { version = "4.5", features = ["derive", "env"] }
-clap_complete = "4.5"
-dirs = "6"
-fs2 = "0.4"
-humantime = "2"
-regex = "1"
-libc = "0.2"
-signal-hook = "0.3"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-shell-words = "1"
-shellexpand = "3"
-strip-ansi-escapes = "0.2"
-toml = "0.8"
-tree-sitter = "0.26.13"
+anyhow = "1.0.104"
+chrono = { version = "0.4.45", features = ["serde"] }
+clap = { version = "4.6.7", features = ["derive", "env"] }
+clap_complete = "4.6.11"
+dirs = "7.0.0"
+fs2 = "0.4.3"
+humantime = "2.4.0"
+regex = "1.13.1"
+libc = "0.2.191"
+signal-hook = "0.4.5"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+shell-words = "1.1.1"
+shellexpand = "3.1.2"
+strip-ansi-escapes = "0.2.1"
+toml = "1.1.8"
+tree-sitter = "0.27.1"
 tree-sitter-bash = "0.25.1"
-unicode-width = "0.2"
-unicode-casefold = "0.2"
-wait-timeout = "0.2"
+unicode-width = "0.2.3"
+unicode-casefold = "0.2.0"
+wait-timeout = "0.2.1"
 
-tempfile = "3"
+tempfile = "3.27.0"
 
 [profile.release]
 lto = "thin"
