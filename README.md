@@ -36,7 +36,7 @@ Other tools are optional, depending on your workflow:
 | gh | Authenticated GitHub issue/PR worktrees, titles, and enriched names; authenticate separately with `gh auth login`. |
 | jj | `clone --vcs jj`; workspace naming also reads `.jj/repo` metadata without requiring a running JJ process. |
 | Browser | Opening worktree issue/PR URLs; macOS active-tab lookup also uses `osascript` and a configured browser. |
-| Nerd Font | Optional source glyphs; normal text mode works without one. |
+| Nerd Font | Renders the source icons shown by default; use `--icons=false` or `[tui] show_icons = false` for plain text. |
 
 ## Choose the Rex app
 
@@ -103,8 +103,10 @@ Both pickers use system fzf for the terminal interface. Rexue keeps source colle
 | Ctrl+U / Ctrl+D | Move half a page. |
 | Ctrl+O | Session picker: toggle preview. |
 | Ctrl+X | Session picker: open a separate fzf Yes/No confirmation before killing a live session or removing a history row. Configured rows cannot be removed. |
-| Ctrl+R | Worktree picker: refresh metadata, retaining the query. Errors retain the previous rows and appear in the header. |
+| Ctrl+R | Session picker: rename the highlighted live session. Worktree picker: refresh metadata. Both retain the query; errors appear in the header. |
 | Left/Right, Home/End, Backspace/Delete | Use fzf's query editing. |
+
+The rename prompt starts with the current session name. Edit it and press Enter to save, or Esc/Ctrl+C to cancel. Empty or whitespace-only names are rejected. Configured sessions, directories and pane rows cannot be renamed here. Saving refreshes the list without connecting to the session.
 
 The confirmation initially selects **Yes**. Enter accepts the selected choice, Y confirms, and N/q/Esc cancels. Up/Down, Left/Right and Tab/Shift+Tab move between choices. Canceling confirmation returns to the picker; deletion refreshes the list. A refreshed/reopened picker retains its query; cursor position and preview toggles return to their configured defaults.
 

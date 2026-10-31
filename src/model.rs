@@ -54,7 +54,8 @@ impl Source {
     }
     pub fn glyph(self) -> &'static str {
         match self {
-            Self::Rex | Self::RexBlock => "",
+            Self::Rex => "",
+            Self::RexBlock => "",
             Self::Config => "",
             Self::Zoxide | Self::Directory => "",
             Self::Worktree => "",

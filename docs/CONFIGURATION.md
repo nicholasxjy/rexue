@@ -146,7 +146,7 @@ Each nonempty command replaces its corresponding default zoxide operation. Omitt
 
 ```toml
 [tui]
-show_icons = false
+show_icons = true
 show_windows = false
 window_name_format = "{window_name}"
 prompt = "> "
@@ -175,13 +175,13 @@ The `[tui]` table is retained for compatibility and configures both system-fzf p
 
 Alias delay accepts Go duration syntax; empty uses 150ms, and zero/negative durations connect immediately. Prefix must be empty (disabled) or one non-whitespace character. Alias mode, exact Unicode alias matching and normal-mode `alias_auto_connect` are preserved. `--no-alias-auto` disables both timed paths, and a prefilled `--query` never arms a timer. A `#` query enables numbered shortcuts 1–9 unless `#` is the alias prefix. `group_separator = true` decorates the first row of each source group when the query is empty; it does not add selectable separator rows.
 
-Fuzzy matching and ranking use `fzf --filter` with case-insensitive matching, extended query syntax and stable ties. `separator_aware` normalizes `-`, `_`, `/` and `\\` to spaces in both names and queries. The visible fzf picker displays these ranked results without an additional search pass or match highlights, allowing alias/index modes to share the same query field. Window labels, icons and aliases are excluded from ordinary name matching. Fzf defaults from `FZF_DEFAULT_OPTS`, `FZF_DEFAULT_OPTS_FILE` and `FZF_DEFAULT_COMMAND` are cleared to protect the row/callback protocol. Navigation and basic query editing otherwise follow fzf; page keys and the documented Ctrl navigation overrides are available. Reopening after deletion or manual refresh preserves the query and resets selection/preview visibility to defaults.
+Fuzzy matching and ranking use `fzf --filter` with case-insensitive matching, extended query syntax and stable ties. `separator_aware` normalizes `-`, `_`, `/` and `\\` to spaces in both names and queries. The visible fzf picker displays these ranked results without an additional search pass or match highlights, allowing alias/index modes to share the same query field. Window labels, icons and aliases are excluded from ordinary name matching. Fzf defaults from `FZF_DEFAULT_OPTS`, `FZF_DEFAULT_OPTS_FILE` and `FZF_DEFAULT_COMMAND` are cleared to protect the row/callback protocol. Navigation and basic query editing otherwise follow fzf; page keys and the documented Ctrl navigation overrides are available. Reopening after renaming, deletion or manual refresh preserves the query and resets selection/preview visibility to defaults.
 
 Window formats support `{window_name}`/`{name}`, `{window_index}` (Rex's 1-based window order), `{window_active}` (`0` or `1`), `{active}` (`*` or empty), and `{session_name}`. Ordinary sesh fields `#{window_name}`/`#W`, `#{window_index}`/`#I`, `#{window_active}`, and `#{session_name}`/`#S` map to those values. `##` escapes a literal hash; native `{{`/`}}` escape braces. Template text is interpreted once, so braces in actual names remain literal and duplicate window names use the actual active window index. Unsupported tmux variables, conditionals, styles and `#(...)` commands produce migration errors.
 
 Recognized source icon tables are `[icons.rex]`, `[icons.rex-block]`, `[icons.config]`, `[icons.zoxide]`, `[icons.directory]`, and `[icons.worktree]`, each with `icon` and `color` strings. Colors accepted by configuration are black/red/green/yellow/blue/magenta/cyan/white and corresponding `bright-*` names, case-insensitive, with `gray`/`grey` aliases; empty means default. Unknown sources/colors are errors. Legacy `[icons.tmux]` migrates to `rex` with a diagnostic; an explicit `rex` table wins. Legacy `[icons.tmux-pane]` (or `[icons.rex-pane]`) migrates to `[icons.rex-block]`; an explicit native table wins. Live session glyphs default blue, block/pane glyphs green.
 
-Configured session/wildcard icons override source glyphs in the TUI. A Nerd Font is optional; aliases use ASCII `[a]` labels in either icon mode. Plain `list --icons` intentionally uses resolved source glyphs, not session icons. `list --icons-exclude rex,config` hides selected sources' glyphs; `--no-color` removes ANSI color.
+Both pickers show Nerd Font icons by default: `` for live sessions, `` for blocks/panes, `` for configured sessions, `` for directories (including zoxide history), and `` for worktrees. Configured session/wildcard icons override source glyphs in the TUI. Use a Nerd Font to render these glyphs, or disable them with `--icons=false` or `[tui] show_icons = false`. Aliases use ASCII `[a]` labels in either icon mode. Plain `list --icons` intentionally uses resolved source glyphs, not session icons. `list --icons-exclude rex,config` hides selected sources' glyphs; `--no-color` removes ANSI color.
 
 ## GitHub worktrees and browser
 

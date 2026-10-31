@@ -856,6 +856,27 @@ impl Manager {
         }
         directory_preview(&entry.path)
     }
+    pub fn rename(&self, entry: &Entry, name: &str) -> Result<()> {
+        if entry.source != Source::Rex {
+            bail!("only live Rex sessions can be renamed");
+        }
+        let id = entry
+            .session_id
+            .as_deref()
+            .filter(|id| id.starts_with("session:") && id.len() > "session:".len())
+            .context("session has no full session ID")?;
+        if name.trim().is_empty() {
+            bail!("session name cannot be empty");
+        }
+        if name.chars().any(char::is_control) {
+            bail!("session name contains control characters");
+        }
+        if name != entry.name {
+            self.rex.rename(id, name)?;
+            self.invalidate();
+        }
+        Ok(())
+    }
     pub fn remove(&self, entry: &Entry) -> Result<()> {
         match entry.source {
             Source::Rex => self

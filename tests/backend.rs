@@ -3,7 +3,7 @@
 use rexue::{
     backend::Rex,
     config::{Config, FrecencyConfig, SessionConfig, SortGroup, WindowConfig},
-    model::Source,
+    model::{Entry, Source},
     session::{ConnectOptions, ListOptions, Manager},
 };
 use serde_json::{Value, json};
@@ -155,6 +155,56 @@ esac
 
 fn client(id: &str, label: &str, kind: &str, connection: &str) -> Value {
     json!({"client_id": id, "info": {"label": label, "kind": kind, "platform": "macos"}, "connection_state": connection})
+}
+
+#[test]
+fn picker_rename_preserves_live_identity_and_rejects_invalid_targets_and_names() {
+    let fake = FakeRex::new();
+    let manager = fake.manager(Config::default());
+    let mut entry = Entry::new("duplicate name", "/project", Source::Rex);
+    entry.session_id = Some("session:second-full".into());
+    for source in [
+        Source::Config,
+        Source::Zoxide,
+        Source::Directory,
+        Source::Worktree,
+        Source::RexBlock,
+    ] {
+        let mut invalid = entry.clone();
+        invalid.source = source;
+        assert!(manager.rename(&invalid, "new name").is_err());
+    }
+    for id in [
+        None,
+        Some("duplicate name"),
+        Some("block:full"),
+        Some("session:"),
+    ] {
+        let mut invalid = entry.clone();
+        invalid.session_id = id.map(str::to_owned);
+        assert!(manager.rename(&invalid, "new name").is_err());
+    }
+    for name in ["", " ", "\t", "bad\nname", "bad\0name"] {
+        assert!(manager.rename(&entry, name).is_err());
+    }
+    manager.rename(&entry, &entry.name).unwrap();
+    assert!(fake.calls().is_empty());
+
+    fs::create_dir_all(&manager.state_dir).unwrap();
+    let cache = manager.state_dir.join("list.json");
+    fs::write(&cache, "cached").unwrap();
+    let name = " 项目 '; $(touch RENAME_INJECTED) {q} ";
+    manager.rename(&entry, name).unwrap();
+    let calls = fake.calls();
+    assert_eq!(calls.len(), 1);
+    assert!(calls[0].ends_with(&[
+        "session".into(),
+        "rename".into(),
+        "session:second-full".into(),
+        name.into()
+    ]));
+    assert!(!cache.exists());
+    assert!(!fake.dir.path().join("RENAME_INJECTED").exists());
 }
 
 #[test]

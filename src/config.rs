@@ -276,7 +276,7 @@ pub struct TuiConfig {
 impl Default for TuiConfig {
     fn default() -> Self {
         Self {
-            show_icons: false,
+            show_icons: true,
             show_windows: false,
             window_name_format: "{window_name}".into(),
             prompt: "> ".into(),

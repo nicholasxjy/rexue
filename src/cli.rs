@@ -540,10 +540,12 @@ fn pick_session(manager: Manager, args: PickerArgs, detach: bool) -> Result<()> 
     let fetch = manager.clone();
     let preview = manager.clone();
     let remove = manager.clone();
+    let rename = manager.clone();
     let chosen = picker::pick(
         move || fetch.list(&opts),
         move |e| preview.preview(e),
         move |e| remove.remove(e),
+        move |e, name| rename.rename(e, name),
         options,
     )?;
     if let Some(e) = chosen {
@@ -1108,6 +1110,7 @@ fn worktree_command(manager: Manager, command: WorktreeCommand, detach: bool) ->
                 },
                 move |e| preview.preview(e),
                 |_| bail!("worktrees cannot be deleted from this picker"),
+                |_, _| bail!("worktrees cannot be renamed from this picker"),
                 options,
             )?;
             if let Some(e) = chosen {

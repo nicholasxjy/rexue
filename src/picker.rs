@@ -55,7 +55,7 @@ pub struct PickerOptions {
 impl Default for PickerOptions {
     fn default() -> Self {
         Self {
-            show_icons: false,
+            show_icons: true,
             show_windows: false,
             window_name_format: "{window_name}".into(),
             separator_aware: false,
@@ -244,7 +244,7 @@ impl Catalog {
         let keys = if self.options.worktree {
             "Enter connect · Esc cancel · Ctrl-R refresh"
         } else {
-            "Enter connect · Esc cancel · Ctrl-O preview · Ctrl-X remove"
+            "Enter connect · Esc cancel · Ctrl-O preview · Ctrl-R rename · Ctrl-X remove"
         };
         if self.status.is_empty() {
             keys.into()
@@ -571,7 +571,7 @@ fn finder(options: &PickerOptions, bridge: &Bridge, header: &str, query: &str) -
         .arg(format!("--pointer={}", clean(&options.pointer)))
         .arg(format!("--query={query}"))
         .arg(format!("--header={header}"))
-        .arg(if options.worktree { "--expect=ctrl-r" } else { "--expect=ctrl-x" })
+        .arg(if options.worktree { "--expect=ctrl-r" } else { "--expect=ctrl-r,ctrl-x" })
         .arg(format!("--bind=start:reload({HELPER} rows)"))
         .arg(format!("--bind=change:bg-cancel+reload({HELPER} rows)"))
         .arg(format!("--bind=load:bg-transform({HELPER} loaded)"))
@@ -714,10 +714,56 @@ fn confirm(entry: &Entry) -> Result<bool> {
     }
 }
 
+fn rename_prompt(entry: &Entry) -> Result<Option<String>> {
+    let mut command = Command::new("fzf");
+    clean_fzf_env(&mut command);
+    command
+        .args([
+            "--read0",
+            "--print0",
+            "--print-query",
+            "--no-multi",
+            "--no-sort",
+            "--layout=reverse",
+            "--disabled",
+            "--prompt=New name > ",
+        ])
+        .arg(format!("--query={}", clean(&entry.name)))
+        .arg(format!(
+            "--header=Rename Rex session\n{}\nEnter save · Esc cancel",
+            clean(entry.target())
+        ))
+        .arg("--bind=esc:abort,ctrl-c:abort");
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .context("start fzf rename prompt")?;
+    child
+        .stdin
+        .take()
+        .context("missing rename prompt input")?
+        .write_all(b"Save\0")?;
+    let output = wait_fzf(child)?;
+    match output.status.code() {
+        Some(0) => {
+            let text = String::from_utf8(output.stdout).context("fzf returned invalid UTF-8")?;
+            let (name, _) = text
+                .split_once('\0')
+                .context("fzf omitted new session name")?;
+            Ok(Some(name.to_owned()))
+        }
+        Some(1) | Some(130) => Ok(None),
+        code => bail!("fzf rename prompt exited unexpectedly ({code:?})"),
+    }
+}
+
 pub fn pick(
     fetch: impl Fn() -> Result<Vec<Entry>> + Send + 'static,
     preview: impl Fn(&Entry) -> Result<String> + Send + Sync + 'static,
     remove: impl Fn(&Entry) -> Result<()> + Send + Sync + 'static,
+    rename: impl Fn(&Entry, &str) -> Result<()> + Send + Sync + 'static,
     options: PickerOptions,
 ) -> Result<Option<Entry>> {
     check_fzf()?;
@@ -743,6 +789,9 @@ pub fn pick(
             continue;
         }
         let Some(id) = chosen.id else {
+            if chosen.key == "ctrl-r" {
+                continue;
+            }
             return Ok(None);
         };
         // Enter may arrive while reload is still showing an earlier query.
@@ -755,6 +804,21 @@ pub fn pick(
             return Ok(None);
         }
         let entry = target(&state, Some(&id))?;
+        if chosen.key == "ctrl-r" {
+            if entry.source != Source::Rex {
+                state.lock().unwrap().status = "Only live Rex sessions can be renamed".into();
+            } else if let Some(name) = rename_prompt(&entry)?
+                && name != entry.name
+            {
+                match rename(&entry, &name) {
+                    Ok(()) => refresh(&state, &fetch),
+                    Err(error) => {
+                        state.lock().unwrap().status = format!("Rename failed: {error:#}");
+                    }
+                }
+            }
+            continue;
+        }
         if chosen.key == "ctrl-x" {
             if !matches!(
                 entry.source,

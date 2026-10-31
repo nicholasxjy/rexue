@@ -125,15 +125,21 @@ def main():
         executable(rex, '#!' + sys.executable + '\n' + '''import json,pathlib,sys
 root=pathlib.Path(__file__).parent.parent
 fixture=json.loads((root/'fixture.json').read_text())
+labels=json.loads((root/'labels.json').read_text()) if (root/'labels.json').exists() else {}
 a=sys.argv[4:]
 if a[:1]==['-S']:a=a[2:]
 with (root/'rex-calls.jsonl').open('a') as f:f.write(json.dumps(a)+'\\n')
 if a[:2]==['whoami','--json']:print('{}')
 elif a[:2]==['ls','--json']:
     killed=(root/'killed').read_text().splitlines() if (root/'killed').exists() else []
-    print(json.dumps({'sessions':[{'session_id':'session:'+i,'label':fixture['name']} for i in ['first','second'] if 'session:'+i not in killed]}))
+    print(json.dumps({'sessions':[{'session_id':'session:'+i,'label':labels.get('session:'+i,fixture['name'])} for i in ['first','second'] if 'session:'+i not in killed]}))
 elif a[:2]==['session','inspect']:
-    print(json.dumps({'session_id':a[2],'label':fixture['name'],'active_window_id':'window:fixture','windows':[{'window_id':'window:fixture','label':'Terminal','focused_block_id':'block:fixture'}]}))
+    print(json.dumps({'session_id':a[2],'label':labels.get(a[2],fixture['name']),'active_window_id':'window:fixture','windows':[{'window_id':'window:fixture','label':'Terminal','focused_block_id':'block:fixture'}]}))
+elif a[:2]==['session','rename']:
+    if (root/'rename-fail').exists():print('rename fixture failure',file=sys.stderr);sys.exit(7)
+    labels[a[2]]=a[3]
+    (root/'labels.json').write_text(json.dumps(labels))
+    print('{}')
 elif a[:2]==['block','call']:print(json.dumps({'foreground':{'cwd':fixture['path']}}))
 elif a[0]=='capture':print('PREVIEW_'+a[2])
 elif a[0]=='new':print(json.dumps({'session_id':'session:new','initial_windows':[{'block_ids':['block:fixture']}]}))
@@ -192,6 +198,77 @@ else:
         text = run_case('index-shortcut-second-id', ['picker', '--rex'],
                         lambda s: (s.expect(name), s.send(b'#'), s.expect('#2'), s.send(b'2')))
         assert 'session:second' in text
+
+        def rename_calls():
+            return [call for call in (json.loads(line) for line in (root/'rex-calls.jsonl').read_text().splitlines()) if call[:2] == ['session', 'rename']]
+
+        def resume_after(s, data):
+            start = len(s.capture)
+            s.send(data)
+            s.until(lambda: b'Enter connect' in s.capture[start:], 'picker did not resume after rename')
+
+        def open_rename(s):
+            s.expect(name)
+            s.send(b'\x12')
+            s.expect('Rename Rex session')
+            s.expect('New name > ')
+
+        def cancel_rename(s):
+            open_rename(s)
+            s.send(b'\x15cancelled rename')
+            resume_after(s, b'\x1b')
+            s.send(b'\x1b')
+        run_case('rename-cancel-preserves-name', ['picker', '--rex'], cancel_rename)
+        run_case('rename-unchanged-is-noop', ['picker', '--rex'],
+                 lambda s: (open_rename(s), resume_after(s, b'\r'), s.send(b'\x1b')))
+        assert not rename_calls()
+
+        def empty_rename(s):
+            open_rename(s)
+            s.send(b'\x15   \r')
+            s.expect('session name cannot be empty')
+            s.send(b'\x1b')
+        run_case('rename-empty-name-rejected', ['picker', '--rex'], empty_rename)
+        run_case('rename-config-row-rejected', ['picker', '--config'],
+                 lambda s: (s.expect(name), s.send(b'\x12'), s.expect('Only live Rex sessions can be renamed'), s.send(b'\x1b')))
+        assert not rename_calls()
+
+        (root/'rename-fail').touch()
+        def failed_rename(s):
+            # The fixture executable has a long path; show its complete error.
+            s.resize(240, 30)
+            open_rename(s)
+            s.send(b'\x15failed name\r')
+            s.expect('Rename failed:')
+            s.expect('rename fixture failure')
+            s.send(b'\x1b')
+        run_case('rename-backend-error-retains-list', ['picker', '--rex', '--no-preview'], failed_rename)
+        (root/'rename-fail').unlink()
+        assert not (root/'labels.json').exists()
+
+        renamed = "项目 renamed '; $(touch RENAME_INJECTED) {q}"
+        before_calls = len((root/'rex-calls.jsonl').read_text().splitlines())
+        def rename_second(s):
+            s.resize(240, 30)
+            s.expect(name)
+            s.send(b'\x1b[B')
+            s.expect('PREVIEW_session:second')
+            s.send(b'\x12')
+            s.expect('Rename Rex session')
+            s.send(b'\x15' + renamed.encode())
+            resume_after(s, b'\r')
+            s.expect('1/1')  # The original 'same' query now matches only the first row.
+            start = len(s.capture)
+            s.send(b'\x7f' * len('same'))
+            s.until(lambda: renamed in s.capture[start:].decode('utf-8', 'replace'), 'renamed row missing after clearing query')
+            s.send(b'\x1b')
+        text = run_case('rename-second-duplicate-refreshes-and-keeps-query', ['picker', '--rex', '--query=same'], rename_second)
+        assert json.loads((root/'labels.json').read_text()) == {'session:second': renamed}
+        calls = [json.loads(line) for line in (root/'rex-calls.jsonl').read_text().splitlines()[before_calls:]]
+        assert [call for call in calls if call[:2] == ['session', 'rename']] == [['session', 'rename', 'session:second', renamed]]
+        assert not any(call[0] in ['new', 'focus', 'kill'] or call[:2] == ['client', 'ls'] for call in calls)
+        assert not (root/'RENAME_INJECTED').exists()
+        (root/'labels.json').unlink()
 
         def decline(s):
             s.expect(name)
