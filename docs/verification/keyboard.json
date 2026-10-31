@@ -1,0 +1,58 @@
+{
+  "keyboard": [
+    {
+      "case": "legacy",
+      "passed": true,
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "csi-u",
+      "passed": true,
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "csi-u-text",
+      "passed": true,
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "csi-u-repeat",
+      "passed": true,
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "csi-u-alternate-keys",
+      "passed": true,
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "modify-other-keys",
+      "passed": true,
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "ctrl-n-p",
+      "passed": true,
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "arrows",
+      "passed": true,
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "suspend-resume",
+      "passed": true,
+      "restored": true,
+      "exit": 0
+    }
+  ]
+}

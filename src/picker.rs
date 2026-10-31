@@ -1,4 +1,5 @@
 //! System-fzf picker. Display strings never serve as connection identities.
+use crate::keyboard::{Keyboard, copy_size, set_raw};
 use crate::model::{Entry, Source, alias_key};
 use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
@@ -596,14 +597,16 @@ fn finder(options: &PickerOptions, bridge: &Bridge, header: &str, query: &str) -
             ))
             .arg("--bind=ctrl-o:toggle-preview");
     }
-    // stderr belongs to fzf's terminal UI. stdout is exclusively the protocol.
+    // stdout is exclusively the selection protocol. Keyboard input and terminal
+    // rendering use a private PTY so extended keys can be normalized for fzf.
+    let keyboard = Keyboard::prepare(&mut command)?;
     let child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
         .context("could not start system fzf; is fzf installed and on PATH?")?;
-    wait_fzf(child)
+    wait_fzf(child, keyboard)
 }
 struct Choice {
     query: String,
@@ -663,18 +666,63 @@ impl Drop for TerminalState {
     }
 }
 
-// fzf owns raw-mode restoration. Forward process termination and let it restore
-// the terminal before this process exits, including a signal sent only to rexue.
-fn wait_fzf(child: std::process::Child) -> Result<Output> {
+// Keep the real terminal size in sync with fzf's private terminal. Forward
+// termination and let fzf restore its display before the keyboard relay stops.
+fn wait_fzf(mut child: std::process::Child, mut keyboard: Option<Keyboard>) -> Result<Output> {
     use signal_hook::{
-        consts::signal::{SIGHUP, SIGINT, SIGTERM},
+        consts::signal::{SIGCONT, SIGHUP, SIGINT, SIGTERM, SIGTSTP, SIGWINCH},
         iterator::Signals,
     };
-    let mut signals = Signals::new([SIGHUP, SIGINT, SIGTERM])?;
+    let setup = (|| -> Result<_> {
+        let signals = Signals::new([SIGHUP, SIGINT, SIGTERM, SIGWINCH, SIGTSTP, SIGCONT])?;
+        let saved = keyboard.as_ref().map(Keyboard::saved_modes);
+        let resize = keyboard
+            .as_ref()
+            .map(Keyboard::resize_handles)
+            .transpose()?;
+        if let Some(keyboard) = keyboard.as_mut() {
+            keyboard.start(child.id())?;
+        }
+        Ok((signals, resize, saved))
+    })();
+    let (mut signals, resize, saved) = match setup {
+        Ok(setup) => setup,
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
+    };
     let handle = signals.handle();
     let pid = child.id() as i32;
     let forwarder = thread::spawn(move || {
         for signal in signals.forever() {
+            if signal == SIGTSTP {
+                // fzf restores its private PTY before stopping the job. Restore
+                // the real terminal too, so the shell retains echo and editing.
+                if let (Some((terminal, _)), Some(saved)) = (&resize, &saved) {
+                    let _ = set_raw(terminal, saved, false);
+                }
+                unsafe {
+                    libc::kill(pid, SIGTSTP);
+                }
+                let _ = signal_hook::low_level::emulate_default_handler(SIGTSTP);
+                if let (Some((terminal, _)), Some(saved)) = (&resize, &saved) {
+                    let _ = set_raw(terminal, saved, true);
+                }
+                continue;
+            }
+            if signal == SIGCONT
+                && let (Some((terminal, slave)), Some(saved)) = (&resize, &saved)
+            {
+                let _ = set_raw(terminal, saved, true);
+                let _ = copy_size(terminal, slave);
+            }
+            if signal == SIGWINCH
+                && let Some((terminal, slave)) = &resize
+            {
+                let _ = copy_size(terminal, slave);
+            }
             unsafe {
                 libc::kill(pid, signal);
             }
@@ -683,7 +731,9 @@ fn wait_fzf(child: std::process::Child) -> Result<Output> {
     let result = child.wait_with_output();
     handle.close();
     let _ = forwarder.join();
+    let relayed = keyboard.as_mut().map(Keyboard::finish).transpose();
     let output = result?;
+    relayed?;
     if output.stdout.len() as u64 > LIMIT {
         bail!("fzf returned too much output");
     }
@@ -704,6 +754,7 @@ fn confirm(entry: &Entry) -> Result<bool> {
         .arg(format!("--header={question}\n{}\n{}", clean(&entry.name), clean(&entry.path.display().to_string())))
         .arg("--bind=esc:abort,ctrl-c:abort,n:abort,q:abort,y:first+accept,left:up,right:down,tab:down,btab:up");
     // Confirmation is also rendered by fzf. Cancellation never calls remove.
+    let keyboard = Keyboard::prepare(&mut command)?;
     let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -715,7 +766,7 @@ fn confirm(entry: &Entry) -> Result<bool> {
         .take()
         .context("missing confirmation input")?
         .write_all(b"Yes\0No\0")?;
-    let output = wait_fzf(child)?;
+    let output = wait_fzf(child, keyboard)?;
     match output.status.code() {
         Some(0) => Ok(output.stdout == b"Yes\0"),
         Some(1) | Some(130) => Ok(false),
@@ -751,6 +802,7 @@ fn text_prompt(initial: &str, prompt: &str, header: &str) -> Result<Option<Strin
         .arg(format!("--query={}", clean(initial)))
         .arg(format!("--header={header}"))
         .arg("--bind=esc:abort,ctrl-c:abort");
+    let keyboard = Keyboard::prepare(&mut command)?;
     let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -762,7 +814,7 @@ fn text_prompt(initial: &str, prompt: &str, header: &str) -> Result<Option<Strin
         .take()
         .context("missing text prompt input")?
         .write_all(b"Confirm\0")?;
-    let output = wait_fzf(child)?;
+    let output = wait_fzf(child, keyboard)?;
     match output.status.code() {
         Some(0) => {
             let text = String::from_utf8(output.stdout).context("fzf returned invalid UTF-8")?;

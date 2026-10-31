@@ -92,6 +92,8 @@ In the session picker, `/` filters configured aliases. Exact aliases connect aft
 
 Both pickers use the installed fzf. Rexue clears inherited `FZF_DEFAULT_OPTS`, `FZF_DEFAULT_OPTS_FILE` and `FZF_DEFAULT_COMMAND` for child processes to preserve its bindings and selection protocol. Preview captures on selection changes; it does not continuously watch terminal output. The standalone `preview --watch` command watches live session capture.
 
+Traditional keyboard input, CSI-u/Kitty text and Ctrl-key reports, and xterm modifyOtherKeys reports are supported. Rexue normalizes extended reports for fzf so bindings such as Ctrl+J/K work with extended keyboard reporting. Key releases do not repeat actions, and bracketed paste is passed through unchanged.
+
 ## Configuration and shell integration
 
 The default config is `$XDG_CONFIG_HOME/rexue/rexue.toml`, or `~/.config/rexue/rexue.toml`. A missing default file is fine; an explicit config path must exist. See [the example](examples/rexue.toml) and [configuration reference](docs/CONFIGURATION.md).
