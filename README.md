@@ -9,9 +9,11 @@ The current verified platform is macOS. Worktree discovery and lifecycle use [Wo
 Install Rust 1.90 or newer and a C compiler, then run:
 
 ```sh
-cargo install --path .
+cargo install --locked rexue
 rexue
 ```
+
+To install from a local checkout, run `cargo install --locked --path .`.
 
 Interactive pickers require fzf 0.63 or newer. Put `rex` on `PATH` and open Rex before connecting; rexue does not start its server. Install `wt` 0.81.0 or newer and Git for worktrees. zoxide is optional; without it, directory history is empty. Configured session listing works without Rex.
 
