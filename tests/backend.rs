@@ -35,11 +35,7 @@ impl FakeRex {
         let script = format!(
             r#"#!/bin/sh
 root={}
-n=0
-[ ! -f "$root/count" ] || n=$(/bin/cat "$root/count")
-n=$((n + 1))
-printf '%s' "$n" > "$root/count"
-printf '%s\000' "$@" > "$root/calls/$n"
+printf '%s\000' "$@" > "$root/calls/$$"
 if [ -f "$root/fail.exit" ]; then
     /bin/cat "$root/fail.stderr" >&2
     exit "$(/bin/cat "$root/fail.exit")"
@@ -58,6 +54,14 @@ case "$1 $2" in
         esac ;;
     'ls --json') /bin/cat "$root/sessions.json" ;;
     'session inspect')
+        if [ -f "$root/check-overlap" ]; then
+            if /bin/mkdir "$root/scanning" 2>/dev/null; then
+                /bin/sleep 0.1
+                /bin/rmdir "$root/scanning"
+            else
+                : > "$root/overlapped"
+            fi
+        fi
         if [ -f "$root/inspect-$3.exit" ]; then
             printf 'inspect fixture failure' >&2
             exit "$(/bin/cat "$root/inspect-$3.exit")"
@@ -131,13 +135,19 @@ esac
     }
 
     fn calls(&self) -> Vec<Vec<String>> {
-        let count = fs::read_to_string(self.dir.path().join("count"))
-            .unwrap_or_else(|_| "0".into())
-            .parse::<usize>()
-            .unwrap();
-        (1..=count)
-            .map(|n| {
-                fs::read(self.dir.path().join(format!("calls/{n}")))
+        // Each child owns a log file, so concurrent discovery cannot overwrite calls.
+        let mut calls: Vec<_> = fs::read_dir(self.dir.path().join("calls"))
+            .unwrap()
+            .map(|entry| {
+                let entry = entry.unwrap();
+                (entry.metadata().unwrap().modified().unwrap(), entry.path())
+            })
+            .collect();
+        calls.sort();
+        calls
+            .into_iter()
+            .map(|(_, path)| {
+                fs::read(path)
                     .unwrap()
                     .split(|b| *b == 0)
                     .filter(|s| !s.is_empty())
@@ -325,6 +335,121 @@ fn agent_selection_previews_and_focuses_exact_pane_and_rejects_exited_target() {
     );
     fake.json(
         "process-block:codex-full.json",
+        json!({"last_exit": {"exit_code": 0}}),
+    );
+    let error = manager
+        .connect_entry(entry, &ConnectOptions::default())
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("no longer running"), "{error}");
+}
+
+#[test]
+fn discovery_overlaps_independent_sessions_and_preserves_order() {
+    let fake = FakeRex::new();
+    let rows: Vec<_> = (0..8)
+        .map(|i| {
+            fake.session(
+                &format!("session:{i}-full"),
+                &format!("session-{i}"),
+                fake.dir.path(),
+            )
+        })
+        .collect();
+    fake.json("sessions.json", json!({"sessions": rows}));
+    fs::write(fake.dir.path().join("check-overlap"), "").unwrap();
+    let entries = fake.rex.list().unwrap();
+    assert!(
+        fake.dir.path().join("overlapped").exists(),
+        "independent session queries must overlap"
+    );
+    assert_eq!(
+        entries.iter().map(|e| e.name.clone()).collect::<Vec<_>>(),
+        (0..8).map(|i| format!("session-{i}")).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        fake.calls().len(),
+        17,
+        "one list, one inspect and one process query per session"
+    );
+}
+
+#[test]
+fn picker_live_connect_does_not_inspect_unrelated_sessions() {
+    let fake = FakeRex::new();
+    let selected = fake.session("session:selected-full", "selected", fake.dir.path());
+    let unrelated = fake.session("session:unrelated-full", "unrelated", fake.dir.path());
+    fake.json("sessions.json", json!({"sessions": [unrelated, selected]}));
+    fs::write(
+        fake.dir.path().join("inspect-session:unrelated-full.exit"),
+        "4",
+    )
+    .unwrap();
+    let mut manager = fake.manager(Config::default());
+    manager.config.frecency.add_command = Some("true".into());
+    let mut entry = Entry::new("old label", fake.dir.path(), Source::Rex);
+    entry.session_id = Some("session:selected-full".into());
+    let result = manager
+        .connect_entry(entry, &ConnectOptions::default())
+        .unwrap();
+    assert_eq!(result.session_id, "session:selected-full");
+    assert_eq!(result.name, "selected");
+    assert!(!result.created);
+    let inspections: Vec<_> = fake
+        .calls()
+        .into_iter()
+        .filter(|args| args.windows(2).any(|args| args == ["session", "inspect"]))
+        .collect();
+    assert_eq!(
+        inspections.len(),
+        1,
+        "only the selected session needs inspection"
+    );
+    assert!(
+        inspections[0]
+            .iter()
+            .any(|arg| arg == "session:selected-full")
+    );
+}
+
+#[test]
+fn picker_agent_connect_revalidates_only_the_selected_pane() {
+    let fake = FakeRex::new();
+    agents_fixture(&fake);
+    let entry = fake
+        .manager(Config::default())
+        .resolve_entry("block:pi-full")
+        .unwrap();
+    let before = fake.calls().len();
+    let mut manager = fake.manager(Config::default());
+    manager.config.frecency.add_command = Some("true".into());
+    let result = manager
+        .connect_entry(entry.clone(), &ConnectOptions::default())
+        .unwrap();
+    assert_eq!(result.session_id, "session:agents-full");
+    let calls = fake.calls();
+    let queries: Vec<_> = calls[before..]
+        .iter()
+        .filter(|args| args.windows(2).any(|args| args == ["block", "call"]))
+        .collect();
+    assert!(
+        queries.iter().all(|args| !args.iter().any(|arg| {
+            matches!(
+                arg.as_str(),
+                "block:codex-full" | "block:stale-full" | "block:gone-full"
+            )
+        })),
+        "connecting must not rescan unrelated panes: {queries:?}"
+    );
+    assert_eq!(
+        calls[before..]
+            .iter()
+            .filter(|args| args.windows(2).any(|args| args == ["session", "inspect"]))
+            .count(),
+        1
+    );
+    fake.json(
+        "process-block:pi-full.json",
         json!({"last_exit": {"exit_code": 0}}),
     );
     let error = manager

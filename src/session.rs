@@ -413,9 +413,6 @@ impl Manager {
             return self.connect_path(&prepared.path, opts);
         }
         self.connect_resolved(opts, || {
-            if entry.source == Source::Agent {
-                return self.resolve_agent(entry.target());
-            }
             // Alias-only rows can be synthesized outside the fetched sources.
             // Complete their typed config identity by exact key, never by the
             // human-target parser that strips decoration or expands aliases.
@@ -480,10 +477,33 @@ impl Manager {
             }
             entry.name = name.clone();
         }
-        let path = normalize(&entry.path);
+        let mut path = normalize(&entry.path);
         let mut state = self.state()?;
-        let mut existing = self.rex.list()?;
+        let mut existing = if opts.name.is_none()
+            && let Some(id) = entry
+                .session_id
+                .as_deref()
+                .filter(|id| id.starts_with("session:"))
+        {
+            self.rex
+                .list_session(id, agent.as_ref().map(|agent| agent.block_id.as_str()))?
+        } else {
+            self.rex.list()?
+        };
         self.restore_paths(&mut existing, &state);
+        if let Some(agent) = &agent {
+            let current = existing
+                .iter()
+                .find(|candidate| {
+                    candidate
+                        .agent
+                        .as_ref()
+                        .is_some_and(|current| current.block_id == agent.block_id)
+                })
+                .with_context(|| format!("agent in {} is no longer running", agent.block_id))?;
+            path = normalize(&current.path);
+            existing.retain(|candidate| candidate.source == Source::Rex);
+        }
         let exact = entry.session_id.as_deref().and_then(|id| {
             existing
                 .iter()

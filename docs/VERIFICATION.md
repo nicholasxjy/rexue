@@ -54,6 +54,14 @@ python3 scripts/wildcard_smoke.py --binary target/debug/rexue
 
 These probes verify nested shell placeholders, path binding across positional scopes, and wildcard character classes through the executable CLI.
 
+## Performance
+
+Session and agent discovery runs up to four session queries and four pane queries per session concurrently, preserving the original catalog order. Connecting a selected live row refreshes only that session and, for agents, the selected pane. Explicit naming and directory reuse still check all live sessions for conflicts. No session or agent cache is introduced.
+
+The performance change passed all 131 Rust tests (87 unit, 39 process integration, 5 scope/configuration), `cargo fmt --check`, and `cargo clippy --all-targets -- -D warnings`. The real-fzf PTY and extended-keyboard acceptance scripts also passed. Regression tests assert overlapping session queries, stable row ordering, targeted connection requests, and rejection of exited agents.
+
+The [performance receipt](verification/performance.json) records medians and individual samples from three runs before and after the change. Live listing measurements only read the local Rex server. Picker opening and Enter-to-completion measurements use real fzf with isolated Rex fixtures containing four sessions and three agent panes per session, with 15ms latency per fixture request. Those timings include process startup and terminal restoration; they do not measure live Rex app rendering.
+
 ## Limits
 
 The isolated checks establish CLI behavior, process protocol, actual fzf interaction, and actual Worktrunk/Git behavior. They do not establish live Rex app rendering or client switching, a real keypress on the example Lua binding, or behavior on other platforms. No personal configuration, live session, or existing user worktree is modified by this verification.

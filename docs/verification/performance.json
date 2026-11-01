@@ -1,0 +1,220 @@
+{
+  "validation": {
+    "rust_tests": {
+      "passed": 131,
+      "unit": 87,
+      "integration": 39,
+      "scope": 5
+    },
+    "format": "passed",
+    "clippy": "passed",
+    "fzf": {
+      "version": "0.74.5 (Homebrew)",
+      "cases": 37,
+      "interactive_cases": 34,
+      "expected_tool_error_cases": 3,
+      "terminal_restored": true
+    },
+    "keyboard": {
+      "cases": 9,
+      "passed": true
+    }
+  },
+  "method": "median of three runs; live listing is read-only; picker uses real fzf in a PTY with four isolated sessions and three agent panes per session; each fake Rex request has 15ms latency",
+  "live_listing": {
+    "sessions": {
+      "before": {
+        "median_ms": 251.6,
+        "samples_ms": [
+          254.9,
+          251.6,
+          245.1
+        ],
+        "entries": [
+          4,
+          4,
+          4
+        ]
+      },
+      "after": {
+        "median_ms": 100.1,
+        "samples_ms": [
+          100.7,
+          100.1,
+          97.6
+        ],
+        "entries": [
+          4,
+          4,
+          4
+        ]
+      }
+    },
+    "agents": {
+      "before": {
+        "median_ms": 1182.5,
+        "samples_ms": [
+          1189.2,
+          1182.5,
+          1175.3
+        ],
+        "entries": [
+          3,
+          3,
+          3
+        ]
+      },
+      "after": {
+        "median_ms": 382.1,
+        "samples_ms": [
+          382.1,
+          386.6,
+          378.9
+        ],
+        "entries": [
+          3,
+          3,
+          3
+        ]
+      }
+    },
+    "default": {
+      "before": {
+        "median_ms": 1195.1,
+        "samples_ms": [
+          1196.6,
+          1195.1,
+          1191.9
+        ],
+        "entries": [
+          51,
+          51,
+          51
+        ]
+      },
+      "after": {
+        "median_ms": 392.8,
+        "samples_ms": [
+          390.9,
+          392.8,
+          400.4
+        ],
+        "entries": [
+          51,
+          51,
+          51
+        ]
+      }
+    }
+  },
+  "isolated_picker": {
+    "before": {
+      "session": {
+        "open_ms": 1833.2,
+        "jump_ms": 579.7,
+        "open_rex_calls": 29,
+        "jump_rex_calls": 13,
+        "samples": [
+          {
+            "open_ms": 2732.0,
+            "jump_ms": 579.7,
+            "open_rex_calls": 29,
+            "jump_rex_calls": 13
+          },
+          {
+            "open_ms": 1819.8,
+            "jump_ms": 582.6,
+            "open_rex_calls": 29,
+            "jump_rex_calls": 13
+          },
+          {
+            "open_ms": 1833.2,
+            "jump_ms": 571.8,
+            "open_rex_calls": 29,
+            "jump_rex_calls": 13
+          }
+        ]
+      },
+      "agent": {
+        "open_ms": 1822.6,
+        "jump_ms": 1914.1,
+        "open_rex_calls": 29,
+        "jump_rex_calls": 43,
+        "samples": [
+          {
+            "open_ms": 1810.4,
+            "jump_ms": 1914.1,
+            "open_rex_calls": 29,
+            "jump_rex_calls": 43
+          },
+          {
+            "open_ms": 1845.7,
+            "jump_ms": 1914.9,
+            "open_rex_calls": 29,
+            "jump_rex_calls": 43
+          },
+          {
+            "open_ms": 1822.6,
+            "jump_ms": 1912.5,
+            "open_rex_calls": 29,
+            "jump_rex_calls": 43
+          }
+        ]
+      }
+    },
+    "after": {
+      "session": {
+        "open_ms": 819.4,
+        "jump_ms": 340.6,
+        "open_rex_calls": 29,
+        "jump_rex_calls": 7,
+        "samples": [
+          {
+            "open_ms": 1110.3,
+            "jump_ms": 341.4,
+            "open_rex_calls": 29,
+            "jump_rex_calls": 7
+          },
+          {
+            "open_ms": 819.4,
+            "jump_ms": 322.2,
+            "open_rex_calls": 29,
+            "jump_rex_calls": 7
+          },
+          {
+            "open_ms": 818.6,
+            "jump_ms": 340.6,
+            "open_rex_calls": 29,
+            "jump_rex_calls": 7
+          }
+        ]
+      },
+      "agent": {
+        "open_ms": 807.4,
+        "jump_ms": 420.4,
+        "open_rex_calls": 29,
+        "jump_rex_calls": 9,
+        "samples": [
+          {
+            "open_ms": 807.4,
+            "jump_ms": 425.3,
+            "open_rex_calls": 29,
+            "jump_rex_calls": 9
+          },
+          {
+            "open_ms": 806.8,
+            "jump_ms": 420.4,
+            "open_rex_calls": 29,
+            "jump_rex_calls": 9
+          },
+          {
+            "open_ms": 814.0,
+            "jump_ms": 416.8,
+            "open_rex_calls": 29,
+            "jump_rex_calls": 9
+          }
+        ]
+      }
+    }
+  }
+}

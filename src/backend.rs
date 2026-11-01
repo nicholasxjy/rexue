@@ -112,88 +112,110 @@ impl Rex {
         let rows = response["sessions"]
             .as_array()
             .context("Rex response missing sessions")?;
+        parallel_entries(rows, |row| {
+            self.inspect_entries(row, sessions, agents, None)
+        })
+    }
+    /// Refresh a selected session and, optionally, only its selected agent pane.
+    pub fn list_session(&self, id: &str, block: Option<&str>) -> Result<Vec<Entry>> {
+        let response = self.json(&["ls", "--json"])?;
+        let rows = response["sessions"]
+            .as_array()
+            .context("Rex response missing sessions")?;
+        match rows.iter().find(|row| row["session_id"] == id) {
+            Some(row) => self.inspect_entries(row, true, block.is_some(), block),
+            None => Ok(Vec::new()),
+        }
+    }
+    fn inspect_entries(
+        &self,
+        row: &Value,
+        sessions: bool,
+        agents: bool,
+        target_block: Option<&str>,
+    ) -> Result<Vec<Entry>> {
+        let id = row["session_id"]
+            .as_str()
+            .context("Rex session missing session_id")?;
+        let name = row["label"].as_str().unwrap_or(id);
+        // A session can disappear between list and inspect. Skip only that race;
+        // malformed or unreachable service responses must remain visible errors.
+        let inspect = match self.inspect(id) {
+            Ok(v) => v,
+            Err(e) if e.to_string().contains("exit 3") => return Ok(Vec::new()),
+            Err(e) => return Err(e),
+        };
+        let focused = active_window(&inspect).and_then(|w| w["focused_block_id"].as_str());
+        let focused_process = focused.and_then(|block| self.block_process(id, block).ok());
         let mut entries = Vec::new();
-        for s in rows {
-            let id = s["session_id"]
-                .as_str()
-                .context("Rex session missing session_id")?;
-            let name = s["label"].as_str().unwrap_or(id);
+        if sessions {
             let mut entry = Entry::new(name, PathBuf::new(), Source::Rex);
             entry.session_id = Some(id.into());
-            // A session can disappear between list and inspect. Skip only that race;
-            // malformed or unreachable service responses must remain visible errors.
-            let inspect = match self.inspect(id) {
-                Ok(v) => v,
-                Err(e) if e.to_string().contains("exit 3") => continue,
-                Err(e) => return Err(e),
-            };
-            let focused = active_window(&inspect).and_then(|w| w["focused_block_id"].as_str());
-            let focused_process = focused.and_then(|block| self.block_process(id, block).ok());
-            if sessions {
-                if let Some(process) = &focused_process {
-                    entry.path = process_path(process).unwrap_or_default();
-                }
-                if entry.path.as_os_str().is_empty()
-                    && let Some(block) = focused
-                {
-                    entry.path = self.reported_path(id, block).unwrap_or_default();
-                }
-                entries.push(entry);
+            if let Some(process) = &focused_process {
+                entry.path = process_path(process).unwrap_or_default();
             }
-            if agents {
-                for window in inspect["windows"].as_array().into_iter().flatten() {
-                    let Some(window_id) = window["window_id"].as_str() else {
-                        continue;
-                    };
-                    let window_name = window["label"].as_str().unwrap_or(window_id);
-                    for layer in window["layers"].as_array().into_iter().flatten() {
-                        for block in layer["blocks"].as_array().into_iter().flatten() {
-                            if block["creator_name"] != "com.superlogical.terminal" {
-                                continue;
-                            }
-                            let Some(block_id) = block["block_id"].as_str() else {
-                                continue;
-                            };
-                            let process = if focused == Some(block_id) {
-                                focused_process.clone()
-                            } else {
-                                self.block_process(id, block_id).ok()
-                            };
-                            let Some(process) = process else { continue };
-                            // Status is optional on older Rex versions and on agents
-                            // that do not implement OSC 7501. Process identity still works.
-                            let status = self
-                                .json(&[
-                                    "block",
-                                    "call",
-                                    "-s",
-                                    id,
-                                    "-b",
-                                    block_id,
-                                    "program_status",
-                                ])
-                                .unwrap_or(Value::Null);
-                            let Some(running) = crate::agent::running(&process, &status) else {
-                                continue;
-                            };
-                            let mut agent = Entry::new(
-                                format!("{} · {name} / {window_name}", running.app),
-                                running.path,
-                                Source::Agent,
-                            );
-                            agent.session_id = Some(id.into());
-                            agent.agent = Some(Agent {
-                                app: running.app.into(),
-                                state: running.state,
-                                session_name: name.into(),
-                                window_id: window_id.into(),
-                                block_id: block_id.into(),
-                            });
-                            entries.push(agent);
+            if entry.path.as_os_str().is_empty()
+                && let Some(block) = focused
+            {
+                entry.path = self.reported_path(id, block).unwrap_or_default();
+            }
+            entries.push(entry);
+        }
+        if agents {
+            let mut blocks = Vec::new();
+            for window in inspect["windows"].as_array().into_iter().flatten() {
+                let Some(window_id) = window["window_id"].as_str() else {
+                    continue;
+                };
+                let window_name = window["label"].as_str().unwrap_or(window_id);
+                for layer in window["layers"].as_array().into_iter().flatten() {
+                    for block in layer["blocks"].as_array().into_iter().flatten() {
+                        if block["creator_name"] != "com.superlogical.terminal" {
+                            continue;
+                        }
+                        if let Some(block_id) = block["block_id"].as_str()
+                            && target_block.is_none_or(|target| target == block_id)
+                        {
+                            blocks.push((window_id, window_name, block_id));
                         }
                     }
                 }
             }
+            entries.extend(parallel_entries(
+                &blocks,
+                |&(window_id, window_name, block_id)| {
+                    let process = if focused == Some(block_id) {
+                        focused_process.clone()
+                    } else {
+                        self.block_process(id, block_id).ok()
+                    };
+                    let Some(process) = process else {
+                        return Ok(Vec::new());
+                    };
+                    // Status is optional on older Rex versions and on agents that do
+                    // not implement OSC 7501. Process identity still works.
+                    let status = self
+                        .json(&["block", "call", "-s", id, "-b", block_id, "program_status"])
+                        .unwrap_or(Value::Null);
+                    let Some(running) = crate::agent::running(&process, &status) else {
+                        return Ok(Vec::new());
+                    };
+                    let mut agent = Entry::new(
+                        format!("{} · {name} / {window_name}", running.app),
+                        running.path,
+                        Source::Agent,
+                    );
+                    agent.session_id = Some(id.into());
+                    agent.agent = Some(Agent {
+                        app: running.app.into(),
+                        state: running.state,
+                        session_name: name.into(),
+                        window_id: window_id.into(),
+                        block_id: block_id.into(),
+                    });
+                    Ok(vec![agent])
+                },
+            )?);
         }
         Ok(entries)
     }
@@ -273,6 +295,40 @@ impl Rex {
         Ok(())
     }
 }
+/// Preserve catalog order while bounding discovery to four sessions and four panes
+/// per session at a time. Small/targeted queries need no worker thread.
+fn parallel_entries<T: Sync>(
+    items: &[T],
+    query: impl Fn(&T) -> Result<Vec<Entry>> + Sync,
+) -> Result<Vec<Entry>> {
+    if items.len() <= 1 {
+        return items.iter().try_fold(Vec::new(), |mut entries, item| {
+            entries.extend(query(item)?);
+            Ok(entries)
+        });
+    }
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = items
+            .chunks(items.len().div_ceil(4))
+            .map(|chunk| {
+                let query = &query;
+                scope.spawn(move || -> Result<Vec<Entry>> {
+                    chunk.iter().try_fold(Vec::new(), |mut entries, item| {
+                        entries.extend(query(item)?);
+                        Ok(entries)
+                    })
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .try_fold(Vec::new(), |mut entries, worker| {
+                entries.extend(worker.join().expect("Rex discovery worker panicked")?);
+                Ok(entries)
+            })
+    })
+}
+
 fn process_path(value: &Value) -> Option<PathBuf> {
     value["foreground"]["cwd"]
         .as_str()
