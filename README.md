@@ -2,6 +2,16 @@
 
 An **fzf picker for Rex sessions, coding agents, and Git worktrees**. Connect to a project once; later visits reuse its session. Currently verified on macOS.
 
+## Demo
+
+Session and agent picker:
+
+![Rexue session picker showing running sessions, coding agents, and directory history](assets/s1.png)
+
+Worktree picker:
+
+![Rexue worktree picker showing a Git branch and checkout path](assets/s.png)
+
 ## Install
 
 Install and open [Rex](https://www.superlogical.com/rex/docs/installation). Run the following commands inside a Rex terminal, where its `rex` CLI is already on `PATH`.
