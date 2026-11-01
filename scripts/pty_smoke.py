@@ -263,6 +263,83 @@ else:
                         lambda s: (s.expect(name), s.send(b'#'), s.expect('#2'), s.send(b'2')))
         assert 'session:second' in text
 
+        custom_keys = '''
+[tui.keybindings]
+accept = ['alt-a', 'alt-s']
+cancel = ['alt-q', 'alt-z']
+up = ['alt-k', 'alt-p']
+down = ['alt-j', 'alt-n']
+toggle_preview = ['alt-o', 'alt-v']
+rename = ['alt-r', 'f2']
+remove = ['alt-x', 'alt-d']
+select_2 = ['alt-2', 'alt-3']
+confirm_yes = ['alt-y', 'alt-v']
+confirm_no = ['alt-n', 'alt-c']
+'''
+        cfg.write_text(config + custom_keys)
+
+        def send_expect(s, data, expected):
+            offset = len(s.capture)
+            s.send(data)
+            s.until(lambda: expected in s.capture[offset:].decode('utf-8', 'replace'), 'missing output after configured key: ' + expected)
+
+        def custom_navigation(s):
+            s.resize(240, 30)
+            s.expect('Alt-A connect')
+            s.expect('Alt-R rename')
+            s.expect('PREVIEW_session:first')
+            for down, up in [(b'\x1bj', b'\x1bk'), (b'\x1bn', b'\x1bp')]:
+                send_expect(s, down, 'PREVIEW_session:second')
+                send_expect(s, up, 'PREVIEW_session:first')
+            s.send(b'\x1bz')
+        run_case('configured-multiple-navigation-keys-and-header', ['picker', '--rex'], custom_navigation)
+        for key in [b'\x1ba', b'\x1bs']:
+            text = run_case('configured-accept-' + key.hex(), ['picker', '--rex'], lambda s, key=key: (s.expect('PREVIEW_session:first'), s.send(key)))
+            assert 'session:first' in text
+        for key in [b'\x1b2', b'\x1b3']:
+            text = run_case('configured-index-' + key.hex(), ['picker', '--rex', '--query=#'], lambda s, key=key: (s.expect('#2'), s.send(key)))
+            assert 'session:second' in text
+        for key in [b'\x1bo', b'\x1bv']:
+            run_case('configured-preview-' + key.hex(), ['picker', '--rex', '--no-preview'], lambda s, key=key: (s.expect('Alt-O preview'), s.send(key), s.expect('PREVIEW_session:first'), s.send(b'\x1bq')))
+        for key in [b'\x1br', b'\x1bOQ']:
+            def configured_rename(s, key=key):
+                s.expect('PREVIEW_session:first')
+                send_expect(s, key, 'New name >')
+                s.expect('Alt-A save')
+                send_expect(s, b'\x1ba', 'Alt-A connect')
+                s.send(b'\x1bq')
+            run_case('configured-rename-and-input-accept-' + key.hex(), ['picker', '--rex'], configured_rename)
+        for key, no in [(b'\x1bx', b'\x1bn'), (b'\x1bd', b'\x1bc')]:
+            def configured_decline(s, key=key, no=no):
+                s.expect('PREVIEW_session:first')
+                send_expect(s, key, 'Kill this Rex session?')
+                send_expect(s, no, 'Alt-A connect')
+                s.send(b'\x1bq')
+            run_case('configured-remove-and-decline-' + key.hex(), ['picker', '--rex'], configured_decline)
+        for yes in [b'\x1by', b'\x1bv']:
+            def configured_confirm(s, yes=yes):
+                s.expect('PREVIEW_session:first')
+                send_expect(s, b'\x1bx', 'Kill this Rex session?')
+                s.send(yes)
+                s.until(lambda: (root/'killed').exists(), 'configured confirmation did not remove the session')
+                s.expect('Alt-A connect')
+                s.send(b'\x1bq')
+            run_case('configured-confirm-yes-' + yes.hex(), ['picker', '--rex'], configured_confirm)
+            assert (root/'killed').read_text() == 'session:first\n'
+            (root/'killed').unlink()
+
+        run_case('overridden-default-keys-no-longer-trigger-actions', ['picker', '--rex'],
+                 lambda s: (s.expect('PREVIEW_session:first'), s.send(b'\x12\x18\r\x1b\x1bz')))
+        assert not (root/'killed').exists()
+        cfg.write_text(config + '\n[tui.keybindings]\nrename=[]\ntoggle_preview=[]\nselect_2=[]\n')
+        def disabled_shortcuts(s):
+            s.expect('PREVIEW_session:first')
+            s.send(b'\x12\x0f')
+            send_expect(s, b'#2', '#2')
+            s.send(b'\x1b')
+        run_case('empty-key-arrays-disable-actions-and-restore-digit-input', ['picker', '--rex'], disabled_shortcuts)
+        cfg.write_text(config)
+
         def rename_calls():
             return [call for call in (json.loads(line) for line in (root/'rex-calls.jsonl').read_text().splitlines()) if call[:2] == ['session', 'rename']]
 
@@ -433,6 +510,29 @@ os.execv('''+repr(real_wt)+''',['wt','--config','''+repr(str(wt_config))+''',*sy
             checks.append({'case':'global-worktree-source-connects-actual-checkout',**report})
         finally:
             s.close()
+        saved_worktree_config = cfg.read_text()
+        cfg.write_text(saved_worktree_config + '''
+[tui.keybindings]
+create_worktree = ['alt-w', 'alt-b']
+refresh = ['alt-r', 'alt-f']
+accept = ['alt-a', 'alt-s']
+cancel = ['alt-q', 'alt-z']
+''')
+        for create, refresh_key, cancel_key in [(b'\x1bw', b'\x1br', b'\x1bq'), (b'\x1bb', b'\x1bf', b'\x1bz')]:
+            s = Session(binary, cfg, root, arguments=[*base, 'wt', 'pk', '--path', str(repo), '--query=zz-no-current'], env_extra=env)
+            try:
+                s.expect('0/0')
+                send_expect(s, refresh_key, 'Alt-W create')
+                send_expect(s, create, 'Branch >')
+                s.expect('Alt-A create and connect')
+                send_expect(s, cancel_key, 'Alt-W create')
+                s.expect('zz-no-current')
+                s.send(cancel_key)
+                checks.append({'case': 'configured-worktree-create-refresh-empty-results-' + create.hex(), **s.finish()})
+            finally:
+                s.close()
+        cfg.write_text(saved_worktree_config)
+
         def open_branch_prompt(session):
             offset = len(session.capture)
             session.send(b'\x17')

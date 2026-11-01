@@ -47,7 +47,7 @@ rexue last                   # Return to the previous session.
 
 The picker combines Rex sessions, running agents, configured projects, zoxide history, and registered worktrees. Selecting an agent focuses its terminal pane and tab.
 
-**Enter** connects, **Esc** cancels, **Ctrl+J/K** moves, and **Ctrl+O** toggles preview. **Ctrl+R** renames a session; **Ctrl+X** asks to remove a live session, history entry, or worktree.
+**Enter** connects, **Esc** cancels, **Ctrl+J/K** moves, and **Ctrl+O** toggles preview. **Ctrl+R** renames a session; **Ctrl+X** asks to remove a live session, history entry, or worktree. Configure one or more keys per action in [`[tui.keybindings]`](docs/CONFIGURATION.md#keybindings); omitted actions keep these defaults.
 
 For worktrees, run inside a Git repository or add `--path ~/Projects/app`:
 

@@ -69,3 +69,31 @@ preview_width = 60
 preview_min_width = 100
 preview_border = "line"
 group_separator = false
+
+# Each action accepts multiple fzf key names. Omit it to keep defaults;
+# an array replaces that action's defaults, and [] disables its shortcuts.
+[tui.keybindings]
+accept = ["enter", "double-click"]
+cancel = ["esc", "ctrl-c", "ctrl-g", "ctrl-q"]
+up = ["up", "ctrl-k", "ctrl-p"]
+down = ["down", "ctrl-j", "ctrl-n"]
+half_page_up = ["ctrl-u"]
+half_page_down = ["ctrl-d"]
+toggle_preview = ["ctrl-o"]
+rename = ["ctrl-r"] # For example: ["ctrl-r", "alt-r", "f2"].
+remove = ["ctrl-x"]
+refresh = ["ctrl-r"] # Worktree picker only.
+create_worktree = ["ctrl-w"] # Worktree picker only.
+select_1 = ["1"] # Session picker: choose this row while the query starts with #.
+select_2 = ["2"]
+select_3 = ["3"]
+select_4 = ["4"]
+select_5 = ["5"]
+select_6 = ["6"]
+select_7 = ["7"]
+select_8 = ["8"]
+select_9 = ["9"]
+confirm_yes = ["y"] # Removal confirmation only.
+confirm_no = ["n", "q"]
+confirm_up = ["up", "ctrl-k", "ctrl-p", "left", "btab"]
+confirm_down = ["down", "ctrl-j", "ctrl-n", "right", "tab"]

@@ -134,6 +134,70 @@ fn imports_append_session_wildcard_and_worktree_definitions_once() {
 }
 
 #[test]
+fn picker_keybindings_keep_defaults_and_override_individual_actions() {
+    let defaults = load("strict_mode=true").unwrap();
+    assert_eq!(defaults.tui.keybindings.keys("rename"), ["ctrl-r"]);
+    assert_eq!(
+        defaults.tui.keybindings.keys("cancel"),
+        ["esc", "ctrl-c", "ctrl-g", "ctrl-q"]
+    );
+    assert_eq!(defaults.tui.keybindings.keys("select_2"), ["2"]);
+    let configured = load("strict_mode=true\n[tui.keybindings]\nrename=['alt-r', 'f2']\ntoggle_preview=[]\nselect_2=['alt-2', 'f3']\naccept=['return']\n").unwrap();
+    assert_eq!(configured.tui.keybindings.keys("rename"), ["alt-r", "f2"]);
+    assert!(configured.tui.keybindings.keys("toggle_preview").is_empty());
+    assert_eq!(configured.tui.keybindings.keys("accept"), ["enter"]);
+    assert_eq!(configured.tui.keybindings.keys("remove"), ["ctrl-x"]);
+    assert_eq!(
+        load("[tui.keybindings]")
+            .unwrap()
+            .tui
+            .keybindings
+            .keys("rename"),
+        ["ctrl-r"]
+    );
+}
+
+#[test]
+fn picker_keybindings_reject_invalid_keys_types_and_conflicts() {
+    for settings in [
+        "rename='alt-r'",
+        "rename=['']",
+        "rename=['ctrl-nope']",
+        "rename=['ctrl-alt-space']",
+        "rename=['ctrl-alt-/']",
+        "rename=['start']",
+        "rename=['ctrl-r:execute(touch INJECTED)']",
+        "rename=['alt-r', 'alt-r']",
+        "rename=['ctrl-x']",
+        "rename=['ctrl-m']",
+        "accept=['enter', 'return']",
+        "confirm_yes=['ctrl-i']",
+        "select_2=['1']",
+        "confirm_yes=['tab']",
+        "cancel=['ctrl-j']",
+    ] {
+        assert!(
+            load(&format!("[tui.keybindings]\n{settings}")).is_err(),
+            "{settings}"
+        );
+    }
+    assert!(load("strict_mode=true\n[tui.keybindings]\nrenmae=['f2']").is_err());
+    let ignored = load("[tui.keybindings]\nrenmae=['f2']").unwrap();
+    assert_eq!(ignored.tui.keybindings.keys("rename"), ["ctrl-r"]);
+    // These pairs belong to different picker contexts and may share keys.
+    assert!(
+        load("[tui.keybindings]\nrename=['ctrl-r']\nrefresh=['ctrl-r']\nconfirm_yes=['ctrl-r']")
+            .is_ok()
+    );
+}
+
+#[test]
+fn editable_configuration_example_loads_with_keybinding_defaults() {
+    let cfg = load(include_str!("../examples/rexue.toml")).unwrap();
+    assert_eq!(cfg.tui.keybindings.keys("rename"), ["ctrl-r"]);
+}
+
+#[test]
 fn picker_defaults_and_numeric_normalization_survive_config_loading() {
     let cfg = load("strict_mode=true\ndir_length=-1\ngit_dir_length=0\n[tui]\nprompt=''\npointer='too wide'\npreview_width=1000\npreview_min_width=-1\nalias_auto_connect_delay='-1ms'").unwrap();
     assert_eq!((cfg.dir_length, cfg.git_dir_length), (1, 1));

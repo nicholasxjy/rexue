@@ -2,7 +2,7 @@
 
 Rexue's supported workflows are Rex sessions, zoxide directory history and Worktrunk worktrees. The current verification platform is macOS.
 
-The keyboard compatibility update passed all 121 Rust tests (83 unit, 33 process integration, 5 scope/configuration), `cargo fmt --check`, and `cargo clippy --all-targets -- -D warnings`. Actual fzf 0.74.5 passed the existing 34 picker PTY cases and 9 keyboard cases. The existing Worktrunk 0.81.0 and Git receipt covers 21 isolated acceptance checks. Expected missing/old/failing-tool cases deliberately exit with errors and are asserted by the scripts.
+The configurable keybindings update passed all 136 Rust tests (88 unit, 40 process integration, 8 scope/configuration), `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo build`. Actual fzf 0.74.5 passed 54 picker PTY cases, including 17 cases for configurable shortcuts, and 9 keyboard cases. Real Worktrunk 0.81.0 and Git passed 21 isolated acceptance checks. The new cases cover multiple keys per action, updated hints, overridden and disabled defaults, confirmation and input dialogs, and worktree create/refresh shortcuts with no matching rows. All interactive cases restored the terminal. Expected missing/old/failing-tool cases deliberately exit with errors and are asserted by the scripts.
 
 Current receipts: [fzf](verification/fzf.json), [keyboard compatibility](verification/keyboard.json), [Worktrunk](verification/worktree.json), and [public CLI, all five shell completions and example configuration](verification/public-cli.json). The three focused shell/wildcard probes below also passed. Local Markdown links and `git diff --check` were checked.
 

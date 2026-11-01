@@ -2,6 +2,21 @@
   "system_fzf": "0.74.5 (Homebrew)",
   "pty": [
     {
+      "case": "agents-after-session-group-inactive-tab-duplicate-names-exact-pane",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "agents-reject-session-delete-and-rename-actions",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "agents-filter-by-state-and-connect-pane",
+      "restored": true,
+      "exit": 0
+    },
+    {
       "case": "group-separator-lines-skip-headings-and-preserve-selection",
       "restored": true,
       "exit": 0
@@ -62,6 +77,81 @@
       "exit": 0
     },
     {
+      "case": "configured-multiple-navigation-keys-and-header",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "configured-accept-1b61",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "configured-accept-1b73",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "configured-index-1b32",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "configured-index-1b33",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "configured-preview-1b6f",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "configured-preview-1b76",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "configured-rename-and-input-accept-1b72",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "configured-rename-and-input-accept-1b4f51",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "configured-remove-and-decline-1b78",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "configured-remove-and-decline-1b64",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "configured-confirm-yes-1b79",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "configured-confirm-yes-1b76",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "overridden-default-keys-no-longer-trigger-actions",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "empty-key-arrays-disable-actions-and-restore-digit-input",
+      "restored": true,
+      "exit": 0
+    },
+    {
       "case": "rename-cancel-preserves-name",
       "restored": true,
       "exit": 0
@@ -118,6 +208,16 @@
     },
     {
       "case": "global-worktree-source-connects-actual-checkout",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "configured-worktree-create-refresh-empty-results-1b77",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "configured-worktree-create-refresh-empty-results-1b62",
       "restored": true,
       "exit": 0
     },

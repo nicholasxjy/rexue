@@ -490,6 +490,7 @@ fn picker_options_for(
         preview_min_width: cfg.tui.preview_min_width,
         preview_border: cfg.tui.preview_border.clone(),
         group_separator: cfg.tui.group_separator,
+        keybindings: cfg.tui.keybindings.clone(),
         worktree,
         ..Default::default()
     })
@@ -1245,6 +1246,36 @@ mod tests {
         let path = dir.path().join("picker.toml");
         std::fs::write(&path, text).unwrap();
         Config::load(Some(&path)).unwrap()
+    }
+
+    #[test]
+    fn picker_keybindings_survive_config_loading_and_cli_overrides() {
+        for text in [
+            "",
+            "[tui.keybindings]",
+            "[tui.keybindings]\nrename=['alt-r', 'f2']\ntoggle_preview=[]",
+        ] {
+            let cfg = loaded_picker_config(text);
+            for worktree in [false, true] {
+                let options = picker_options_for(
+                    &cfg,
+                    &parsed_picker(&["--prompt=", "--placeholder=", "--no-preview"]),
+                    worktree,
+                )
+                .unwrap();
+                assert_eq!(
+                    options.keybindings.keys("rename"),
+                    cfg.tui.keybindings.keys("rename")
+                );
+                assert_eq!(
+                    options.keybindings.keys("toggle_preview"),
+                    cfg.tui.keybindings.keys("toggle_preview")
+                );
+                assert!(options.prompt.is_empty());
+                assert!(options.placeholder.is_empty());
+                assert!(!options.preview);
+            }
+        }
     }
 
     #[test]

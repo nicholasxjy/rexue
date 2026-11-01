@@ -100,6 +100,41 @@ Install Worktrunk 0.81.0 or newer. `REXUE_WT` selects another executable. Worktr
 | `preview_border` | `"line"` | `none`, `line`, `thick`, `double`; unknown values use `line`. |
 | `group_separator` | `false` | Draw a nonselectable separator above each source group. The Agents group always shows its boundary when the query is empty. |
 
-`picker --icons`, `--separator-aware`, `--prompt`, `--placeholder`, `--query`, `--preview`, `--no-preview` and `--no-alias-auto` override the corresponding behavior. Worktree picker supports icons, prompt, placeholder and query overrides; Ctrl+O toggles its preview. fzf owns terminal layout and editing.
+`picker --icons`, `--separator-aware`, `--prompt`, `--placeholder`, `--query`, `--preview`, `--no-preview` and `--no-alias-auto` override the corresponding behavior. Worktree picker supports icons, prompt, placeholder and query overrides. Picker shortcuts use `[tui.keybindings]` below; fzf owns terminal layout and other text editing.
 
 `[icons.agent]`, `[icons.rex]`, `[icons.config]`, `[icons.zoxide]`, `[icons.directory]` and `[icons.worktree]` accept `icon` and `color`. Colors are black/red/green/yellow/blue/magenta/cyan/white with optional `bright-`, or gray/grey. A session, wildcard or repository icon takes priority over its source icon.
+
+### Keybindings
+
+`[tui.keybindings]` maps each action to an array of fzf key names. Each action can have multiple shortcuts. Omitted actions keep their defaults; a configured array replaces all default keys for that action, and `[]` disables its shortcuts. Removing a digit shortcut restores ordinary digit input. The picker header and text prompts show the first configured keyboard shortcut and omit disabled actions.
+
+```toml
+[tui.keybindings]
+rename = ["ctrl-r", "alt-r", "f2"]
+remove = ["ctrl-x", "alt-x"]
+toggle_preview = ["alt-o"]
+select_2 = ["2", "alt-2"]
+```
+
+| Action | Default keys | Context |
+| --- | --- | --- |
+| `accept` | `enter`, `double-click` | Connect in either picker; save text or accept the selected confirmation row in dialogs. |
+| `cancel` | `esc`, `ctrl-c`, `ctrl-g`, `ctrl-q` | Both pickers and all dialogs. |
+| `up` | `up`, `ctrl-k`, `ctrl-p` | Both pickers. |
+| `down` | `down`, `ctrl-j`, `ctrl-n` | Both pickers. |
+| `half_page_up` | `ctrl-u` | Both pickers. |
+| `half_page_down` | `ctrl-d` | Both pickers. |
+| `toggle_preview` | `ctrl-o` | Both pickers. |
+| `rename` | `ctrl-r` | Session picker; live Rex sessions only. |
+| `remove` | `ctrl-x` | Both pickers; opens a confirmation. |
+| `refresh` | `ctrl-r` | Worktree picker only. |
+| `create_worktree` | `ctrl-w` | Worktree picker only, including when no rows match. |
+| `select_1` … `select_9` | `1` … `9`, respectively | Session picker: select a numbered row when the query starts with `#`; otherwise insert its digit. Each action accepts multiple keys independently. |
+| `confirm_yes` | `y` | Removal confirmation: select Yes and accept. |
+| `confirm_no` | `n`, `q` | Removal confirmation: cancel. |
+| `confirm_up` | `up`, `ctrl-k`, `ctrl-p`, `left`, `btab` | Removal confirmation. |
+| `confirm_down` | `down`, `ctrl-j`, `ctrl-n`, `right`, `tab` | Removal confirmation. |
+
+Use lowercase named keys such as `enter`, `esc`, `tab`, `space`, `up`, `page-down`, `f1`–`f12`, `ctrl-a`–`ctrl-z`, `alt-r`, or modified navigation keys such as `ctrl-up`. Single printable characters are also accepted, except binding delimiters `: , + ( ) [ ] { }` and backslash. Key names are case-sensitive, including `alt-r` versus `alt-R`. Aliases such as `return`/`ctrl-m`, `shift-tab`, `pgup`, and `pgdn` normalize before conflict checks.
+
+Invalid key names and duplicate assignments in the same context fail configuration loading. A key can serve different actions in separate contexts, such as the default `ctrl-r` for session rename and worktree refresh. Reassigning a key within one context requires replacing or disabling the action that currently owns it. Other fzf editing and mouse bindings retain their usual behavior. Rex shortcuts that open Rexue itself remain in Rex's `init.lua`.

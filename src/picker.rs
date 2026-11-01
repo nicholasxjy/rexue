@@ -1,4 +1,5 @@
 //! System-fzf picker. Display strings never serve as connection identities.
+use crate::keybindings::Keybindings;
 use crate::keyboard::{Keyboard, copy_size, set_raw};
 use crate::model::{Entry, Source, alias_key};
 use anyhow::{Context, Result, anyhow, bail};
@@ -48,6 +49,7 @@ pub struct PickerOptions {
     pub preview_min_width: usize,
     pub preview_border: String,
     pub group_separator: bool,
+    pub keybindings: Keybindings,
     pub worktree: bool,
     pub auto_refresh: bool,
 }
@@ -73,6 +75,7 @@ impl Default for PickerOptions {
             preview_min_width: 100,
             preview_border: "line".into(),
             group_separator: false,
+            keybindings: Keybindings::default(),
             worktree: false,
             auto_refresh: true,
         }
@@ -241,13 +244,31 @@ impl Catalog {
         )
     }
     fn header(&self) -> String {
-        let keys = if self.options.worktree {
-            "Ctrl-W create · Enter connect · Ctrl-R refresh · Ctrl-X remove · Ctrl-O preview · Esc cancel"
+        let actions: &[(&str, &str)] = if self.options.worktree {
+            &[
+                ("create_worktree", "create"),
+                ("accept", "connect"),
+                ("refresh", "refresh"),
+                ("remove", "remove"),
+                ("toggle_preview", "preview"),
+                ("cancel", "cancel"),
+            ]
         } else {
-            "Enter connect · Esc cancel · Ctrl-O preview · Ctrl-R rename · Ctrl-X remove"
+            &[
+                ("accept", "connect"),
+                ("cancel", "cancel"),
+                ("toggle_preview", "preview"),
+                ("rename", "rename"),
+                ("remove", "remove"),
+            ]
         };
+        let keys = actions
+            .iter()
+            .filter_map(|(action, label)| self.options.keybindings.hint(action, label))
+            .collect::<Vec<_>>()
+            .join(" · ");
         if self.status.is_empty() {
-            keys.into()
+            keys
         } else {
             format!("{keys}\n{}", clean(&self.status))
         }
@@ -331,7 +352,7 @@ impl Bridge {
                                             && (s.alias_query(&request.query).is_some() || a.auto_connect)
                                     }).map(|_| s.options.alias_auto_connect_delay)
                                 };
-                                if let Some(delay) = delay { thread::sleep(delay); return Ok(b"pos(1)+accept".to_vec()); }
+                                if let Some(delay) = delay { thread::sleep(delay); return Ok(b"pos(1)+print(accept)+accept".to_vec()); }
                                 Ok(Vec::new())
                             }
                             "index" => {
@@ -341,7 +362,7 @@ impl Bridge {
                                 let action = if s.index_query(&request.query).is_some() {
                                     // pos() clamps, so do not select when the requested row is absent.
                                     let count = request.matches;
-                                    if digit <= count { format!("pos({digit})+accept") } else { String::new() }
+                                    if digit <= count { format!("pos({digit})+print(accept)+accept") } else { String::new() }
                                 } else { format!("put({digit})") };
                                 Ok(action.into_bytes())
                             }
@@ -579,23 +600,61 @@ fn check_fzf() -> Result<()> {
 fn finder(options: &PickerOptions, bridge: &Bridge, header: &str, query: &str) -> Result<Output> {
     let mut command = Command::new("fzf");
     clean_fzf_env(&mut command);
-    command.env("REXUE_PICKER_EXE", std::env::current_exe()?)
+    command
+        .env("REXUE_PICKER_EXE", std::env::current_exe()?)
         .env("REXUE_PICKER_SOCKET", &bridge.socket)
-        .args(["--read0", "--print0", "--print-query", "--no-multi", "--disabled", "--no-sort", "--ansi", "--layout=reverse", "--delimiter=\t", "--with-nth=3.."])
+        .args([
+            "--read0",
+            "--print0",
+            "--print-query",
+            "--no-multi",
+            "--disabled",
+            "--no-sort",
+            "--ansi",
+            "--layout=reverse",
+            "--delimiter=\t",
+            "--with-nth=3..",
+        ])
         .arg(format!("--prompt={}", clean(&options.prompt)))
         .arg(format!("--ghost={}", clean(&options.placeholder)))
         .arg(format!("--pointer={}", clean(&options.pointer)))
         .arg(format!("--query={query}"))
         .arg(format!("--header={header}"))
-        .arg(if options.worktree { "--expect=ctrl-r,ctrl-x,ctrl-w" } else { "--expect=ctrl-r,ctrl-x" })
         .arg(format!("--bind=start:reload({HELPER} rows)"))
         .arg(format!("--bind=change:bg-cancel+reload({HELPER} rows)"))
-        .arg(format!("--bind=load:bg-transform({HELPER} loaded)"))
-        .arg("--bind=esc:abort,ctrl-c:abort,ctrl-k:up,ctrl-j:down,ctrl-p:up,ctrl-n:down,ctrl-u:half-page-up,ctrl-d:half-page-down");
-    {
-        for digit in (1..=9).filter(|_| !options.worktree) {
-            command.arg(format!("--bind={digit}:transform({HELPER} index {digit})"));
+        .arg(format!("--bind=load:bg-transform({HELPER} loaded)"));
+    let bindings = &options.keybindings;
+    bindings.reset(&mut command, &Keybindings::picker_actions(options.worktree));
+    for (action, fzf_action) in [
+        ("accept", "print(accept)+accept"),
+        ("cancel", "abort"),
+        ("up", "up"),
+        ("down", "down"),
+        ("half_page_up", "half-page-up"),
+        ("half_page_down", "half-page-down"),
+        ("toggle_preview", "toggle-preview"),
+        ("remove", "print(remove)+accept"),
+    ] {
+        bindings.bind(&mut command, action, fzf_action);
+    }
+    if options.worktree {
+        bindings.bind(&mut command, "refresh", "print(refresh)+accept");
+        bindings.bind(
+            &mut command,
+            "create_worktree",
+            "print(create_worktree)+accept",
+        );
+    } else {
+        bindings.bind(&mut command, "rename", "print(rename)+accept");
+        for digit in 1..=9 {
+            bindings.bind(
+                &mut command,
+                &format!("select_{digit}"),
+                &format!("transform({HELPER} index {digit})"),
+            );
         }
+    }
+    {
         let border = match options.preview_border.as_str() {
             "none" => "none",
             "thick" => "bold",
@@ -609,8 +668,7 @@ fn finder(options: &PickerOptions, bridge: &Bridge, header: &str, query: &str) -
                 options.preview_width.clamp(10, 90),
                 options.preview_min_width,
                 if options.preview { "" } else { ",hidden" }
-            ))
-            .arg("--bind=ctrl-o:toggle-preview");
+            ));
     }
     // stdout is exclusively the selection protocol. Keyboard input and terminal
     // rendering use a private PTY so extended keys can be normalized for fzf.
@@ -623,9 +681,17 @@ fn finder(options: &PickerOptions, bridge: &Bridge, header: &str, query: &str) -
         .context("could not start system fzf; is fzf installed and on PATH?")?;
     wait_fzf(child, keyboard)
 }
+#[derive(Debug, PartialEq, Eq)]
+enum ChoiceAction {
+    Accept,
+    Rename,
+    Remove,
+    Refresh,
+    CreateWorktree,
+}
 struct Choice {
     query: String,
-    key: String,
+    action: ChoiceAction,
     id: Option<String>,
 }
 fn choice(output: Output) -> Result<Option<Choice>> {
@@ -641,22 +707,30 @@ fn choice(output: Output) -> Result<Option<Choice>> {
     let text = String::from_utf8(output.stdout).context("fzf returned invalid UTF-8")?;
     let mut fields = text.split('\0');
     let query = fields.next().context("fzf omitted query")?.to_owned();
-    let key = fields.next();
-    // fzf exits 1 when no row matches, even for an expected action key.
-    // Creation and refresh remain useful without a selected row.
-    if code == Some(1) && !matches!(key, Some("ctrl-r" | "ctrl-w")) {
+    let action = match fields.next().context("fzf omitted action")? {
+        "accept" => ChoiceAction::Accept,
+        "rename" => ChoiceAction::Rename,
+        "remove" => ChoiceAction::Remove,
+        "refresh" => ChoiceAction::Refresh,
+        "create_worktree" => ChoiceAction::CreateWorktree,
+        "" if code == Some(1) => return Ok(None),
+        action => bail!("unexpected fzf action {action:?}"),
+    };
+    // fzf exits 1 without a selected row. Creation and refresh still apply.
+    if code == Some(1)
+        && !matches!(
+            action,
+            ChoiceAction::Rename | ChoiceAction::Refresh | ChoiceAction::CreateWorktree
+        )
+    {
         return Ok(None);
     }
-    let key = key.context("fzf omitted key")?.to_owned();
     let id = fields
         .next()
         .filter(|s| !s.is_empty())
         .and_then(|row| row.split('\t').next())
         .map(str::to_owned);
-    if !matches!(key.as_str(), "" | "ctrl-r" | "ctrl-x" | "ctrl-w") {
-        bail!("unexpected fzf action {key:?}");
-    }
-    Ok(Some(Choice { query, key, id }))
+    Ok(Some(Choice { query, action, id }))
 }
 // Preserve the incoming terminal configuration across all subprocess exits.
 // macOS may independently set PENDIN, a transient kernel input-state flag.
@@ -755,7 +829,7 @@ fn wait_fzf(mut child: std::process::Child, mut keyboard: Option<Keyboard>) -> R
     Ok(output)
 }
 
-fn confirm(entry: &Entry) -> Result<bool> {
+fn confirm(entry: &Entry, bindings: &Keybindings) -> Result<bool> {
     let question = if entry.source == Source::Rex {
         "Kill this Rex session?"
     } else if entry.source == Source::Worktree {
@@ -765,9 +839,32 @@ fn confirm(entry: &Entry) -> Result<bool> {
     };
     let mut command = Command::new("fzf");
     clean_fzf_env(&mut command);
-    command.args(["--read0", "--print0", "--no-multi", "--no-sort", "--layout=reverse", "--disabled", "--prompt=Confirm > "])
-        .arg(format!("--header={question}\n{}\n{}", clean(&entry.name), clean(&entry.path.display().to_string())))
-        .arg("--bind=esc:abort,ctrl-c:abort,n:abort,q:abort,y:first+accept,left:up,right:down,tab:down,btab:up");
+    command
+        .args([
+            "--read0",
+            "--print0",
+            "--no-multi",
+            "--no-sort",
+            "--layout=reverse",
+            "--disabled",
+            "--prompt=Confirm > ",
+        ])
+        .arg(format!(
+            "--header={question}\n{}\n{}",
+            clean(&entry.name),
+            clean(&entry.path.display().to_string())
+        ));
+    bindings.reset(&mut command, &Keybindings::confirmation_actions());
+    for (action, fzf_action) in [
+        ("accept", "accept"),
+        ("cancel", "abort"),
+        ("confirm_yes", "first+accept"),
+        ("confirm_no", "abort"),
+        ("confirm_up", "up"),
+        ("confirm_down", "down"),
+    ] {
+        bindings.bind(&mut command, action, fzf_action);
+    }
     // Confirmation is also rendered by fzf. Cancellation never calls remove.
     let keyboard = Keyboard::prepare(&mut command)?;
     let mut child = command
@@ -789,18 +886,28 @@ fn confirm(entry: &Entry) -> Result<bool> {
     }
 }
 
-fn rename_prompt(entry: &Entry) -> Result<Option<String>> {
+fn rename_prompt(entry: &Entry, bindings: &Keybindings) -> Result<Option<String>> {
     text_prompt(
         &entry.name,
         "New name > ",
-        &format!(
-            "Rename Rex session\n{}\nEnter save · Esc cancel",
-            clean(entry.target())
-        ),
+        &format!("Rename Rex session\n{}", clean(entry.target())),
+        "save",
+        bindings,
     )
 }
 
-fn text_prompt(initial: &str, prompt: &str, header: &str) -> Result<Option<String>> {
+fn text_prompt(
+    initial: &str,
+    prompt: &str,
+    header: &str,
+    accept_label: &str,
+    bindings: &Keybindings,
+) -> Result<Option<String>> {
+    let hints = [("accept", accept_label), ("cancel", "cancel")]
+        .iter()
+        .filter_map(|(action, label)| bindings.hint(action, label))
+        .collect::<Vec<_>>()
+        .join(" · ");
     let mut command = Command::new("fzf");
     clean_fzf_env(&mut command);
     command
@@ -815,8 +922,10 @@ fn text_prompt(initial: &str, prompt: &str, header: &str) -> Result<Option<Strin
         ])
         .arg(format!("--prompt={prompt}"))
         .arg(format!("--query={}", clean(initial)))
-        .arg(format!("--header={header}"))
-        .arg("--bind=esc:abort,ctrl-c:abort");
+        .arg(format!("--header={header}\n{hints}"));
+    bindings.reset(&mut command, &["accept", "cancel"]);
+    bindings.bind(&mut command, "accept", "accept");
+    bindings.bind(&mut command, "cancel", "abort");
     let keyboard = Keyboard::prepare(&mut command)?;
     let mut child = command
         .stdin(Stdio::piped())
@@ -893,11 +1002,13 @@ pub fn pick_with_create(
             return Ok(None);
         };
         query = chosen.query;
-        if chosen.key == "ctrl-w" && options.worktree {
+        if chosen.action == ChoiceAction::CreateWorktree && options.worktree {
             if let Some(branch) = text_prompt(
                 "",
                 "Branch > ",
-                "Create worktree\nEnter create and connect · Esc cancel",
+                "Create worktree",
+                "create and connect",
+                &options.keybindings,
             )? {
                 if branch.trim().is_empty() {
                     state.lock().unwrap().status = "Branch name must not be empty".into();
@@ -914,12 +1025,12 @@ pub fn pick_with_create(
             }
             continue;
         }
-        if chosen.key == "ctrl-r" && options.worktree {
+        if chosen.action == ChoiceAction::Refresh && options.worktree {
             refresh(&state, &fetch);
             continue;
         }
         let Some(id) = chosen.id else {
-            if chosen.key == "ctrl-r" {
+            if chosen.action == ChoiceAction::Rename {
                 continue;
             }
             return Ok(None);
@@ -934,10 +1045,10 @@ pub fn pick_with_create(
             return Ok(None);
         }
         let entry = target(&state, Some(&id))?;
-        if chosen.key == "ctrl-r" {
+        if chosen.action == ChoiceAction::Rename {
             if entry.source != Source::Rex {
                 state.lock().unwrap().status = "Only live Rex sessions can be renamed".into();
-            } else if let Some(name) = rename_prompt(&entry)?
+            } else if let Some(name) = rename_prompt(&entry, &options.keybindings)?
                 && name != entry.name
             {
                 match rename(&entry, &name) {
@@ -949,7 +1060,7 @@ pub fn pick_with_create(
             }
             continue;
         }
-        if chosen.key == "ctrl-x" {
+        if chosen.action == ChoiceAction::Remove {
             if !matches!(
                 entry.source,
                 Source::Rex | Source::Zoxide | Source::Directory | Source::Worktree
@@ -960,7 +1071,7 @@ pub fn pick_with_create(
                     "Configured sessions cannot be removed here; edit rexue.toml"
                 }
                 .into();
-            } else if confirm(&entry)? {
+            } else if confirm(&entry, &options.keybindings)? {
                 match remove(&entry) {
                     Ok(()) => {
                         state.lock().unwrap().removed(&entry);
@@ -1051,15 +1162,29 @@ mod tests {
             stderr: Vec::new(),
         };
         for code in [0, 1] {
-            for key in ["ctrl-w", "ctrl-r"] {
-                let action = choice(result(code, key)).unwrap().unwrap();
-                assert_eq!(action.key, key);
+            for (name, expected) in [
+                ("create_worktree", ChoiceAction::CreateWorktree),
+                ("refresh", ChoiceAction::Refresh),
+                ("rename", ChoiceAction::Rename),
+            ] {
+                let action = choice(result(code, name)).unwrap().unwrap();
+                assert_eq!(action.action, expected);
                 assert_eq!(action.query, "missing");
                 assert!(action.id.is_none());
             }
         }
         assert!(choice(result(1, "")).unwrap().is_none());
-        assert!(choice(result(130, "ctrl-w")).unwrap().is_none());
+        assert!(choice(result(1, "accept")).unwrap().is_none());
+        assert!(choice(result(1, "remove")).unwrap().is_none());
+        let selected = Output {
+            status: std::process::ExitStatus::from_raw(0),
+            stdout: b"query\0accept\x0042\trow\0".to_vec(),
+            stderr: Vec::new(),
+        };
+        let selected = choice(selected).unwrap().unwrap();
+        assert_eq!(selected.action, ChoiceAction::Accept);
+        assert_eq!(selected.id.as_deref(), Some("42"));
+        assert!(choice(result(130, "create_worktree")).unwrap().is_none());
         assert!(choice(result(0, "ctrl-q")).is_err());
     }
 
