@@ -455,7 +455,10 @@ fn picker_options_for(
             .clone()
             .unwrap_or_else(|| cfg.tui.prompt.clone()),
         placeholder: args.placeholder.clone().unwrap_or_else(|| {
-            if cfg.tui.placeholder.is_empty() {
+            if cfg.tui.placeholder.is_empty()
+                || (worktree
+                    && cfg.tui.placeholder == crate::config::TuiConfig::default().placeholder)
+            {
                 if worktree {
                     "Filter worktrees..."
                 } else {
@@ -1272,14 +1275,20 @@ mod tests {
     }
 
     #[test]
-    fn worktree_placeholder_resolution_matches_loader_then_fallback_then_explicit_override() {
+    fn worktree_placeholder_uses_context_default_and_preserves_custom_overrides() {
         let loaded = loaded_picker_config("");
         assert_eq!(loaded.tui.placeholder, "Filter Sessions...");
+        assert_eq!(
+            picker_options(&loaded, &PickerArgs::default())
+                .unwrap()
+                .placeholder,
+            "Filter Sessions..."
+        );
         assert_eq!(
             picker_options_for(&loaded, &PickerArgs::default(), true)
                 .unwrap()
                 .placeholder,
-            "Filter Sessions..."
+            "Filter worktrees..."
         );
         let configured = loaded_picker_config("[tui]\nplaceholder='Filter sessions...'\n");
         assert_eq!(
@@ -1302,7 +1311,7 @@ mod tests {
                 .placeholder,
             "Filter sessions..."
         );
-        for placeholder in ["", "Filter sessions..."] {
+        for placeholder in ["", "Filter Sessions...", "Custom worktree filter"] {
             let options = picker_options_for(
                 &loaded,
                 &PickerArgs {
@@ -1321,7 +1330,7 @@ mod tests {
             picker_options_for(&loaded_empty, &PickerArgs::default(), true)
                 .unwrap()
                 .placeholder,
-            "Filter Sessions..."
+            "Filter worktrees..."
         );
     }
 
