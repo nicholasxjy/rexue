@@ -129,6 +129,25 @@ labels=json.loads((root/'labels.json').read_text()) if (root/'labels.json').exis
 a=sys.argv[4:]
 if a[:1]==['-S']:a=a[2:]
 with (root/'rex-calls.jsonl').open('a') as f:f.write(json.dumps(a)+'\\n')
+if (root/'agents-mode').exists():
+    if a[:2]==['ls','--json']:
+        print(json.dumps({'sessions':[{'session_id':'session:agents','label':'agent-project'}]}));sys.exit(0)
+    if a[:2]==['session','inspect']:
+        windows=[]
+        for window,blocks in [('shell',['shell']),('agents',['first','second'])]:
+            windows.append({'window_id':'window:'+window,'label':window,'focused_block_id':'block:'+blocks[0],
+                            'layers':[{'blocks':[{'block_id':'block:'+b,'creator_name':'com.superlogical.terminal'} for b in blocks]}]})
+        print(json.dumps({'active_window_id':'window:shell','windows':windows}));sys.exit(0)
+    if a[:2]==['block','call']:
+        block=a[5]
+        pid=2 if block=='block:first' else 3
+        if a[6]=='process':
+            print(json.dumps({'last_exit':None,'foreground':{'pid':pid,'name':'node' if block!='block:shell' else 'zsh','argv0':'pi' if block!='block:shell' else 'zsh','cwd':fixture['path']}}))
+        else:
+            print(json.dumps({'records':[{'app':'pi','state':'working' if block=='block:first' else 'blocked','owner':{'pid':pid,'name':'node'}}] if block!='block:shell' else []}))
+        sys.exit(0)
+    if a[0]=='capture':print('AGENT_PREVIEW_'+a[4]);sys.exit(0)
+    if a[0]=='focus':print('{}');sys.exit(0)
 if a[:2]==['whoami','--json']:print('{}')
 elif a[:2]==['ls','--json']:
     killed=(root/'killed').read_text().splitlines() if (root/'killed').exists() else []
@@ -164,6 +183,33 @@ else:
                 return s.text()
             finally:
                 s.close()
+
+        (root/'agents-mode').touch()
+        def agent_navigation(s):
+            s.expect('── Agents ──')
+            s.expect('3/3')
+            s.expect('AGENT_PREVIEW_block:shell')
+            s.send(b'\x1b[B')
+            s.expect('AGENT_PREVIEW_block:first')
+            s.send(b'\x1b[B')
+            s.expect('AGENT_PREVIEW_block:second')
+            s.send(b'\r')
+        run_case('agents-after-session-group-inactive-tab-duplicate-names-exact-pane', ['picker', '--agents', '--rex'], agent_navigation)
+        calls=[json.loads(line) for line in (root/'rex-calls.jsonl').read_text().splitlines()]
+        assert ['focus','-s','session:agents','block:second'] in calls,calls
+
+        def agent_guards(s):
+            s.expect('AGENT_PREVIEW_block:first')
+            s.send(b'\x18')
+            s.expect('Agent rows cannot be removed')
+            s.send(b'\x12')
+            s.expect('Only live Rex sessions can be renamed')
+            s.send(b'\x1b')
+        run_case('agents-reject-session-delete-and-rename-actions', ['picker', '--agents'], agent_guards)
+        run_case('agents-filter-by-state-and-connect-pane', ['picker', '--agents'],
+                 lambda s: (s.expect('── Agents ──'), s.send(b'blocked'), s.expect('1/1'), s.expect('AGENT_PREVIEW_block:second'), s.send(b'\r')))
+        assert not (root/'killed').exists()
+        (root/'agents-mode').unlink()
 
         cfg.write_text(config.replace('[tui]\n', '[tui]\ngroup_separator=true\n') + 'preview_command="printf GROUP_CONFIG_PREVIEW"\n')
         def grouped_navigation(s):

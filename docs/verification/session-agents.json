@@ -1,0 +1,187 @@
+{
+  "system_fzf": "0.74.5 (Homebrew)",
+  "pty": [
+    {
+      "case": "agents-after-session-group-inactive-tab-duplicate-names-exact-pane",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "agents-reject-session-delete-and-rename-actions",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "agents-filter-by-state-and-connect-pane",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "group-separator-lines-skip-headings-and-preserve-selection",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "session-cancel-filter-preview-resize",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "session-sigterm-restores-terminal",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "preview-cli-hidden-then-toggle",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "entry-default",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "entry-pick",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "entry-pk",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "duplicate-name-select-second-id",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "unicode-alias-auto-connect",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "prefilled-alias-does-not-auto-connect",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "disable-alias-auto-and-select",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "index-shortcut-second-id",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "rename-cancel-preserves-name",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "rename-unchanged-is-noop",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "rename-empty-name-rejected",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "rename-config-row-rejected",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "rename-backend-error-retains-list",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "rename-second-duplicate-refreshes-and-keeps-query",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "remove-decline",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "remove-confirm-and-refresh",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "last-duplicate-removal-retires-alias",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "worktree-generic-branch-path-refresh-error-filter-cancel",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "worktree-selected-path-connects-without-alias-hijack",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "global-worktree-source-connects-actual-checkout",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "worktree-create-cancel-from-empty-results",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "worktree-create-empty-and-existing-branch-errors-recover",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "worktree-create-from-empty-results-configured-path-hooks-once-and-connect",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "worktree-confirm-cancel-then-safe-remove-and-refresh",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "literal-config-name-📁",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "hidden-config-alias-keeps-literal-name-and-path",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "literal-config-name-",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "missing-fzf",
+      "exit": 1
+    },
+    {
+      "case": "old-fzf",
+      "exit": 1
+    },
+    {
+      "case": "fzf-error",
+      "exit": 1
+    }
+  ]
+}

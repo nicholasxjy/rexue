@@ -1,6 +1,6 @@
 //! Documented Rex CLI adapter. Labels are for display; mutations use full IDs.
 use crate::{
-    model::{Entry, Source},
+    model::{Agent, Entry, Source},
     process,
 };
 use anyhow::{Context, Result, bail};
@@ -105,12 +105,15 @@ impl Rex {
         Ok(())
     }
     pub fn list(&self) -> Result<Vec<Entry>> {
+        self.list_sources(true, false)
+    }
+    pub fn list_sources(&self, sessions: bool, agents: bool) -> Result<Vec<Entry>> {
         let response = self.json(&["ls", "--json"])?;
-        let sessions = response["sessions"]
+        let rows = response["sessions"]
             .as_array()
             .context("Rex response missing sessions")?;
         let mut entries = Vec::new();
-        for s in sessions {
+        for s in rows {
             let id = s["session_id"]
                 .as_str()
                 .context("Rex session missing session_id")?;
@@ -124,24 +127,87 @@ impl Rex {
                 Err(e) if e.to_string().contains("exit 3") => continue,
                 Err(e) => return Err(e),
             };
-            if let Some(window) = active_window(&inspect)
-                && let Some(block) = window["focused_block_id"].as_str()
-            {
-                entry.path = self.block_path(id, block).unwrap_or_default();
+            let focused = active_window(&inspect).and_then(|w| w["focused_block_id"].as_str());
+            let focused_process = focused.and_then(|block| self.block_process(id, block).ok());
+            if sessions {
+                if let Some(process) = &focused_process {
+                    entry.path = process_path(process).unwrap_or_default();
+                }
+                if entry.path.as_os_str().is_empty()
+                    && let Some(block) = focused
+                {
+                    entry.path = self.reported_path(id, block).unwrap_or_default();
+                }
+                entries.push(entry);
             }
-            entries.push(entry);
+            if agents {
+                for window in inspect["windows"].as_array().into_iter().flatten() {
+                    let Some(window_id) = window["window_id"].as_str() else {
+                        continue;
+                    };
+                    let window_name = window["label"].as_str().unwrap_or(window_id);
+                    for layer in window["layers"].as_array().into_iter().flatten() {
+                        for block in layer["blocks"].as_array().into_iter().flatten() {
+                            if block["creator_name"] != "com.superlogical.terminal" {
+                                continue;
+                            }
+                            let Some(block_id) = block["block_id"].as_str() else {
+                                continue;
+                            };
+                            let process = if focused == Some(block_id) {
+                                focused_process.clone()
+                            } else {
+                                self.block_process(id, block_id).ok()
+                            };
+                            let Some(process) = process else { continue };
+                            // Status is optional on older Rex versions and on agents
+                            // that do not implement OSC 7501. Process identity still works.
+                            let status = self
+                                .json(&[
+                                    "block",
+                                    "call",
+                                    "-s",
+                                    id,
+                                    "-b",
+                                    block_id,
+                                    "program_status",
+                                ])
+                                .unwrap_or(Value::Null);
+                            let Some(running) = crate::agent::running(&process, &status) else {
+                                continue;
+                            };
+                            let mut agent = Entry::new(
+                                format!("{} · {name} / {window_name}", running.app),
+                                running.path,
+                                Source::Agent,
+                            );
+                            agent.session_id = Some(id.into());
+                            agent.agent = Some(Agent {
+                                app: running.app.into(),
+                                state: running.state,
+                                session_name: name.into(),
+                                window_id: window_id.into(),
+                                block_id: block_id.into(),
+                            });
+                            entries.push(agent);
+                        }
+                    }
+                }
+            }
         }
         Ok(entries)
     }
+    pub fn block_process(&self, session: &str, block: &str) -> Result<Value> {
+        self.json(&["block", "call", "-s", session, "-b", block, "process"])
+    }
     pub fn block_path(&self, session: &str, block: &str) -> Result<PathBuf> {
-        let value = self.json(&["block", "call", "-s", session, "-b", block, "process"])?;
-        if let Some(path) = value["foreground"]["cwd"].as_str().or_else(|| {
-            value["ancestors"]
-                .as_array()
-                .and_then(|a| a.iter().find_map(|v| v["cwd"].as_str()))
-        }) {
-            return Ok(path.into());
+        let value = self.block_process(session, block)?;
+        if let Some(path) = process_path(&value) {
+            return Ok(path);
         }
+        self.reported_path(session, block)
+    }
+    fn reported_path(&self, session: &str, block: &str) -> Result<PathBuf> {
         let value = self.json(&["block", "call", "-s", session, "-b", block, "pwd"])?;
         Ok(value["path"]
             .as_str()
@@ -197,8 +263,25 @@ impl Rex {
         let block = active_window(&detail)
             .and_then(|w| w["focused_block_id"].as_str())
             .context("session has no focused terminal")?;
-        self.text(&["capture", "-s", id, "-b", block, "--trim", "--unwrap"])
+        self.capture_block(id, block)
     }
+    pub fn capture_block(&self, session: &str, block: &str) -> Result<String> {
+        self.text(&["capture", "-s", session, "-b", block, "--trim", "--unwrap"])
+    }
+    pub fn focus(&self, session: &str, block: &str) -> Result<()> {
+        self.text(&["focus", "-s", session, block])?;
+        Ok(())
+    }
+}
+fn process_path(value: &Value) -> Option<PathBuf> {
+    value["foreground"]["cwd"]
+        .as_str()
+        .or_else(|| {
+            value["ancestors"]
+                .as_array()
+                .and_then(|a| a.iter().find_map(|v| v["cwd"].as_str()))
+        })
+        .map(PathBuf::from)
 }
 pub fn active_window(value: &Value) -> Option<&Value> {
     let windows = value["windows"].as_array()?;

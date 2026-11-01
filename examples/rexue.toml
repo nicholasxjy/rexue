@@ -4,7 +4,7 @@ strict_mode = true
 cache = false
 import = [] # Exact filenames; append session, wildcard and worktree definitions.
 blacklist = ["scratch"]
-sort_order = ["rex", ["config", "zoxide"], "directory", "worktree"]
+sort_order = ["rex", "agent", ["config", "zoxide"], "directory", "worktree"]
 dir_length = 1
 git_dir_length = 1
 git_namer_use_worktree_root = false
@@ -14,6 +14,10 @@ separator_aware = false
 find = '^~/Projects/(.*)$'
 replace = '$1'
 regex = true
+
+[icons.agent]
+icon = "󰚩"
+color = "magenta"
 
 [icons.rex]
 icon = ""

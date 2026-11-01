@@ -33,6 +33,7 @@ mod folding_tests {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Source {
+    Agent,
     Rex,
     Config,
     Zoxide,
@@ -42,6 +43,7 @@ pub enum Source {
 impl Source {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Agent => "agent",
             Self::Rex => "rex",
             Self::Config => "config",
             Self::Zoxide => "zoxide",
@@ -51,6 +53,7 @@ impl Source {
     }
     pub fn glyph(self) -> &'static str {
         match self {
+            Self::Agent => "󰚩",
             Self::Rex => "",
             Self::Config => "",
             Self::Zoxide | Self::Directory => "",
@@ -59,6 +62,15 @@ impl Source {
     }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Agent {
+    pub app: String,
+    pub state: String,
+    pub session_name: String,
+    pub window_id: String,
+    pub block_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Entry {
     pub name: String,
     #[serde(default)]
@@ -66,6 +78,8 @@ pub struct Entry {
     pub source: Source,
     #[serde(default)]
     pub session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<Agent>,
     #[serde(default)]
     pub group: usize,
     #[serde(default)]
@@ -84,6 +98,7 @@ impl Entry {
             path: path.into(),
             source,
             session_id: None,
+            agent: None,
             group: 0,
             icon: None,
             alias: None,
@@ -92,6 +107,16 @@ impl Entry {
         }
     }
     pub fn target(&self) -> &str {
-        self.session_id.as_deref().unwrap_or(&self.name)
+        self.agent
+            .as_ref()
+            .map(|agent| agent.block_id.as_str())
+            .or(self.session_id.as_deref())
+            .unwrap_or(&self.name)
+    }
+    pub fn display_name(&self) -> String {
+        match &self.agent {
+            Some(agent) => format!("{} [{}]", self.name, agent.state),
+            None => self.name.clone(),
+        }
     }
 }

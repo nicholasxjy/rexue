@@ -481,9 +481,11 @@ impl Config {
             }
         }
         for (source, icon) in &self.icons {
-            if !["rex", "config", "zoxide", "directory", "worktree"].contains(&source.as_str()) {
+            if !["agent", "rex", "config", "zoxide", "directory", "worktree"]
+                .contains(&source.as_str())
+            {
                 bail!(
-                    "unknown icons source {source:?}; use rex, config, zoxide, directory, or worktree"
+                    "unknown icons source {source:?}; use agent, rex, config, zoxide, directory, or worktree"
                 );
             }
             let color = icon.color.to_lowercase();
@@ -554,10 +556,11 @@ impl Config {
                 bail!("sort_order groups must not be empty");
             }
             for source in sources {
-                if !["rex", "config", "zoxide", "directory", "worktree"].contains(&source.as_str())
+                if !["agent", "rex", "config", "zoxide", "directory", "worktree"]
+                    .contains(&source.as_str())
                 {
                     bail!(
-                        "unknown sort_order source {source:?}; use rex, config, zoxide, directory, or worktree"
+                        "unknown sort_order source {source:?}; use agent, rex, config, zoxide, directory, or worktree"
                     );
                 }
             }

@@ -18,6 +18,7 @@ use std::{
 
 #[derive(Debug, Clone, Default)]
 pub struct ListOptions {
+    pub agents: bool,
     pub rex: bool,
     pub config: bool,
     pub zoxide: bool,
@@ -180,13 +181,15 @@ impl Manager {
         Ok(entries)
     }
     fn collect(&self, opts: &ListOptions) -> Result<Vec<Entry>> {
-        let selected = opts.rex || opts.config || opts.zoxide;
+        let selected = opts.agents || opts.rex || opts.config || opts.zoxide;
         let mut entries = Vec::new();
         let configs = self.config.entries()?;
-        if !selected || opts.rex {
-            let mut live = self.rex.list()?;
+        if !selected || opts.rex || opts.agents {
+            let mut live = self
+                .rex
+                .list_sources(!selected || opts.rex, !selected || opts.agents)?;
             self.restore_paths(&mut live, &self.state()?);
-            for entry in &mut live {
+            for entry in live.iter_mut().filter(|e| e.source == Source::Rex) {
                 if let Some(config) = configs.iter().find(|c| {
                     c.name == entry.name
                         || (!entry.path.as_os_str().is_empty() && same_path(&c.path, &entry.path))
@@ -261,10 +264,10 @@ impl Manager {
         let mut entries = self.collect(opts)?;
         entries = order_entries(entries, &self.config.sort_order);
         entries.retain(|e| is_blacklisted(&self.config, e) == opts.blacklisted);
-        if opts.hide_attached && entries.iter().any(|e| e.source == Source::Rex) {
+        if opts.hide_attached && entries.iter().any(|e| e.session_id.is_some()) {
             let context = self.rex.context()?;
             if let Some(id) = context["session_id"].as_str() {
-                entries.retain(|e| e.source != Source::Rex || e.session_id.as_deref() != Some(id));
+                entries.retain(|e| e.session_id.as_deref() != Some(id));
             }
         }
         if opts.hide_duplicates {
@@ -285,6 +288,9 @@ impl Manager {
                 target = rest.trim_start().to_owned();
                 break;
             }
+        }
+        if target.starts_with("block:") {
+            return self.resolve_agent(&target);
         }
         if let Some(session) = self.config.session.iter().find(|session| {
             session.alias.as_deref().is_some_and(|alias| {
@@ -372,6 +378,13 @@ impl Manager {
         }
         bail!("no session, configuration, or directory matches {target:?}")
     }
+    fn resolve_agent(&self, block_id: &str) -> Result<Entry> {
+        self.rex
+            .list_sources(false, true)?
+            .into_iter()
+            .find(|entry| entry.target() == block_id)
+            .with_context(|| format!("agent in {block_id} is no longer running"))
+    }
     pub fn connect(&self, target: &str, opts: &ConnectOptions) -> Result<Connection> {
         self.connect_resolved(opts, || {
             let rooted = if opts.root {
@@ -400,6 +413,9 @@ impl Manager {
             return self.connect_path(&prepared.path, opts);
         }
         self.connect_resolved(opts, || {
+            if entry.source == Source::Agent {
+                return self.resolve_agent(entry.target());
+            }
             // Alias-only rows can be synthesized outside the fetched sources.
             // Complete their typed config identity by exact key, never by the
             // human-target parser that strips decoration or expands aliases.
@@ -454,6 +470,10 @@ impl Manager {
         };
         let _lock = self.lock()?;
         let mut entry = resolve()?;
+        let agent = entry.agent.clone();
+        if agent.is_some() && opts.name.is_some() {
+            bail!("--name cannot be used when connecting to an agent");
+        }
         if let Some(name) = &opts.name {
             if name.trim().is_empty() {
                 bail!("session name must not be empty");
@@ -561,7 +581,7 @@ impl Manager {
                     .clone()
                     .context("existing session has no ID")?,
                 name: forced_name.unwrap_or_else(|| found.name.clone()),
-                path: if found.path.as_os_str().is_empty() {
+                path: if agent.is_some() || found.path.as_os_str().is_empty() {
                     path
                 } else {
                     found.path.clone()
@@ -596,6 +616,9 @@ impl Manager {
                 created: true,
             }
         };
+        if let Some(agent) = &agent {
+            self.rex.focus(&result.session_id, &agent.block_id)?;
+        }
         if let Some(client) = &client {
             // whoami describes the launcher process, whose inherited session
             // can remain stale after switching the selected app client. Once
@@ -653,7 +676,11 @@ impl Manager {
         if let Some(id) = &entry.session_id
             && id.starts_with("session:")
         {
-            return self.rex.capture(id);
+            return if let Some(agent) = &entry.agent {
+                self.rex.capture_block(id, &agent.block_id)
+            } else {
+                self.rex.capture(id)
+            };
         }
         let cfg = self.config.resolve(&entry.path, Some(&entry.name))?;
         if let Some(script) = cfg.preview_command.filter(|s| !s.is_empty()) {
@@ -687,6 +714,9 @@ impl Manager {
     }
     pub fn remove(&self, entry: &Entry) -> Result<()> {
         match entry.source {
+            Source::Agent => {
+                bail!("agent rows cannot be removed; select their Rex session to close it")
+            }
             Source::Rex => self
                 .rex
                 .kill(entry.session_id.as_deref().context("session has no ID")?)?,
@@ -1051,7 +1081,13 @@ fn is_blacklisted(config: &Config, entry: &Entry) -> bool {
         .blacklist
         .iter()
         .filter_map(|pattern| regex::Regex::new(pattern).ok())
-        .any(|re| re.is_match(&entry.name))
+        .any(|re| {
+            re.is_match(&entry.name)
+                || entry
+                    .agent
+                    .as_ref()
+                    .is_some_and(|a| re.is_match(&a.session_name))
+        })
 }
 fn order_entries(entries: Vec<Entry>, order: &[SortGroup]) -> Vec<Entry> {
     let mut groups: Vec<Vec<Source>> = Vec::new();
@@ -1064,6 +1100,7 @@ fn order_entries(entries: Vec<Entry>, order: &[SortGroup]) -> Vec<Entry> {
         let sources: Vec<_> = names
             .into_iter()
             .filter_map(|n| match n.to_ascii_lowercase().as_str() {
+                "agent" => Some(Source::Agent),
                 "rex" => Some(Source::Rex),
                 "config" => Some(Source::Config),
                 "zoxide" => Some(Source::Zoxide),
@@ -1079,6 +1116,7 @@ fn order_entries(entries: Vec<Entry>, order: &[SortGroup]) -> Vec<Entry> {
     }
     for source in [
         Source::Rex,
+        Source::Agent,
         Source::Config,
         Source::Zoxide,
         Source::Directory,
@@ -1130,7 +1168,7 @@ pub fn clean_target(target: &str, configs: &[Entry]) -> String {
     let clean = String::from_utf8_lossy(&strip_ansi_escapes::strip(target))
         .trim()
         .to_owned();
-    for icon in ["", "", "", "", "", "📁"]
+    for icon in ["󰚩", "", "", "", "", "", "📁"]
         .into_iter()
         .chain(configs.iter().filter_map(|c| c.icon.as_deref()))
     {
@@ -1214,6 +1252,42 @@ mod tests {
         );
         assert!(!kept.iter().any(|e| e.name == "free"));
     }
+    #[test]
+    fn default_order_places_agents_after_sessions_and_before_other_sources() {
+        let entries = vec![
+            Entry::new("pi", "/live", Source::Agent),
+            Entry::new("configured", "/config", Source::Config),
+            Entry::new("first session", "/live", Source::Rex),
+            Entry::new("history", "/history", Source::Zoxide),
+            Entry::new("codex", "/other", Source::Agent),
+            Entry::new("second session", "/other", Source::Rex),
+        ];
+        let ordered = order_entries(entries.clone(), &[]);
+        assert_eq!(
+            ordered
+                .iter()
+                .map(|entry| entry.name.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "first session",
+                "second session",
+                "pi",
+                "codex",
+                "configured",
+                "history"
+            ]
+        );
+        assert_eq!(ordered[0].group, ordered[1].group);
+        assert_ne!(ordered[1].group, ordered[2].group);
+        assert_eq!(ordered[2].group, ordered[3].group);
+        assert_ne!(ordered[3].group, ordered[4].group);
+
+        let explicit = order_entries(entries, &[SortGroup::Source("agent".into())]);
+        assert_eq!(explicit[0].source, Source::Agent);
+        assert_eq!(explicit[1].source, Source::Agent);
+        assert_eq!(explicit[2].source, Source::Rex);
+    }
+
     #[test]
     fn ordering_retains_worktree_sources_and_honors_their_groups() {
         let tree = Entry::new("feature/widgets", "/custom/widgets", Source::Worktree);

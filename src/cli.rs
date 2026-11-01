@@ -85,6 +85,10 @@ pub enum Commands {
 }
 #[derive(Debug, Args, Default, Clone)]
 pub struct Sources {
+    /// List running agents in every Rex terminal pane.
+    #[arg(long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
+    #[arg(default_value_t = false)]
+    pub agents: bool,
     #[arg(short = 't', long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
     #[arg(default_value_t = false)]
     pub rex: bool,
@@ -107,6 +111,7 @@ pub struct Sources {
 impl Sources {
     fn options(&self) -> ListOptions {
         ListOptions {
+            agents: self.agents,
             rex: self.rex,
             config: self.configs,
             zoxide: self.zoxide,
@@ -507,6 +512,7 @@ fn configured_format_entry(
         .map(|s| s.icon.as_str())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| entry.source.glyph());
+    let name = entry.display_name();
     let decorated = if icons
         && !exclude
             .iter()
@@ -516,12 +522,12 @@ fn configured_format_entry(
             .and_then(|s| ansi_color(&s.color.to_lowercase()))
             .unwrap_or_else(|| source_color(entry.source));
         if color {
-            format!("\x1b[{code}m{glyph}\x1b[0m {}", entry.name)
+            format!("\x1b[{code}m{glyph}\x1b[0m {name}")
         } else {
-            format!("{glyph} {}", entry.name)
+            format!("{glyph} {name}")
         }
     } else {
-        entry.name.clone()
+        name
     };
     let Some(format) = format else {
         return Ok(decorated);
@@ -573,6 +579,7 @@ fn configured_format_entry(
 }
 fn source_color(source: Source) -> u8 {
     match source {
+        Source::Agent => 35,
         Source::Rex => 34,
         Source::Config => 90,
         Source::Zoxide | Source::Directory => 36,

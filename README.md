@@ -21,6 +21,8 @@ Running `rexue` with no arguments opens the session picker. Enter connects; Esc 
 
 ```sh
 rexue list
+rexue list --agents
+rexue list --agents --json
 rexue list --rex --config --hide-duplicates
 rexue list --config --json
 rexue picker --zoxide --query Projects
@@ -33,9 +35,13 @@ rexue rename app --to editor
 rexue last
 ```
 
-Default listing combines running sessions, configured sessions, zoxide history and worktrees from `[[worktree]]` registrations. `--rex`, `--config` and `--zoxide` select a union of those sources. `--hide-attached` hides the invoking live session; `--hide-duplicates` prioritizes live sessions without merging distinct live IDs. `--no-cache` bypasses the optional five-second directory-history cache.
+Default listing combines running sessions, running agents, configured sessions, zoxide history and worktrees from `[[worktree]]` registrations. `--agents`, `--rex`, `--config` and `--zoxide` select a union of those sources. `--hide-attached` hides the invoking live session and its agents; `--hide-duplicates` prioritizes live sessions without merging distinct live IDs. `--no-cache` bypasses the optional five-second directory-history cache.
 
-`connect` accepts a session name or full ID, configured alias, directory, or zoxide query. `--root` resolves directory inputs to their Git root before connecting. Names use the Git repository and checkout path by default; explicit names can be set with `--name`. `--command` overrides startup only for a newly created session. Reconnecting never reruns startup. `last` switches to the selected client's previous running session.
+The picker shows an **Agents** group after running Rex sessions by default, with one row per terminal pane across all sessions and tabs. Rows show the agent, session, tab and state; Enter focuses that exact pane, and preview captures its output. Supported identities include Pi, Claude Code, Codex, OpenCode, Aider, Gemini CLI, Goose, Amp, Cursor Agent and Droid. Rex's [Program Status Protocol](https://www.superlogical.com/rex/docs/build/program-status) supplies `idle`, `working`, `blocked`, `done` and `error` when available; otherwise a detected live agent shows `running`. Process checks exclude status records left behind after exit. Discovery covers agents running inside Rex terminals; processes whose identity Rex cannot expose may not be detected.
+
+`list --agents --json` includes `agent.app`, `agent.state`, `agent.window_id` and `agent.block_id`. Pass the full block ID to `connect` or `preview` to target an agent from the CLI. Agent rows cannot be renamed or removed; select the Rex session row for those actions.
+
+`connect` accepts an agent's full block ID, a session name or full ID, configured alias, directory, or zoxide query. `--root` resolves directory inputs to their Git root before connecting. Names use the Git repository and checkout path by default; explicit names can be set with `--name`. `--command` overrides startup only for a newly created session. Reconnecting never reruns startup. `last` switches to the selected client's previous running session.
 
 `list` supports `--json`, `--icons`, `--no-color`, `--blacklisted`, `--icons-exclude CSV`, and `--format`. Format fields are `{name}` (decorated), `{session}` (raw name), `{source}`, `{path}`, and `{fg:COLOR}…{/fg}`. JSON and custom formatting are mutually exclusive. Normal names and full session IDs can be passed to `connect` or `preview`; arbitrary custom formatted rows are display output.
 

@@ -63,7 +63,11 @@ case "$1 $2" in
             exit "$(/bin/cat "$root/inspect-$3.exit")"
         fi
         /bin/cat "$root/inspect-$3.json" ;;
-    'block call') /bin/cat "$root/process.json" ;;
+    'block call')
+        if [ -f "$root/$7-$6.exit" ]; then exit 3; fi
+        file="$root/$7-$6.json"
+        [ -f "$file" ] || file="$root/$7.json"
+        /bin/cat "$file" ;;
     'new '*)
         /bin/cp "$root/after-create.json" "$root/sessions.json"
         /bin/cat "$root/created.json" ;;
@@ -84,6 +88,7 @@ esac
             },
         };
         fake.json("sessions.json", json!({"sessions": []}));
+        fake.json("program_status.json", json!({"records": []}));
         fake.json(
             "clients.json",
             json!({"clients": [client("client:desktop-full", "Desk", "app", "connected")]}),
@@ -149,6 +154,211 @@ esac
             state_dir: self.dir.path().join("manager state"),
         }
     }
+}
+
+fn agents_fixture(fake: &FakeRex) {
+    let session = fake.session("session:agents-full", "project", fake.dir.path());
+    fake.json("sessions.json", json!({"sessions": [session]}));
+    fake.json("inspect-session:agents-full.json", json!({
+        "active_window_id": "window:shell-full",
+        "windows": [
+            {"window_id": "window:shell-full", "label": "Shell", "focused_block_id": "block:shell-full", "layers": [{"blocks": [
+                {"block_id": "block:shell-full", "creator_name": "com.superlogical.terminal"},
+                {"block_id": "block:browser-full", "creator_name": "browser"}
+            ]}]},
+            {"window_id": "window:agents-full", "label": "Agents", "focused_block_id": "block:pi-full", "layers": [{"blocks": [
+                {"block_id": "block:pi-full", "creator_name": "com.superlogical.terminal"},
+                {"block_id": "block:codex-full", "creator_name": "com.superlogical.terminal"},
+                {"block_id": "block:stale-full", "creator_name": "com.superlogical.terminal"},
+                {"block_id": "block:gone-full", "creator_name": "com.superlogical.terminal"}
+            ]}]}
+        ]
+    }));
+    fake.json(
+        "process.json",
+        json!({"last_exit": null, "foreground": {"pid": 1, "name": "zsh", "cwd": fake.dir.path()}}),
+    );
+    fake.json("process-block:pi-full.json", json!({"last_exit": null, "foreground": {"pid": 2, "name": "node", "argv0": "pi", "cwd": fake.dir.path()}}));
+    fake.json("program_status-block:pi-full.json", json!({"records": [{"app": "pi", "state": "blocked", "owner": {"pid": 2, "name": "node"}}]}));
+    // Running a tool under an agent keeps that agent in the ancestor chain.
+    fake.json("process-block:codex-full.json", json!({"last_exit": null, "foreground": {"pid": 4, "name": "rg"}, "ancestors": [{"pid": 3, "name": "codex", "cwd": fake.dir.path()}]}));
+    fs::write(
+        fake.dir.path().join("program_status-block:codex-full.exit"),
+        "",
+    )
+    .unwrap();
+    // done/error survive shell prompts; neither is evidence of a live agent.
+    fake.json(
+        "program_status-block:stale-full.json",
+        json!({"records": [{"app": "pi", "state": "done", "owner": {"pid": 99, "name": "node"}}]}),
+    );
+    fs::write(fake.dir.path().join("process-block:gone-full.exit"), "").unwrap();
+}
+
+#[test]
+fn agents_discover_inactive_tabs_and_panes_without_stale_status_or_dedup_loss() {
+    let fake = FakeRex::new();
+    agents_fixture(&fake);
+    let manager = fake.manager(Config::default());
+    let entries = manager
+        .list(&ListOptions {
+            agents: true,
+            hide_duplicates: true,
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(entries.len(), 2);
+    assert!(entries.iter().all(|e| e.source == Source::Agent));
+    assert_eq!(entries[0].agent.as_ref().unwrap().app, "pi");
+    assert_eq!(entries[0].agent.as_ref().unwrap().state, "blocked");
+    assert_eq!(entries[0].target(), "block:pi-full");
+    assert_eq!(entries[1].agent.as_ref().unwrap().app, "codex");
+    assert_eq!(entries[1].agent.as_ref().unwrap().state, "running");
+    assert_eq!(entries[1].path, fake.dir.path());
+    let all = manager
+        .list(&ListOptions {
+            rex: true,
+            agents: true,
+            hide_duplicates: true,
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(all.len(), 3);
+    assert_eq!(
+        all.iter().map(|entry| entry.source).collect::<Vec<_>>(),
+        [Source::Rex, Source::Agent, Source::Agent]
+    );
+    assert_ne!(all[0].group, all[1].group);
+    assert_eq!(all[1].group, all[2].group);
+    let only_sessions = manager
+        .list(&ListOptions {
+            rex: true,
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(only_sessions.len(), 1);
+    fake.json("context.json", json!({"session_id": "session:agents-full"}));
+    assert!(
+        manager
+            .list(&ListOptions {
+                agents: true,
+                hide_attached: true,
+                ..Default::default()
+            })
+            .unwrap()
+            .is_empty()
+    );
+    let manager = fake.manager(Config {
+        blacklist: vec!["^project$".into()],
+        ..Default::default()
+    });
+    assert!(
+        manager
+            .list(&ListOptions {
+                agents: true,
+                ..Default::default()
+            })
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        !fake
+            .calls()
+            .iter()
+            .any(|args| args.iter().any(|arg| arg == "block:browser-full"))
+    );
+}
+
+#[test]
+fn agent_selection_previews_and_focuses_exact_pane_and_rejects_exited_target() {
+    let fake = FakeRex::new();
+    agents_fixture(&fake);
+    let mut manager = fake.manager(Config::default());
+    manager.config.frecency.add_command = Some("true".into());
+    manager.config.session.push(SessionConfig {
+        name: "alias-trap".into(),
+        path: fake.dir.path().display().to_string(),
+        alias: Some("block:codex-full".into()),
+        ..Default::default()
+    });
+    let entry = manager.resolve_entry("block:codex-full").unwrap();
+    assert!(
+        manager
+            .preview(&entry)
+            .unwrap()
+            .contains("terminal fixture")
+    );
+    assert!(manager.remove(&entry).is_err());
+    assert!(manager.rename(&entry, "rename").is_err());
+    let connection = manager
+        .connect_entry(entry.clone(), &ConnectOptions::default())
+        .unwrap();
+    assert_eq!(connection.session_id, "session:agents-full");
+    assert_eq!(connection.name, "project");
+    assert!(!connection.created);
+    let calls = fake.calls();
+    assert!(calls.iter().any(|a| a.windows(6).any(|a| a
+        == [
+            "capture",
+            "-s",
+            "session:agents-full",
+            "-b",
+            "block:codex-full",
+            "--trim"
+        ])));
+    let focus = calls
+        .iter()
+        .position(|a| {
+            a.windows(4)
+                .any(|a| a == ["focus", "-s", "session:agents-full", "block:codex-full"])
+        })
+        .unwrap();
+    let switch = calls
+        .iter()
+        .position(|a| a.iter().any(|a| a == "session.select"))
+        .unwrap();
+    assert!(focus < switch);
+    assert!(
+        !calls
+            .iter()
+            .any(|a| a.iter().any(|a| a == "new" || a == "kill"))
+    );
+    fake.json(
+        "process-block:codex-full.json",
+        json!({"last_exit": {"exit_code": 0}}),
+    );
+    let error = manager
+        .connect_entry(entry, &ConnectOptions::default())
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("no longer running"), "{error}");
+}
+
+#[test]
+fn agents_cli_json_and_source_configuration() {
+    let fake = FakeRex::new();
+    agents_fixture(&fake);
+    let config = fake.dir.path().join("agents.toml");
+    fs::write(&config, "strict_mode = true\nsort_order = ['agent', 'rex']\n[icons.agent]\nicon = 'A'\ncolor = 'magenta'\n").unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_rexue"))
+        .args(["--rex-bin"])
+        .arg(&fake.rex.bin)
+        .args(["-C"])
+        .arg(&config)
+        .args(["list", "--agents", "--json"])
+        .env("REXUE_STATE_DIR", fake.dir.path().join("cli-state"))
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let entries: Vec<Value> = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0]["source"], "agent");
+    assert_eq!(entries[0]["agent"]["block_id"], "block:pi-full");
+    assert_eq!(entries[0]["agent"]["state"], "blocked");
 }
 
 fn client(id: &str, label: &str, kind: &str, connection: &str) -> Value {

@@ -96,6 +96,9 @@ struct Catalog {
     status: String,
 }
 fn same_entry(a: &Entry, b: &Entry) -> bool {
+    if a.source == Source::Agent && b.source == Source::Agent {
+        return a.session_id == b.session_id && a.target() == b.target();
+    }
     a.source == b.source && a.name == b.name && a.path == b.path && a.session_id == b.session_id
 }
 impl Catalog {
@@ -424,11 +427,12 @@ fn rows(state: &Mutex<Catalog>, query: &str) -> Result<Vec<u8>> {
     };
     let mut input = Vec::new();
     let mut previous_group = None;
+    let mut previous_source = None;
     for (id, entry) in &candidates {
-        let search = if options.worktree {
+        let search = if options.worktree || entry.source == Source::Agent {
             format!(
                 "{} {}",
-                clean(&entry.name),
+                clean(&entry.display_name()),
                 clean(&entry.path.display().to_string())
             )
         } else {
@@ -440,11 +444,22 @@ fn rows(state: &Mutex<Catalog>, query: &str) -> Result<Vec<u8>> {
             search
         };
         let mut display = display(entry, &options);
-        if options.group_separator && query.is_empty() && previous_group != Some(entry.group) {
+        if query.is_empty()
+            && previous_group != Some(entry.group)
+            && (options.group_separator
+                || entry.source == Source::Agent
+                || previous_source == Some(Source::Agent))
+        {
             // fzf --read0 displays newlines within one selectable record.
-            display = format!("── {} ──\n{display}", entry.source.as_str());
+            let label = if entry.source == Source::Agent {
+                "Agents"
+            } else {
+                entry.source.as_str()
+            };
+            display = format!("── {label} ──\n{display}");
         }
         previous_group = Some(entry.group);
+        previous_source = Some(entry.source);
         write!(input, "{id}\t{search}\t{display}\0")?;
     }
     // Use fzf itself for fuzzy matching and ordering. Keeping the visible finder
@@ -939,8 +954,12 @@ pub fn pick_with_create(
                 entry.source,
                 Source::Rex | Source::Zoxide | Source::Directory | Source::Worktree
             ) {
-                state.lock().unwrap().status =
-                    "Configured sessions cannot be removed here; edit rexue.toml".into();
+                state.lock().unwrap().status = if entry.source == Source::Agent {
+                    "Agent rows cannot be removed; select their Rex session to close it"
+                } else {
+                    "Configured sessions cannot be removed here; edit rexue.toml"
+                }
+                .into();
             } else if confirm(&entry)? {
                 match remove(&entry) {
                     Ok(()) => {
@@ -1015,7 +1034,7 @@ fn display(entry: &Entry, options: &PickerOptions) -> String {
         if let Some(alias) = options.aliases.values().find(|a| a.target == entry.name) {
             text.push_str(&format!("[{}] ", clean(&alias.alias)));
         }
-        text.push_str(&clean(&entry.name));
+        text.push_str(&clean(&entry.display_name()));
     }
     text
 }
@@ -1115,6 +1134,48 @@ mod tests {
         assert!(!numbered.contains("──"));
         assert!(numbered.contains("#1 live first"));
         assert!(numbered.contains("#3 configured project"));
+    }
+
+    #[test]
+    fn agents_have_default_group_and_distinct_stable_pane_identities() {
+        use crate::model::Agent;
+        let mut first = Entry::new("pi · project / Agents", "/project", Source::Agent);
+        first.session_id = Some("session:project".into());
+        first.agent = Some(Agent {
+            app: "pi".into(),
+            state: "working".into(),
+            session_name: "project".into(),
+            window_id: "window:agents".into(),
+            block_id: "block:first".into(),
+        });
+        let mut second = first.clone();
+        second.agent.as_mut().unwrap().block_id = "block:second".into();
+        first.group = 1;
+        second.group = 1;
+        let session = Entry::new("project", "/project", Source::Rex);
+        let mut catalog = Catalog::new(
+            PickerOptions {
+                show_icons: false,
+                ..Default::default()
+            },
+            vec![session.clone(), first.clone(), second.clone()],
+        );
+        let ids = catalog.entries.clone();
+        assert_ne!(ids[1], ids[2]);
+        first.agent.as_mut().unwrap().state = "blocked".into();
+        catalog.replace(vec![session, second, first]);
+        assert_eq!(catalog.entries, vec![ids[0], ids[2], ids[1]]);
+        let state = Mutex::new(catalog);
+        let text = String::from_utf8(rows(&state, "").unwrap()).unwrap();
+        assert!(text.contains("── Agents ──\npi · project / Agents [working]"));
+        assert!(text.starts_with(&format!("{}\tproject\tproject\0", ids[0])));
+        let filtered = String::from_utf8(rows(&state, "blocked").unwrap()).unwrap();
+        assert_eq!(
+            filtered.split('\0').filter(|row| !row.is_empty()).count(),
+            1
+        );
+        assert!(filtered.starts_with(&format!("{}\t", ids[1])));
+        assert!(!filtered.contains("──"));
     }
 
     #[test]
