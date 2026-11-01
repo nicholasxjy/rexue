@@ -1,110 +1,62 @@
 # rexue
 
-Manage **Rex sessions and Git worktrees** from the command line and the system **fzf** picker. Choose a running Rex session, a configured project, a directory from zoxide history, or a registered repository's worktree. Connecting creates a session when needed and reuses it on later visits.
-
-The current verified platform is macOS. Worktree discovery and lifecycle use [Worktrunk](https://worktrunk.dev); Rex displays the selected session.
+An **fzf picker for Rex sessions, coding agents, and Git worktrees**. Connect to a project once; later visits reuse its session. Currently verified on macOS.
 
 ## Install
 
-Install Rust 1.90 or newer and a C compiler, then run:
+Install and open [Rex](https://www.superlogical.com/rex/docs/installation). Run the following commands inside a Rex terminal, where its `rex` CLI is already on `PATH`.
+
+With [Homebrew](https://brew.sh), install Rust and fzf, then rexue:
 
 ```sh
+brew install rust fzf
 cargo install --locked rexue
-rexue
 ```
 
-To install from a local checkout, run `cargo install --locked --path .`.
+Requires Rust **1.90+**, fzf **0.63+**, and a C compiler. If Apple's Command Line Tools are missing, run `xcode-select --install` first. If `rexue` is not found after installation, add `export PATH="$HOME/.cargo/bin:$PATH"` to `~/.zshrc` and open a new terminal.
 
-Interactive pickers require fzf 0.63 or newer. Put `rex` on `PATH` and open Rex before connecting; rexue does not start its server. Install `wt` 0.81.0 or newer and Git for worktrees. zoxide is optional; without it, directory history is empty. Configured session listing works without Rex.
-
-## Sessions
-
-Running `rexue` with no arguments opens the session picker. Enter connects; Esc cancels.
+Optional dependencies:
 
 ```sh
-rexue list
-rexue list --agents
-rexue list --agents --json
-rexue list --rex --config --hide-duplicates
-rexue list --config --json
-rexue picker --zoxide --query Projects
-rexue connect ~/Projects/app
-rexue --detach connect ~/Projects/app --name app --json
-rexue connect app --command 'nvim'
-rexue preview app
-rexue preview app --watch --interval 1s
-rexue rename app --to editor
-rexue last
+brew install git worktrunk # Worktrees; provides wt (0.81.0+ required).
+brew install zoxide       # Directory history.
 ```
 
-Default listing combines running sessions, running agents, configured sessions, zoxide history and worktrees from `[[worktree]]` registrations. `--agents`, `--rex`, `--config` and `--zoxide` select a union of those sources. `--hide-attached` hides the invoking live session and its agents; `--hide-duplicates` prioritizes live sessions without merging distinct live IDs. `--no-cache` bypasses the optional five-second directory-history cache.
+Follow [zoxide's shell setup](https://github.com/ajeetdsouza/zoxide#installation) to record directories as you navigate. To install rexue from a local checkout, use `cargo install --locked --path .`.
 
-The picker shows an **Agents** group after running Rex sessions by default, with one row per terminal pane across all sessions and tabs. Rows show the agent, session, tab, terminal pane number and state; Enter focuses that exact pane, and preview captures its output. Supported identities include Pi, Claude Code, Codex, OpenCode, Aider, Gemini CLI, Goose, Amp, Cursor Agent and Droid. Rex's [Program Status Protocol](https://www.superlogical.com/rex/docs/build/program-status) supplies `idle`, `working`, `blocked`, `done` and `error` when available; otherwise a detected live agent shows `running`. Process checks exclude status records left behind after exit. Discovery covers agents running inside Rex terminals; processes whose identity Rex cannot expose may not be detected.
-
-`list --agents --json` includes `agent.app`, `agent.state`, `agent.window_id` and `agent.block_id`. Pass the full block ID to `connect` or `preview` to target an agent from the CLI. Agent rows cannot be renamed or removed; select the Rex session row for those actions.
-
-`connect` accepts an agent's full block ID, a session name or full ID, configured alias, directory, or zoxide query. `--root` resolves directory inputs to their Git root before connecting. Names use the Git repository and checkout path by default; explicit names can be set with `--name`. `--command` overrides startup only for a newly created session. Reconnecting never reruns startup. `last` switches to the selected client's previous running session.
-
-`list` supports `--json`, `--icons`, `--no-color`, `--blacklisted`, `--icons-exclude CSV`, and `--format`. Format fields are `{name}` (decorated), `{session}` (raw name), `{source}`, `{path}`, and `{fg:COLOR}…{/fg}`. JSON and custom formatting are mutually exclusive. Normal names and full session IDs can be passed to `connect` or `preview`; arbitrary custom formatted rows are display output.
-
-## Select a Rex client
-
-Session creation and displaying that session are separate operations. With one connected Rex app, rexue selects it automatically. With several apps, specify a client label or full ID:
+## Use
 
 ```sh
-rexue --client my-mac connect app
-REX_CLIENT=my-mac rexue picker
-rexue --detach connect app
+rexue                        # Open the picker.
+rexue list                   # List all sources.
+rexue list --agents          # List running coding agents.
+rexue connect ~/Projects/app  # Create or reuse a project session.
+rexue connect app            # Connect by session name or configured alias.
+rexue last                   # Return to the previous session.
 ```
 
-Client IDs can also be selected by an unambiguous suffix of at least four characters. The selected client must support `session.select`. `--detach` creates or reuses a session without switching the app. `last` always switches.
+The picker combines Rex sessions, running agents, configured projects, zoxide history, and registered worktrees. Selecting an agent focuses its terminal pane and tab.
 
-Global options are `-C/--config-file PATH`, `--client CLIENT` (`REX_CLIENT`), `-S/--server SERVER` (`REX_SERVER`), `--rex-bin PATH` (`REXUE_REX`), and `--detach`. Use `--help` on any command for its full options.
+**Enter** connects, **Esc** cancels, **Ctrl+J/K** moves, and **Ctrl+O** toggles preview. **Ctrl+R** renames a session; **Ctrl+X** asks to remove a live session, history entry, or worktree.
 
-## Worktrees
-
-Worktrunk owns checkout paths, branch defaults, hooks, approvals and removal protections. Run inside a checkout or supply `--path REPO`:
+For worktrees, run inside a Git repository or add `--path ~/Projects/app`:
 
 ```sh
-rexue worktree create feature/widgets --path ~/Projects/app
-rexue worktree create feature/widgets --base main --path ~/Projects/app
-rexue worktree list --path ~/Projects/app --json
-rexue worktree connect feature/widgets --path ~/Projects/app
-rexue worktree connect --path ~/Projects/app
-rexue worktree picker --path ~/Projects/app
-rexue worktree remove feature/widgets --path ~/Projects/app --no-delete-branch
+rexue worktree picker
+rexue worktree create feature/widgets
+rexue worktree connect feature/widgets
+rexue worktree remove feature/widgets --no-delete-branch
 ```
 
-`create` creates the checkout without opening Rex. `connect` accepts a branch or path; without a target it connects the current registered checkout. `list` includes detached worktrees. `remove` uses Worktrunk protections and keeps any Rex session. `--force`, `--force-delete` and `--no-delete-branch` control removal. Set `REXUE_WT` to override the `wt` executable.
+[Worktrunk](https://worktrunk.dev/config/) manages checkout paths, hooks, and removal rules. With multiple Rex apps connected, select one with `rexue --client my-mac`. Use `rexue --help` or `rexue <command> --help` for all options.
 
-Repository-scoped commands need no rexue registration. Optional `[[worktree]]` registrations add repositories' worktrees to the main session list and picker. Configure Worktrunk itself at [worktrunk.dev/config](https://worktrunk.dev/config/).
+## Configure
 
-## Picker controls
+Configuration is optional. Create `~/.config/rexue/rexue.toml`, or `$XDG_CONFIG_HOME/rexue/rexue.toml` when that variable is set:
 
-| Key | Action |
-| --- | --- |
-| Enter | Connect the highlighted session or worktree. |
-| Esc / Ctrl+C | Cancel. |
-| Up / Ctrl+K / Ctrl+P | Move up. |
-| Down / Ctrl+J / Ctrl+N | Move down. |
-| PageUp / PageDown | Move a page. |
-| Ctrl+U / Ctrl+D | Move half a page. |
-| Ctrl+O | Toggle preview. |
-| Ctrl+X | Confirm removal of a live session, history entry or worktree. Configured sessions cannot be removed. |
-| Ctrl+R | Rename a live session in the session picker; reload state in the worktree picker. |
-| Ctrl+W | Worktree picker: prompt for a branch, create its checkout, and connect. |
-
-Rename starts with the current name; Enter saves and Esc cancels. Removal confirmation initially selects Yes; Enter/Y confirms, N/q/Esc cancels, and arrows or Tab move between choices. Refresh preserves the search query; cursor and preview toggles return to configured defaults.
-
-In the session picker, `/` filters configured aliases. Exact aliases connect after `alias_auto_connect_delay`; outside alias mode this also requires `alias_auto_connect = true`. `--no-alias-auto` disables automatic selection. Prefilled queries do not arm it. A leading `#` enables result selection with 1–9; an alias prefix of `#` takes priority. Worktree rows show branch and checkout path.
-
-Both pickers use the installed fzf. Rexue clears inherited `FZF_DEFAULT_OPTS`, `FZF_DEFAULT_OPTS_FILE` and `FZF_DEFAULT_COMMAND` for child processes to preserve its bindings and selection protocol. Preview captures on selection changes; it does not continuously watch terminal output. The standalone `preview --watch` command watches live session capture.
-
-Traditional keyboard input, CSI-u/Kitty text and Ctrl-key reports, and xterm modifyOtherKeys reports are supported. Rexue normalizes extended reports for fzf so bindings such as Ctrl+J/K work with extended keyboard reporting. Key releases do not repeat actions, and bracketed paste is passed through unchanged.
-
-## Configuration and shell integration
-
-The default config is `$XDG_CONFIG_HOME/rexue/rexue.toml`, or `~/.config/rexue/rexue.toml`. A missing default file is fine; an explicit config path must exist. See [the example](examples/rexue.toml) and [configuration reference](docs/CONFIGURATION.md).
+```sh
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/rexue"
+```
 
 ```toml
 strict_mode = true
@@ -113,22 +65,25 @@ strict_mode = true
 name = "app"
 path = "~/Projects/app"
 alias = "a"
-startup_command = "nvim"
 
 [tui]
 preview = true
 ```
 
-Generate completions with `rexue completion bash`, `zsh`, `fish`, `elvish` or `powershell`. For example:
+Replace `path` with your project directory, then run `rexue connect a`. Add `startup_command` to a session to run a command when it is first created. Add `[[worktree]]` with a repository `path` to include its worktrees in the main picker.
+
+Use `rexue -C /path/to/rexue.toml` to load another file. See the [full example](examples/rexue.toml) and [configuration reference](docs/CONFIGURATION.md) for more settings.
+
+For a Rex shortcut, merge [Alt+S: floating picker](examples/rex-picker-floating.lua) or [Cmd+Shift+P: new tab](examples/rex-picker.lua) into your [Rex `init.lua`](https://www.superlogical.com/rex/docs/customize/config), then run:
 
 ```sh
-rexue completion fish | source
+rex config check && rex config reload
 ```
 
-[examples/rex-picker.lua](examples/rex-picker.lua) binds Cmd+Shift+P in Rex and passes the invoking client's full ID. [examples/rex-picker-floating.lua](examples/rex-picker-floating.lua) binds Alt+S to a floating picker in the invoking terminal's tab. It explicitly resolves the terminal's window so the picker stays visible after switching to an agent in another tab. Merge the preferred fragment into your Rex Lua configuration, then use Rex's configuration check and reload commands.
+Generate shell completions with `rexue completion bash`, `zsh`, `fish`, `elvish`, or `powershell`.
 
-## Development and license
+## Development
 
-Run `cargo fmt --check`, `cargo test` and `cargo clippy --all-targets -- -D warnings`. [Verification](docs/VERIFICATION.md) describes the isolated picker and worktree checks and their limits.
+Run `cargo fmt --check`, `cargo test`, and `cargo clippy --all-targets -- -D warnings`. See [verification](docs/VERIFICATION.md) for interactive checks.
 
-MIT licensed; see [LICENSE](LICENSE). Required third-party copyright and license notices are retained in [THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES).
+MIT licensed. See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_LICENSES).
