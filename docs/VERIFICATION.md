@@ -54,6 +54,14 @@ python3 scripts/wildcard_smoke.py --binary target/debug/rexue
 
 These probes verify nested shell placeholders, path binding across positional scopes, and wildcard character classes through the executable CLI.
 
+## Agent picker navigation
+
+Agent rows include a terminal pane number before the session and tab names, so multiple instances in one tab remain distinct even with a narrow preview layout. Connecting an agent refreshes its pane metadata and selects both its session and current window in the app. Ordinary session switches keep the app's usual tab selection.
+
+Floating picker shortcuts must target the window containing `ctx.block_id`. Using the server's active window can create an invisible picker in a different tab after an agent switch. The [floating picker example](../examples/rex-picker-floating.lua) uses `session.describe_block` and supplies the resulting `window_id` to `session.new_layer`.
+
+The [live navigation receipt](verification/agent-picker.json) records switching to a real agent, opening the configured picker twice in that agent's tab, checking that the list appears, and cancelling each picker. Only test-created panes are closed, and the initial session/tab is restored. Rust regression coverage checks explicit window selection using refreshed pane metadata, distinct names for agents in the same tab, and removal of exited agents despite retained status records. A `done` status alone does not mean a process has exited. The final change passed 132 Rust tests, formatting, Clippy, 37 fzf acceptance cases and 9 extended-keyboard cases. Both Lua examples and the active personal configuration passed `rex config check`.
+
 ## Performance
 
 Session and agent discovery runs up to four session queries and four pane queries per session concurrently, preserving the original catalog order. Connecting a selected live row refreshes only that session and, for agents, the selected pane. Explicit naming and directory reuse still check all live sessions for conflicts. No session or agent cache is introduced.

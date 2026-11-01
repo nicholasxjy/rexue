@@ -188,6 +188,8 @@ else:
         def agent_navigation(s):
             s.expect('── Agents ──')
             s.expect('3/3')
+            s.expect('pi · pane 1')
+            s.expect('pi · pane 2')
             s.expect('AGENT_PREVIEW_block:shell')
             s.send(b'\x1b[B')
             s.expect('AGENT_PREVIEW_block:first')

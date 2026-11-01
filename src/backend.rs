@@ -93,13 +93,20 @@ impl Rex {
         Ok(())
     }
     pub fn switch(&self, client: &AppClient, id: &str) -> Result<()> {
+        self.switch_window(client, id, None)
+    }
+    pub fn switch_window(&self, client: &AppClient, id: &str, window: Option<&str>) -> Result<()> {
+        let mut args = serde_json::json!({"session_id": id});
+        if let Some(window) = window {
+            args["window_id"] = window.into();
+        }
         self.json(&[
             "-C",
             &client.id,
             "do",
             "session.select",
             "--args",
-            &serde_json::json!({"session_id":id}).to_string(),
+            &args.to_string(),
             "--json",
         ])?;
         Ok(())
@@ -168,22 +175,24 @@ impl Rex {
                     continue;
                 };
                 let window_name = window["label"].as_str().unwrap_or(window_id);
+                let mut pane = 0;
                 for layer in window["layers"].as_array().into_iter().flatten() {
                     for block in layer["blocks"].as_array().into_iter().flatten() {
                         if block["creator_name"] != "com.superlogical.terminal" {
                             continue;
                         }
+                        pane += 1;
                         if let Some(block_id) = block["block_id"].as_str()
                             && target_block.is_none_or(|target| target == block_id)
                         {
-                            blocks.push((window_id, window_name, block_id));
+                            blocks.push((window_id, window_name, block_id, pane));
                         }
                     }
                 }
             }
             entries.extend(parallel_entries(
                 &blocks,
-                |&(window_id, window_name, block_id)| {
+                |&(window_id, window_name, block_id, pane)| {
                     let process = if focused == Some(block_id) {
                         focused_process.clone()
                     } else {
@@ -201,7 +210,7 @@ impl Rex {
                         return Ok(Vec::new());
                     };
                     let mut agent = Entry::new(
-                        format!("{} · {name} / {window_name}", running.app),
+                        format!("{} · pane {pane} · {name} / {window_name}", running.app),
                         running.path,
                         Source::Agent,
                     );

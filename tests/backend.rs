@@ -300,6 +300,9 @@ fn agent_selection_previews_and_focuses_exact_pane_and_rejects_exited_target() {
     );
     assert!(manager.remove(&entry).is_err());
     assert!(manager.rename(&entry, "rename").is_err());
+    let mut entry = entry;
+    // The pane may have moved since the row was fetched; use its refreshed window.
+    entry.agent.as_mut().unwrap().window_id = "window:old-full".into();
     let connection = manager
         .connect_entry(entry.clone(), &ConnectOptions::default())
         .unwrap();
@@ -328,6 +331,16 @@ fn agent_selection_previews_and_focuses_exact_pane_and_rejects_exited_target() {
         .position(|a| a.iter().any(|a| a == "session.select"))
         .unwrap();
     assert!(focus < switch);
+    let args_index = calls[switch]
+        .iter()
+        .position(|arg| arg == "--args")
+        .unwrap();
+    let selected: Value = serde_json::from_str(&calls[switch][args_index + 1]).unwrap();
+    assert_eq!(selected["session_id"], "session:agents-full");
+    assert_eq!(
+        selected["window_id"], "window:agents-full",
+        "the client must select the agent's tab so future picker actions use the visible window"
+    );
     assert!(
         !calls
             .iter()
@@ -457,6 +470,60 @@ fn picker_agent_connect_revalidates_only_the_selected_pane() {
         .unwrap_err()
         .to_string();
     assert!(error.contains("no longer running"), "{error}");
+}
+
+#[test]
+fn agents_in_the_same_tab_have_distinct_pane_labels() {
+    let fake = FakeRex::new();
+    agents_fixture(&fake);
+    for (block, pid) in [("pi", 2), ("codex", 3)] {
+        fake.json(
+            &format!("process-block:{block}-full.json"),
+            json!({
+                "last_exit": null,
+                "foreground": {"pid": pid, "name": "node", "argv0": "pi", "cwd": fake.dir.path()}
+            }),
+        );
+        fake.json(
+            &format!("program_status-block:{block}-full.json"),
+            json!({"records": []}),
+        );
+    }
+    let entries = fake.rex.list_sources(false, true).unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_ne!(
+        entries[0].name, entries[1].name,
+        "different panes must not appear as duplicate agents"
+    );
+    assert!(entries[0].name.contains("pane 1"), "{}", entries[0].name);
+    assert!(entries[1].name.contains("pane 2"), "{}", entries[1].name);
+    // An exited terminal and a returned shell must both retire stale OSC records.
+    fake.json(
+        "process-block:pi-full.json",
+        json!({
+            "last_exit": {"exit_code": 0},
+            "foreground": {"pid": 2, "name": "node", "argv0": "pi"}
+        }),
+    );
+    fake.json(
+        "process-block:codex-full.json",
+        json!({
+            "last_exit": null,
+            "foreground": {"pid": 30, "name": "zsh", "cwd": fake.dir.path()}
+        }),
+    );
+    for (block, pid) in [("pi", 2), ("codex", 3)] {
+        fake.json(
+            &format!("program_status-block:{block}-full.json"),
+            json!({
+                "records": [{"app": "pi", "state": "done", "owner": {"pid": pid, "name": "node"}}]
+            }),
+        );
+    }
+    assert!(
+        fake.rex.list_sources(false, true).unwrap().is_empty(),
+        "exited agents must disappear even when status records remain"
+    );
 }
 
 #[test]

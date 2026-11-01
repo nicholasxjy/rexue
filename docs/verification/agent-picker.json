@@ -1,0 +1,36 @@
+{
+  "validation": {
+    "rust_tests_passed": 132,
+    "format": "passed",
+    "clippy": "passed",
+    "fzf_cases_passed": 37,
+    "keyboard_cases_passed": 9,
+    "lua_examples_and_active_config": "passed",
+    "installed_binary_matches_release": true
+  },
+  "live_rex": {
+    "agent_tab_selected": true,
+    "reopened_picker": [
+      {
+        "attempt": 1,
+        "correct_window": true,
+        "list_visible": true,
+        "pane_labels_visible": true,
+        "cancel_closed_picker": true
+      },
+      {
+        "attempt": 2,
+        "correct_window": true,
+        "list_visible": true,
+        "pane_labels_visible": true,
+        "cancel_closed_picker": true
+      }
+    ]
+  },
+  "repro_before_fix": {
+    "selected_agent_window_parameter_missing": true,
+    "floating_picker_created_in_wrong_window": true,
+    "same_app_same_tab_rows_identical": true
+  },
+  "scope": "Real installed rexue and real Rex app/client; only test-created picker panes are closed; initial session and tab are restored."
+}

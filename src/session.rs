@@ -467,7 +467,7 @@ impl Manager {
         };
         let _lock = self.lock()?;
         let mut entry = resolve()?;
-        let agent = entry.agent.clone();
+        let mut agent = entry.agent.clone();
         if agent.is_some() && opts.name.is_some() {
             bail!("--name cannot be used when connecting to an agent");
         }
@@ -491,17 +491,18 @@ impl Manager {
             self.rex.list()?
         };
         self.restore_paths(&mut existing, &state);
-        if let Some(agent) = &agent {
+        if let Some(selected) = &agent {
             let current = existing
                 .iter()
                 .find(|candidate| {
                     candidate
                         .agent
                         .as_ref()
-                        .is_some_and(|current| current.block_id == agent.block_id)
+                        .is_some_and(|current| current.block_id == selected.block_id)
                 })
-                .with_context(|| format!("agent in {} is no longer running", agent.block_id))?;
+                .with_context(|| format!("agent in {} is no longer running", selected.block_id))?;
             path = normalize(&current.path);
+            agent = current.agent.clone();
             existing.retain(|candidate| candidate.source == Source::Rex);
         }
         let exact = entry.session_id.as_deref().and_then(|id| {
@@ -652,7 +653,11 @@ impl Manager {
             } else {
                 None
             };
-            self.rex.switch(client, &result.session_id)?;
+            self.rex.switch_window(
+                client,
+                &result.session_id,
+                agent.as_ref().map(|agent| agent.window_id.as_str()),
+            )?;
             let history = state.history.entry(client.id.clone()).or_default();
             if let Some(previous) = previous.filter(|id| id != &result.session_id) {
                 history.retain(|id| id != &previous);

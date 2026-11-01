@@ -37,7 +37,7 @@ rexue last
 
 Default listing combines running sessions, running agents, configured sessions, zoxide history and worktrees from `[[worktree]]` registrations. `--agents`, `--rex`, `--config` and `--zoxide` select a union of those sources. `--hide-attached` hides the invoking live session and its agents; `--hide-duplicates` prioritizes live sessions without merging distinct live IDs. `--no-cache` bypasses the optional five-second directory-history cache.
 
-The picker shows an **Agents** group after running Rex sessions by default, with one row per terminal pane across all sessions and tabs. Rows show the agent, session, tab and state; Enter focuses that exact pane, and preview captures its output. Supported identities include Pi, Claude Code, Codex, OpenCode, Aider, Gemini CLI, Goose, Amp, Cursor Agent and Droid. Rex's [Program Status Protocol](https://www.superlogical.com/rex/docs/build/program-status) supplies `idle`, `working`, `blocked`, `done` and `error` when available; otherwise a detected live agent shows `running`. Process checks exclude status records left behind after exit. Discovery covers agents running inside Rex terminals; processes whose identity Rex cannot expose may not be detected.
+The picker shows an **Agents** group after running Rex sessions by default, with one row per terminal pane across all sessions and tabs. Rows show the agent, session, tab, terminal pane number and state; Enter focuses that exact pane, and preview captures its output. Supported identities include Pi, Claude Code, Codex, OpenCode, Aider, Gemini CLI, Goose, Amp, Cursor Agent and Droid. Rex's [Program Status Protocol](https://www.superlogical.com/rex/docs/build/program-status) supplies `idle`, `working`, `blocked`, `done` and `error` when available; otherwise a detected live agent shows `running`. Process checks exclude status records left behind after exit. Discovery covers agents running inside Rex terminals; processes whose identity Rex cannot expose may not be detected.
 
 `list --agents --json` includes `agent.app`, `agent.state`, `agent.window_id` and `agent.block_id`. Pass the full block ID to `connect` or `preview` to target an agent from the CLI. Agent rows cannot be renamed or removed; select the Rex session row for those actions.
 
@@ -123,7 +123,7 @@ Generate completions with `rexue completion bash`, `zsh`, `fish`, `elvish` or `p
 rexue completion fish | source
 ```
 
-[examples/rex-picker.lua](examples/rex-picker.lua) binds Cmd+Shift+P in Rex and passes the invoking client's full ID. Merge it into your Rex Lua configuration, then use Rex's configuration check and reload commands.
+[examples/rex-picker.lua](examples/rex-picker.lua) binds Cmd+Shift+P in Rex and passes the invoking client's full ID. [examples/rex-picker-floating.lua](examples/rex-picker-floating.lua) binds Alt+S to a floating picker in the invoking terminal's tab. It explicitly resolves the terminal's window so the picker stays visible after switching to an agent in another tab. Merge the preferred fragment into your Rex Lua configuration, then use Rex's configuration check and reload commands.
 
 ## Development and license
 
