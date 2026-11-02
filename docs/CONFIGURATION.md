@@ -74,7 +74,7 @@ remove_command = "zoxide remove -- {}"
 
 ## Worktrees
 
-`[[worktree]]` accepts only a required `path` and optional `icon`. Each path registers a repository for the main session list and picker. Paths must be unique after normalization. Repository-scoped worktree commands work without registration, using the current checkout or `--path`.
+`[[worktree]]` accepts only a required `path` and optional `icon`. Each path registers a repository for the main session list and picker. Paths must be unique after normalization. Repository-scoped worktree commands work without registration, using the current checkout or `--path`. The worktree picker stays open with an empty list and a `Not a Git repository or no worktrees found` hint when discovery fails or returns no checkouts. Discovery failures also appear in the header; refresh retries discovery and clears the hint once checkouts are available.
 
 ```toml
 [[worktree]]

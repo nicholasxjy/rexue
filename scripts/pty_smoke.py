@@ -470,10 +470,47 @@ confirm_no = ['alt-n', 'alt-c']
 root=pathlib.Path(__file__).parent.parent
 if (root/'wt-fail').exists() and sys.argv[1:2]==['list']:
  print('offline wt fixture',file=sys.stderr);sys.exit(7)
+if (root/'wt-empty').exists() and sys.argv[1:2]==['list']:
+ print((root/'wt-empty').read_text());sys.exit(0)
 os.execv('''+repr(real_wt)+''',['wt','--config','''+repr(str(wt_config))+''',*sys.argv[1:]])
 ''')
         cfg.write_text(config + '\n[[worktree]]\npath=' + json.dumps(str(repo)) + '\n')
         env = {'PATH': str(bin_dir) + os.pathsep + os.environ['PATH'], 'REXUE_WT':str(bin_dir/'wt-wrapper')}
+        empty_hint = 'Not a Git repository or no worktrees found'
+        before_empty = (root/'rex-calls.jsonl').read_bytes()
+        for path_args in [[], ['--path', str(root)]]:
+            s = Session(binary, cfg, root, arguments=[*base, 'worktree', 'picker', *path_args], env_extra=env)
+            try:
+                s.expect(empty_hint)
+                s.expect('0/0')
+                s.send(b'\x12')
+                s.expect('Refresh failed:')
+                s.send(b'\x1b')
+                checks.append({'case': 'worktree-non-repository-' + ('explicit-path' if path_args else 'cwd'), **s.finish()})
+            finally:
+                s.close()
+        for schema, empty in [('schema1', []), ('schema2-branches-only', {'schema': 2, 'items': [{'branch': 'remote-only'}]})]:
+            (root/'wt-empty').write_text(json.dumps(empty))
+            s = Session(binary, cfg, root, arguments=[*base, 'worktree', 'picker', '--path', str(repo)], env_extra=env)
+            try:
+                s.expect(empty_hint)
+                s.expect('0/0')
+                (root/'wt-empty').unlink()
+                offset = len(s.capture)
+                s.send(b'\x12')
+                s.until(lambda: b'feature/scoped' in s.capture[offset:], 'worktree refresh did not recover rows')
+                s.expect('2/2')
+                (root/'wt-empty').write_text(json.dumps(empty))
+                offset = len(s.capture)
+                s.send(b'\x12')
+                s.until(lambda: empty_hint.encode() in s.capture[offset:], 'empty refresh did not show repository hint')
+                s.until(lambda: b'0/0' in s.capture[offset:], 'empty refresh retained selectable rows')
+                s.send(b'\x1b')
+                checks.append({'case': 'worktree-empty-list-refresh-recovers-' + schema, **s.finish()})
+            finally:
+                s.close()
+                (root/'wt-empty').unlink(missing_ok=True)
+        assert (root/'rex-calls.jsonl').read_bytes() == before_empty
         s = Session(binary, cfg, root, arguments=[*base, 'wt', 'pk', '--path', str(repo)], env_extra=env)
         try:
             s.expect('feature/scoped')

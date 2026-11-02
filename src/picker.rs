@@ -267,10 +267,15 @@ impl Catalog {
             .filter_map(|(action, label)| self.options.keybindings.hint(action, label))
             .collect::<Vec<_>>()
             .join(" · ");
-        if self.status.is_empty() {
-            keys
+        let header = if self.options.worktree && self.entries.is_empty() {
+            format!("{keys}\nNot a Git repository or no worktrees found")
         } else {
-            format!("{keys}\n{}", clean(&self.status))
+            keys
+        };
+        if self.status.is_empty() {
+            header
+        } else {
+            format!("{header}\n{}", clean(&self.status))
         }
     }
 }
@@ -425,7 +430,12 @@ fn refresh(state: &Mutex<Catalog>, fetch: &Mutex<Box<dyn Fn() -> Result<Vec<Entr
             state.replace(entries);
             state.status.clear();
         }
-        Err(error) => state.status = format!("Refresh failed: {error:#}"),
+        Err(error) => {
+            if state.options.worktree {
+                state.replace(Vec::new());
+            }
+            state.status = format!("Refresh failed: {error:#}");
+        }
     }
 }
 
@@ -986,10 +996,18 @@ pub fn pick_with_create(
 ) -> Result<Option<PickOutcome>> {
     check_fzf()?;
     let _terminal = TerminalState::save();
-    let entries = fetch()?;
+    let (entries, status) = match fetch() {
+        Ok(entries) => (entries, String::new()),
+        Err(error) if options.worktree => {
+            (Vec::new(), format!("Could not list worktrees: {error:#}"))
+        }
+        Err(error) => return Err(error),
+    };
     let fetch: Fetch = Arc::new(Mutex::new(Box::new(fetch)));
     let mut query = options.query.clone();
-    let state = Arc::new(Mutex::new(Catalog::new(options.clone(), entries)));
+    let mut catalog = Catalog::new(options.clone(), entries);
+    catalog.status = status;
+    let state = Arc::new(Mutex::new(catalog));
     let bridge = Bridge::start(state.clone(), fetch.clone(), Arc::new(preview))?;
     loop {
         let header = {
@@ -1186,6 +1204,51 @@ mod tests {
         assert_eq!(selected.id.as_deref(), Some("42"));
         assert!(choice(result(130, "create_worktree")).unwrap().is_none());
         assert!(choice(result(0, "ctrl-q")).is_err());
+    }
+
+    #[test]
+    fn empty_worktree_catalog_shows_repository_hint_without_selectable_rows() {
+        let options = PickerOptions {
+            worktree: true,
+            ..Default::default()
+        };
+        let state = Mutex::new(Catalog::new(options, Vec::new()));
+        assert!(rows(&state, "").unwrap().is_empty());
+        assert!(
+            state
+                .lock()
+                .unwrap()
+                .header()
+                .contains("Not a Git repository or no worktrees found")
+        );
+        assert!(
+            !Catalog::new(PickerOptions::default(), Vec::new())
+                .header()
+                .contains("Not a Git repository")
+        );
+    }
+
+    #[test]
+    fn worktree_refresh_failure_empties_rows_and_recovery_clears_hint() {
+        let options = PickerOptions {
+            worktree: true,
+            ..Default::default()
+        };
+        let entry = Entry::new("main", "/repo", Source::Worktree);
+        let state = Mutex::new(Catalog::new(options, vec![entry.clone()]));
+        let failure: Fetch = Arc::new(Mutex::new(Box::new(|| bail!("not a git repository"))));
+        refresh(&state, &failure);
+        assert!(rows(&state, "").unwrap().is_empty());
+        let header = state.lock().unwrap().header();
+        assert!(header.contains("Not a Git repository or no worktrees found"));
+        assert!(header.contains("not a git repository"));
+
+        let success: Fetch = Arc::new(Mutex::new(Box::new(move || Ok(vec![entry.clone()]))));
+        refresh(&state, &success);
+        assert!(!rows(&state, "").unwrap().is_empty());
+        let header = state.lock().unwrap().header();
+        assert!(!header.contains("Not a Git repository"));
+        assert!(!header.contains("Refresh failed"));
     }
 
     #[test]

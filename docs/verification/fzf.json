@@ -197,6 +197,26 @@
       "exit": 0
     },
     {
+      "case": "worktree-non-repository-cwd",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "worktree-non-repository-explicit-path",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "worktree-empty-list-refresh-recovers-schema1",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "worktree-empty-list-refresh-recovers-schema2-branches-only",
+      "restored": true,
+      "exit": 0
+    },
+    {
       "case": "worktree-generic-branch-path-refresh-error-filter-cancel",
       "restored": true,
       "exit": 0
