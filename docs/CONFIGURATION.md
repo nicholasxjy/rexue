@@ -1,44 +1,44 @@
 # Configuration
 
-Rexue reads `$XDG_CONFIG_HOME/rexue/rexue.toml`, falling back to `~/.config/rexue/rexue.toml`. Use `-C/--config-file PATH` to select another file. A missing default file uses defaults; a missing explicit file is an error. Paths support `~` and environment variables without executing shell expressions. Relative session and repository paths resolve from the process working directory.
+Rexue loads `$XDG_CONFIG_HOME/rexue/rexue.toml`, or `~/.config/rexue/rexue.toml` when XDG_CONFIG_HOME is unset or empty. Override it with `-C/--config-file PATH`. A missing default file uses defaults; an explicit file must exist.
 
-The complete editable example is [examples/rexue.toml](../examples/rexue.toml). Unknown settings warn and are ignored by default. Set `strict_mode = true` to reject them; invalid types always fail. Only the fields documented here are supported.
+See the [editable example](../examples/rexue.toml). Unknown keys warn and are ignored unless `strict_mode = true`; type errors always fail. Configuration paths expand `~` and environment variables. Relative paths, including imports, resolve from the working directory.
 
-## Shared session settings
+## General settings
 
-| Key | Default | Behavior |
+| Key | Default | Purpose |
 | --- | --- | --- |
-| `strict_mode` | `false` | Reject unknown settings. |
-| `import` | `[]` | Read exact filenames and append session, wildcard and worktree definitions in order. Relative filenames resolve from the process working directory; nested imports and imported global settings do not apply. No glob expansion. |
-| `blacklist` | `[]` | Regular expressions matching entry names; use `list --blacklisted` to list matches instead. |
-| `sort_order` | `[]` | Source order; nested lists interleave sources by history score. Sources: `agent`, `rex`, `config`, `zoxide`, `directory`, `worktree`. With no explicit order, Rex sessions come first, followed by agents, configured sessions, zoxide history, directories and worktrees. |
-| `cache` | `false` | Cache directory-history discovery for five seconds. Agents, live sessions and configured entries remain fresh. `--no-cache` bypasses it. |
-| `dir_length` | `1` | Number of trailing path components used for ordinary directory session names. |
-| `git_dir_length` | `1` | Number of components in Git repository name anchors. |
-| `git_namer_use_worktree_root` | `false` | Name from the selected checkout instead of the common repository root. |
+| `strict_mode` | `false` | Reject unknown keys. |
+| `import` | `[]` | Append session, wildcard and worktree definitions from exact filenames, in order. No globs, nested imports or imported global settings. |
+| `blacklist` | `[]` | Regexes matching entry names; `list --blacklisted` shows matches instead. |
+| `sort_order` | `[]` | Order sources; nested arrays interleave sources by history score. Default: `rex`, `agent`, `config`, `zoxide`, `directory`, `worktree`. |
+| `cache` | `false` | Cache directory history for five seconds; `--no-cache` bypasses it. Live sessions and agents stay fresh. |
+| `dir_length` | `1` | Trailing path components for directory names. |
+| `git_dir_length` | `1` | Trailing components of the Git repository naming anchor. |
+| `git_namer_use_worktree_root` | `false` | Use the checkout root as the naming anchor. |
 | `separator_aware` | `false` | Rank picker name segments separately. |
 
-Nonpositive naming lengths normalize to 1. `[[name_substitution]]` entries have `find`, `replace` and optional `regex = false`; substitutions run before directory/Git naming. Invalid regular expressions fail validation.
+Naming lengths of zero or less become 1. `[[name_substitution]]` applies `find` → `replace` before directory/Git naming; `regex = true` enables regex matching (default: `false`). `find` must be nonempty.
 
 ## Sessions and startup
 
-Each `[[session]]` requires a unique nonempty `name` and an expandable nonempty `path`.
+Each `[[session]]` requires a unique nonempty `name` and a nonempty `path`.
 
-| Field | Default | Behavior |
-| --- | --- | --- |
-| `startup_command` | absent | Shell command run when a new session is created. |
-| `startup_script` | absent | Shell text or a script filename relative to the session directory. Takes priority over a command in the same layer. |
-| `preview_command` | absent | Shell command for directory/config previews; empty output falls back to directory listing. |
-| `disable_startup_command` | `false` | Prevent fallback to default startup; explicit session startup still applies. |
-| `alias` | absent | Unique alias compared using Unicode simple case folding. |
-| `alias_auto_connect` | `false` | Allow an exact alias to connect outside alias-filter mode. |
-| `icon` | absent | Row icon; matching wildcards can supply a fallback. |
+| Optional field | Behavior |
+| --- | --- |
+| `startup_command` | Shell command for a new session. |
+| `startup_script` | Shell text or an existing script file, relative to the session directory; takes priority over the command in the same layer. |
+| `preview_command` | Directory preview command; empty output falls back to a directory listing. |
+| `disable_startup_command` | Suppress default startup fallback (default: `false`). Explicit session startup still runs. |
+| `alias` | Unique alias, compared using Unicode simple case folding. |
+| `alias_auto_connect` | Auto-connect an exact alias outside alias-filter mode (default: `false`). |
+| `icon` | Custom picker icon; falls back to a matching wildcard. |
 
-`[default_session]` provides startup and preview defaults. `[[wildcard]]` supplies `pattern`, `startup_command`, `startup_script`, `preview_command`, `disable_startup_command` and `icon`. The first matching wildcard participates. Patterns support `*` within a path component, `?`, character classes such as `[a-z]` and `[^x]`, and backslash escapes. A trailing `/**` matches descendants of its literal prefix, excluding the prefix itself.
+`[default_session]` supplies startup, preview and default-disable settings. `[[wildcard]]` accepts `pattern`, startup/preview settings, `disable_startup_command` and `icon`. Only the first matching wildcard participates. Patterns support `*` within a path component, `?`, character classes (`[a-z]`, `[^x]`) and backslash escapes. A trailing `/**` matches descendants of its literal prefix, excluding the prefix itself.
 
-For startup, a nonempty `connect --command` takes priority, then explicit session startup, then the first enabled matching wildcard startup, then enabled defaults. Each layer keeps its script and command paired. Empty commands/scripts fall through. A wildcard disable flag prevents its own startup and suppresses default startup for directories without an explicit session. An explicit session's disable flag controls default fallback. The default disable flag also prevents default startup. Reconnecting never reruns startup.
+Startup uses the first nonempty choice: `connect --command`, explicit session startup, enabled wildcard startup, then enabled defaults. Each layer keeps its script and command together; empty values fall through. A wildcard disable flag skips its startup and, without an explicit session, suppresses defaults. An explicit session's disable flag controls its default fallback; the default disable flag suppresses default startup globally. Reconnecting never reruns startup.
 
-Preview uses the first nonempty explicit session, wildcard or default preview command. `{}` in startup, preview and frecency shell commands is a path/value placeholder and remains data even with spaces and shell punctuation. Commands execute through `sh`. Live session previews capture the focused terminal instead of running directory preview commands. Agent previews capture the agent's exact pane, including panes in inactive tabs.
+Preview uses the first nonempty session, wildcard or default command. Startup and preview scripts run through `sh`; `{}` inserts the session path as data, preserving spaces and shell punctuation. Live previews capture the focused terminal; agent previews capture that agent's pane, including in inactive tabs.
 
 ```toml
 [default_session]
@@ -47,7 +47,6 @@ preview_command = "ls -la {}"
 [[wildcard]]
 pattern = "~/Projects/**"
 startup_command = "git status --short"
-icon = "G"
 
 [[session]]
 name = "app"
@@ -58,83 +57,78 @@ startup_command = "nvim"
 
 ## Directory history
 
-Without overrides, zoxide supplies list/query/add/remove operations. Missing optional zoxide yields an empty history source. `[frecency]` supports `list_command`, `query_command`, `add_command` and `remove_command`. Absent or empty strings use zoxide; a nonempty override replaces that operation. Override failures are reported.
+`[frecency]` accepts `list_command`, `query_command`, `add_command` and `remove_command`. Each absent or empty value uses the corresponding zoxide operation. Missing zoxide yields an empty history source; failing custom commands report errors.
 
-List output is one directory per line, optionally preceded by a numeric score. Scores affect merged source groups. Connecting records the resolved directory; picker deletion removes the selected history row. `query_command`, `add_command` and `remove_command` receive their argument through `{}`.
+Custom commands use shell-style quoting but execute directly, without shell expansion. Use a wrapper script for pipes or redirection. `{}` substitutes the query/path within each argument, preserving it as data.
+
+List output is one directory per line, optionally prefixed by a numeric score. Connecting records the directory; picker removal deletes its history entry. Scores rank merged groups, for example:
 
 ```toml
 sort_order = ["rex", "agent", ["config", "zoxide"], "directory", "worktree"]
 
 [frecency]
-list_command = "zoxide query --list --score"
 query_command = "zoxide query -- {}"
 add_command = "zoxide add -- {}"
-remove_command = "zoxide remove -- {}"
 ```
 
 ## Worktrees
 
-`[[worktree]]` accepts only a required `path` and optional `icon`. Each path registers a repository for the main session list and picker. Paths must be unique after normalization. Repository-scoped worktree commands work without registration, using the current checkout or `--path`. The worktree picker stays open with an empty list and a `Not a Git repository or no worktrees found` hint when discovery fails or returns no checkouts. Discovery failures also appear in the header; refresh retries discovery and clears the hint once checkouts are available.
+`[[worktree]]` registers a repository in the main list/picker with a required `path` and optional `icon`. Paths must be unique after normalization. Repository-scoped commands use the current checkout or `--path` without requiring registration.
 
-```toml
-[[worktree]]
-path = "~/Projects/app"
-icon = "G"
-```
+Requires Worktrunk **0.81.0+** (`wt` on PATH, or `REXUE_WT`). Configure checkout paths, branch defaults, hooks, approvals and removal policy in [Worktrunk](https://worktrunk.dev/config/). Removing a checkout keeps its Rex session alive.
 
-Install Worktrunk 0.81.0 or newer. `REXUE_WT` selects another executable. Worktrunk owns checkout path templates, branch defaults, hooks, approvals and removal policies; configure these in [Worktrunk](https://worktrunk.dev/config/). Removing a checkout does not kill its Rex session.
+The worktree picker stays open when discovery fails or finds no checkouts, showing `Not a Git repository or no worktrees found` and any error. Refresh retries discovery. Create and cancel remain available with an empty list or no filter matches.
 
 ## Picker settings
 
-| `[tui]` key | Default | Behavior |
+Requires fzf **0.63+** on PATH. `[tui]` applies to both pickers:
+
+| Key | Default | Behavior |
 | --- | --- | --- |
 | `show_icons` | `true` | Show source/custom icons. |
-| `prompt` | `"> "` | Search prompt. |
-| `placeholder` | `"Filter Sessions..."` | Empty values normalize to the default. |
-| `pointer` | `"> "` | Empty strings or values wider than two cells use the default. |
+| `prompt` | `"> "` | Search prompt; empty uses the default. |
+| `placeholder` | `"Filter Sessions..."` | Empty uses the default. Worktrees use `"Filter worktrees..."` unless customized. |
+| `pointer` | `"> "` | Empty or wider than two terminal cells uses the default. |
 | `alias_filter_prefix` | `"/"` | One non-whitespace character; empty disables alias filtering. |
-| `alias_auto_connect_delay` | `"150ms"` | Exact-alias delay. Units: ns, us/µs/μs, ms, s, m, h; combinations and fractions are accepted. Zero/negative durations select immediately. |
+| `alias_auto_connect_delay` | `"150ms"` | Duration; empty uses the default, zero/negative connects immediately. Supports ns, us/µs/μs, ms, s, m, h, fractions and combinations. |
 | `preview` | `false` | Initial preview visibility. |
-| `preview_width` | `60` | Percentage; nonpositive uses 60, positive clamps to 10–90. |
-| `preview_min_width` | `100` | Minimum terminal width for preview; nonpositive uses 100. |
-| `preview_border` | `"line"` | `none`, `line`, `thick`, `double`; unknown values use `line`. |
-| `group_separator` | `false` | Draw a nonselectable separator above each source group. The Agents group always shows its boundary when the query is empty. |
+| `preview_width` | `60` | Percentage, clamped to 10–90; zero/negative uses 60. |
+| `preview_min_width` | `100` | Minimum terminal width for preview; zero/negative uses 100. |
+| `preview_border` | `"line"` | `none`, `line`, `thick`, `double`; unknown uses `line`. |
+| `group_separator` | `false` | Nonselectable source boundaries; Agents always shows a boundary with an empty query. |
 
-`picker --icons`, `--separator-aware`, `--prompt`, `--placeholder`, `--query`, `--preview`, `--no-preview` and `--no-alias-auto` override the corresponding behavior. Worktree picker supports icons, prompt, placeholder and query overrides. Picker shortcuts use `[tui.keybindings]` below; fzf owns terminal layout and other text editing.
+CLI overrides: `picker --icons`, `--separator-aware`, `--prompt`, `--placeholder`, `--query`, `--preview`, `--no-preview`, `--no-alias-auto`. `--no-preview` wins over `--preview`. Boolean values use `=`, e.g. `--icons=false`. Worktree picker accepts icons, prompt, placeholder and query overrides. CLI prompt/placeholder overrides may be empty.
 
-`[icons.agent]`, `[icons.rex]`, `[icons.config]`, `[icons.zoxide]`, `[icons.directory]` and `[icons.worktree]` accept `icon` and `color`. Colors are black/red/green/yellow/blue/magenta/cyan/white with optional `bright-`, or gray/grey. A session, wildcard or repository icon takes priority over its source icon.
+In the session picker, `/` filters aliases and an exact alias auto-connects after typing; outside this mode, auto-connect requires `alias_auto_connect = true`. A prefilled `--query` does not auto-connect. A query starting with `#` enables numbered selection. These modes do not apply to the worktree picker.
+
+`[icons.SOURCE]` accepts `icon` and `color` for `agent`, `rex`, `config`, `zoxide`, `directory`, `worktree`. Colors: black/red/green/yellow/blue/magenta/cyan/white, optionally `bright-`, or gray/grey. Custom session, repository and wildcard picker icons take priority over source icons, in that order.
 
 ### Keybindings
 
-`[tui.keybindings]` maps each action to an array of fzf key names. Each action can have multiple shortcuts. Omitted actions keep their defaults; a configured array replaces all default keys for that action, and `[]` disables its shortcuts. Removing a digit shortcut restores ordinary digit input. The picker header and text prompts show the first configured keyboard shortcut and omit disabled actions.
+`[tui.keybindings]` maps actions to arrays of fzf key names. Omit an action to keep its defaults; an array replaces them, and `[]` disables its shortcuts. Headers/prompts show the first keyboard shortcut and omit disabled actions.
 
 ```toml
 [tui.keybindings]
 rename = ["ctrl-r", "alt-r", "f2"]
-remove = ["ctrl-x", "alt-x"]
 toggle_preview = ["alt-o"]
 select_2 = ["2", "alt-2"]
 ```
 
 | Action | Default keys | Context |
 | --- | --- | --- |
-| `accept` | `enter`, `double-click` | Connect in either picker; save text or accept the selected confirmation row in dialogs. |
-| `cancel` | `esc`, `ctrl-c`, `ctrl-g`, `ctrl-q` | Both pickers and all dialogs. |
-| `up` | `up`, `ctrl-k`, `ctrl-p` | Both pickers. |
-| `down` | `down`, `ctrl-j`, `ctrl-n` | Both pickers. |
-| `half_page_up` | `ctrl-u` | Both pickers. |
-| `half_page_down` | `ctrl-d` | Both pickers. |
+| `accept` | `enter`, `double-click` | Connect; submit text or the selected confirmation row. |
+| `cancel` | `esc`, `ctrl-c`, `ctrl-g`, `ctrl-q` | Both pickers and dialogs. |
+| `up` / `down` | `up`, `ctrl-k`, `ctrl-p` / `down`, `ctrl-j`, `ctrl-n` | Both pickers. |
+| `half_page_up` / `half_page_down` | `ctrl-u` / `ctrl-d` | Both pickers. |
 | `toggle_preview` | `ctrl-o` | Both pickers. |
 | `rename` | `ctrl-r` | Session picker; live Rex sessions only. |
-| `remove` | `ctrl-x` | Both pickers; opens a confirmation. |
-| `refresh` | `ctrl-r` | Worktree picker only. |
-| `create_worktree` | `ctrl-w` | Worktree picker only, including when no rows match. |
-| `select_1` … `select_9` | `1` … `9`, respectively | Session picker: select a numbered row when the query starts with `#`; otherwise insert its digit. Each action accepts multiple keys independently. |
-| `confirm_yes` | `y` | Removal confirmation: select Yes and accept. |
-| `confirm_no` | `n`, `q` | Removal confirmation: cancel. |
-| `confirm_up` | `up`, `ctrl-k`, `ctrl-p`, `left`, `btab` | Removal confirmation. |
-| `confirm_down` | `down`, `ctrl-j`, `ctrl-n`, `right`, `tab` | Removal confirmation. |
+| `remove` | `ctrl-x` | Confirm removal of a live session, history entry or worktree. Agent/config rows cannot be removed. |
+| `refresh` | `ctrl-r` | Worktree picker. |
+| `create_worktree` | `ctrl-w` | Worktree picker; create and connect, even with no matching rows. |
+| `select_1` … `select_9` | `1` … `9` | Session picker; choose a numbered row in `#` mode, otherwise insert the digit. |
+| `confirm_yes` / `confirm_no` | `y` / `n`, `q` | Confirm removal / cancel. |
+| `confirm_up` / `confirm_down` | `up`, `ctrl-k`, `ctrl-p`, `left`, `btab` / `down`, `ctrl-j`, `ctrl-n`, `right`, `tab` | Removal confirmation. |
 
-Use lowercase named keys such as `enter`, `esc`, `tab`, `space`, `up`, `page-down`, `f1`–`f12`, `ctrl-a`–`ctrl-z`, `alt-r`, or modified navigation keys such as `ctrl-up`. Single printable characters are also accepted, except binding delimiters `: , + ( ) [ ] { }` and backslash. Key names are case-sensitive, including `alt-r` versus `alt-R`. Aliases such as `return`/`ctrl-m`, `shift-tab`, `pgup`, and `pgdn` normalize before conflict checks.
+Keys include `enter`, `esc`, `tab`, `space`, arrows, `page-down`, `f1`–`f12`, `ctrl-a`–`ctrl-z`, `alt-r` and modified navigation such as `ctrl-up`. Single printable characters are accepted except `: , + ( ) [ ] { }` and backslash. Names are case-sensitive; aliases such as `return`/`ctrl-m`, `shift-tab`, `pgup` and `pgdn` normalize before validation.
 
-Invalid key names and duplicate assignments in the same context fail configuration loading. A key can serve different actions in separate contexts, such as the default `ctrl-r` for session rename and worktree refresh. Reassigning a key within one context requires replacing or disabling the action that currently owns it. Other fzf editing and mouse bindings retain their usual behavior. Rex shortcuts that open Rexue itself remain in Rex's `init.lua`.
+Invalid keys and duplicate assignments in the same context fail loading. Reassign a key by replacing/disabling its previous action. Separate contexts may share keys, e.g. session rename and worktree refresh. Removing a digit shortcut restores digit input. Other fzf editing/mouse bindings remain available. Shortcuts that launch Rexue belong in Rex's `init.lua`; see the [examples](../README.md#configure).
