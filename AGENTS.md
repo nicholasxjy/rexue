@@ -4,7 +4,7 @@ Rexue connects Rex sessions and agent panes through fzf, with zoxide directory h
 
 ## Integration boundaries
 
-- Delegate checkout discovery, paths, hooks, approvals and removal policy to Worktrunk. Removing a worktree leaves its Rex session alive.
+- Delegate checkout discovery, paths, hooks, approvals and removal policy to Worktrunk.
 - Preserve full session IDs and agent window/block IDs through selection and mutation. Picker labels and rendered rows are display data; refresh agent metadata before connecting to its pane and tab.
 - Keep process arguments separate. Shell templates carry substituted paths as positional data; fzf bindings keep constant shell source and pass query/selection data through the existing environment and socket protocol.
 - Test configuration precedence through `Config::load`: it normalizes empty values before picker options are resolved. Cover omitted settings, empty configuration values and explicit CLI overrides; picker prompt/placeholder overrides may intentionally be empty.

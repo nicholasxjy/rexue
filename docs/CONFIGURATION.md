@@ -75,7 +75,9 @@ add_command = "zoxide add -- {}"
 
 `[[worktree]]` registers a repository in the main list/picker with a required `path` and optional `icon`. Paths must be unique after normalization. Repository-scoped commands use the current checkout or `--path` without requiring registration.
 
-Requires Worktrunk **0.81.0+** (`wt` on PATH, or `REXUE_WT`). Configure checkout paths, branch defaults, hooks, approvals and removal policy in [Worktrunk](https://worktrunk.dev/config/). Removing a checkout keeps its Rex session alive.
+Requires Worktrunk **0.81.0+** (`wt` on PATH, or `REXUE_WT`). Configure checkout paths, branch defaults, hooks, approvals and removal policy in [Worktrunk](https://worktrunk.dev/config/).
+
+Removing the current checkout from either picker switches to the first remaining worktree in worktree picker order, then closes the original Rex session. If no worktrees remain, it switches to the first other live session; if no sessions remain either, it closes the original session. The current worktree is identified from the launching Rex session's directory, including subdirectories. Removing another checkout or using `worktree remove` keeps its Rex session alive.
 
 The worktree picker stays open when discovery fails or finds no checkouts, showing `Not a Git repository or no worktrees found` and any error. Refresh retries discovery. Create and cancel remain available with an empty list or no filter matches.
 

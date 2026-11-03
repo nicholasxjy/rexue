@@ -19,9 +19,12 @@ Requires Python 3 and fzf **0.63+** on PATH:
 
 ```sh
 python3 scripts/pty_smoke.py --binary target/debug/rexue --output docs/verification/fzf.json
+python3 scripts/worktree_removal_smoke.py --binary target/debug/rexue
 ```
 
 Runs real fzf in a controlling PTY with Rex/Worktrunk test doubles. Covers filtering, aliases, numbered selection, configurable shortcuts, previews, rename/removal, worktree creation/refresh and terminal restoration. Includes empty/non-repository worktree lists, recovery after refresh, shell punctuation, inherited fzf settings and missing/old/failing fzf.
+
+The focused removal script uses real Git/Worktrunk and a stateful Rex fixture. It checks removal of the current worktree from both pickers, selection or creation of the next session, preservation of the original session after a failed switch, cancellation, dirty-checkout protection, full session IDs and terminal restoration.
 
 ## Extended keyboard acceptance
 
@@ -41,7 +44,7 @@ Requires Python 3, Git and Worktrunk **0.81.0+** (`wt` on PATH):
 python3 scripts/worktree_smoke.py --binary target/debug/rexue --output docs/verification/worktree.json
 ```
 
-Uses real Git/Worktrunk, temporary repositories/configuration/hooks and a stateful Rex test double. Covers discovery, both list schemas, detached checkouts, path templates, create/connect reuse, hook approvals and protected removal. Verifies that removal keeps the Rex session and that recreated checkouts handle session-name conflicts.
+Uses real Git/Worktrunk, temporary repositories/configuration/hooks and a stateful Rex test double. Covers discovery, both list schemas, detached checkouts, path templates, create/connect reuse, hook approvals and protected removal. Verifies that the `worktree remove` command keeps the Rex session and that recreated checkouts handle session-name conflicts. Picker removal and navigation are covered by interactive picker acceptance above.
 
 ## Focused CLI probes
 
@@ -76,6 +79,6 @@ rex config check examples/rex-picker-floating.lua
 
 ## Verification records
 
-[Picker](verification/fzf.json), [keyboard](verification/keyboard.json), [Worktrunk](verification/worktree.json) and [public CLI/completions](verification/public-cli.json) record earlier runs. [Session/agent fixtures](verification/session-agents.json), [live agent navigation](verification/agent-picker.json) and [performance samples](verification/performance.json) retain focused evidence. They do not certify the current checkout.
+[Picker](verification/fzf.json), [keyboard](verification/keyboard.json), [Worktrunk](verification/worktree.json) and [public CLI/completions](verification/public-cli.json) record earlier runs. [Worktree removal](verification/worktree-removal.json) records the focused removal checks. [Session/agent fixtures](verification/session-agents.json), [live agent navigation](verification/agent-picker.json) and [performance samples](verification/performance.json) retain focused evidence. They do not certify the current checkout.
 
 Update receipts only from checks actually run; omit `--output` for local checks without replacing a receipt. Report commands, outcomes and whether evidence used fixtures or the live app. Performance samples combine live read-only listing with fixture-based picker timing; they do not measure live app rendering. Other platforms require separate verification.

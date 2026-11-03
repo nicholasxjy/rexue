@@ -38,7 +38,7 @@ def child():
 
 
 class Session:
-    def __init__(self, binary, cfg, root, arguments=None, env_extra=None, **_):
+    def __init__(self, binary, cfg, root, arguments=None, env_extra=None, cwd=None, **_):
         self.master, self.slave = pty.openpty()
         fcntl.ioctl(self.slave, termios.TIOCSWINSZ, struct.pack('HHHH', 30, 120, 0, 0))
         env = dict(os.environ, TERM='xterm-256color', REXUE_STATE_DIR=str(root / 'state'), XDG_CACHE_HOME=str(root / 'cache'))
@@ -49,7 +49,7 @@ class Session:
         def setup():
             os.setsid()
             fcntl.ioctl(0, termios.TIOCSCTTY, 0)
-        self.proc = subprocess.Popen([sys.executable, __file__, '--child', binary, *args], cwd=root, env=env,
+        self.proc = subprocess.Popen([sys.executable, __file__, '--child', binary, *args], cwd=cwd or root, env=env,
                                      stdin=self.slave, stdout=self.slave, stderr=self.slave, preexec_fn=setup)
         self.capture = bytearray()
 

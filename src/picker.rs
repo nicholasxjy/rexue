@@ -843,7 +843,7 @@ fn confirm(entry: &Entry, bindings: &Keybindings) -> Result<bool> {
     let question = if entry.source == Source::Rex {
         "Kill this Rex session?"
     } else if entry.source == Source::Worktree {
-        "Remove this worktree using Worktrunk? Its Rex session will remain."
+        "Remove this worktree using Worktrunk? Removing the current worktree also closes its Rex session."
     } else {
         "Remove this directory from history?"
     };
@@ -964,32 +964,30 @@ fn text_prompt(
 pub enum PickOutcome {
     Selected(Entry),
     Created(Entry),
+    Removed(crate::session::WorktreeRemoval),
 }
 
 pub fn pick(
     fetch: impl Fn() -> Result<Vec<Entry>> + Send + 'static,
     preview: impl Fn(&Entry) -> Result<String> + Send + Sync + 'static,
-    remove: impl Fn(&Entry) -> Result<()> + Send + Sync + 'static,
+    remove: impl Fn(&Entry) -> Result<Option<crate::session::WorktreeRemoval>> + Send + Sync + 'static,
     rename: impl Fn(&Entry, &str) -> Result<()> + Send + Sync + 'static,
     options: PickerOptions,
-) -> Result<Option<Entry>> {
-    Ok(pick_with_create(
+) -> Result<Option<PickOutcome>> {
+    pick_with_create(
         fetch,
         preview,
         remove,
         rename,
         |_| bail!("creation is not available in this picker"),
         options,
-    )?
-    .map(|outcome| match outcome {
-        PickOutcome::Selected(entry) | PickOutcome::Created(entry) => entry,
-    }))
+    )
 }
 
 pub fn pick_with_create(
     fetch: impl Fn() -> Result<Vec<Entry>> + Send + 'static,
     preview: impl Fn(&Entry) -> Result<String> + Send + Sync + 'static,
-    remove: impl Fn(&Entry) -> Result<()> + Send + Sync + 'static,
+    remove: impl Fn(&Entry) -> Result<Option<crate::session::WorktreeRemoval>> + Send + Sync + 'static,
     rename: impl Fn(&Entry, &str) -> Result<()> + Send + Sync + 'static,
     create: impl Fn(&str) -> Result<Entry> + Send + Sync + 'static,
     options: PickerOptions,
@@ -1091,7 +1089,8 @@ pub fn pick_with_create(
                 .into();
             } else if confirm(&entry, &options.keybindings)? {
                 match remove(&entry) {
-                    Ok(()) => {
+                    Ok(Some(removal)) => return Ok(Some(PickOutcome::Removed(removal))),
+                    Ok(None) => {
                         state.lock().unwrap().removed(&entry);
                         refresh(&state, &fetch);
                     }

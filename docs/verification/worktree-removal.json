@@ -1,0 +1,40 @@
+{
+  "checks": [
+    {
+      "case": "current-worktree-first-row",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "global-current-worktree-first-row",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "current-worktree-creates-first-session",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "current-worktree-switch-fails",
+      "restored": true,
+      "exit": 1
+    },
+    {
+      "case": "noncurrent-worktree-keeps-sessions",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "last-worktree-first-session",
+      "restored": true,
+      "exit": 0
+    },
+    {
+      "case": "last-worktree-no-other-sessions",
+      "restored": true,
+      "exit": 0
+    }
+  ],
+  "count": 7
+}

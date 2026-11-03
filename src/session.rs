@@ -41,6 +41,12 @@ pub struct Connection {
     pub path: PathBuf,
     pub created: bool,
 }
+/// Successful removal that needs a session handoff after picker teardown.
+#[derive(Debug)]
+pub struct WorktreeRemoval {
+    session_id: String,
+    repository: PathBuf,
+}
 #[derive(Debug, Clone)]
 pub struct Manager {
     pub rex: Rex,
@@ -737,7 +743,8 @@ impl Manager {
         }
         Ok(())
     }
-    pub fn remove(&self, entry: &Entry) -> Result<()> {
+    pub fn remove(&self, entry: &Entry) -> Result<Option<WorktreeRemoval>> {
+        let mut removal = None;
         match entry.source {
             Source::Agent => {
                 bail!("agent rows cannot be removed; select their Rex session to close it")
@@ -749,6 +756,21 @@ impl Manager {
                 self.frecency("remove", &entry.path.to_string_lossy())?;
             }
             Source::Worktree => {
+                if let Some(id) = self.rex.context()?["session_id"].as_str() {
+                    let mut current = self.rex.list_session(id, None)?;
+                    self.restore_paths(&mut current, &self.state()?);
+                    if current.iter().any(|session| {
+                        !session.path.as_os_str().is_empty()
+                            && normalize(&session.path).starts_with(normalize(&entry.path))
+                    }) {
+                        removal = Some(WorktreeRemoval {
+                            session_id: id.to_owned(),
+                            // The launching cwd may disappear with this checkout.
+                            repository: git_common_dir(&entry.path)
+                                .context("cannot resolve the current worktree's Git directory")?,
+                        });
+                    }
+                }
                 crate::worktree::Worktrees::new(&self.config).remove(
                     &crate::worktree::Selection {
                         path: Some(entry.path.clone()),
@@ -760,7 +782,40 @@ impl Manager {
             _ => bail!("configured sessions cannot be removed here; edit rexue.toml"),
         };
         self.invalidate();
-        Ok(())
+        Ok(removal)
+    }
+    pub fn complete_worktree_removal(
+        &self,
+        removal: WorktreeRemoval,
+        opts: &ConnectOptions,
+    ) -> Result<Option<Connection>> {
+        let next = crate::worktree::Worktrees::new(&self.config)
+            .list(&crate::worktree::Selection {
+                path: Some(removal.repository),
+            })?
+            .into_iter()
+            .map(|worktree| worktree.entry())
+            // Match the worktree picker's name/path ordering.
+            .min_by(|a, b| a.name.cmp(&b.name).then_with(|| a.path.cmp(&b.path)));
+        let next = match next {
+            Some(entry) => Some(entry),
+            None => self
+                .list(&ListOptions {
+                    rex: true,
+                    no_cache: true,
+                    ..Default::default()
+                })?
+                .into_iter()
+                .find(|entry| entry.session_id.as_deref() != Some(&removal.session_id)),
+        };
+        let connection = next
+            .map(|entry| self.connect_entry(entry, opts))
+            .transpose()?;
+        // Picker teardown restores the terminal before closing its host session.
+        // A failed connection leaves that session available for recovery.
+        self.rex.kill(&removal.session_id)?;
+        self.invalidate();
+        Ok(connection)
     }
 }
 fn git_common_dir(path: &Path) -> Option<PathBuf> {

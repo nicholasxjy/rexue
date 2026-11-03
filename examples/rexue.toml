@@ -53,6 +53,8 @@ icon = ""
 # remove_command = "zoxide remove -- {}"
 
 # Worktrunk manages paths, branches, hooks and approvals.
+# Picker removal of the current worktree switches to the first remaining
+# worktree (or live session), then closes the original Rex session.
 [[worktree]]
 path = "~/Projects/app"
 icon = ""

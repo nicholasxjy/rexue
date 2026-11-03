@@ -382,15 +382,22 @@ fn pick_session(manager: Manager, args: PickerArgs, detach: bool) -> Result<()> 
         move |e, name| rename.rename(e, name),
         options,
     )?;
-    if let Some(e) = chosen {
-        let c = manager.connect_entry(
-            e,
-            &ConnectOptions {
-                detach,
-                ..Default::default()
-            },
-        )?;
-        connection_out(&c, false)?;
+    if let Some(outcome) = chosen {
+        let opts = ConnectOptions {
+            detach,
+            ..Default::default()
+        };
+        let connection = match outcome {
+            picker::PickOutcome::Selected(entry) | picker::PickOutcome::Created(entry) => {
+                Some(manager.connect_entry(entry, &opts)?)
+            }
+            picker::PickOutcome::Removed(removal) => {
+                manager.complete_worktree_removal(removal, &opts)?
+            }
+        };
+        if let Some(connection) = connection {
+            connection_out(&connection, false)?;
+        }
     }
     Ok(())
 }
@@ -709,11 +716,10 @@ fn worktree_command(manager: Manager, command: WorktreeCommand, detach: bool) ->
             let mut options = picker_options_for(&manager.config, &opts, true)?;
             options.auto_refresh = false;
             let fetch_cfg = manager.config.clone();
-            let remove_cfg = manager.config.clone();
+            let remove = manager.clone();
             let create_cfg = manager.config.clone();
             let selection = repo.selection()?;
             let fetch_selection = selection.clone();
-            let remove_selection = selection.clone();
             let create_selection = selection.clone();
             let preview = manager.clone();
             let chosen = picker::pick_with_create(
@@ -725,14 +731,7 @@ fn worktree_command(manager: Manager, command: WorktreeCommand, detach: bool) ->
                         .collect())
                 },
                 move |e| preview.preview(e),
-                move |e| {
-                    Worktrees::new(&remove_cfg).remove(
-                        &remove_selection,
-                        &e.path.to_string_lossy(),
-                        RemoveOptions::default(),
-                    )?;
-                    Ok(())
-                },
+                move |e| remove.remove(e),
                 |_, _| bail!("worktrees cannot be renamed from this picker"),
                 move |branch| {
                     let prepared = Worktrees::new(&create_cfg).prepare(
@@ -753,6 +752,18 @@ fn worktree_command(manager: Manager, command: WorktreeCommand, detach: bool) ->
                             .path
                     }
                     picker::PickOutcome::Created(entry) => entry.path,
+                    picker::PickOutcome::Removed(removal) => {
+                        if let Some(connection) = manager.complete_worktree_removal(
+                            removal,
+                            &ConnectOptions {
+                                detach,
+                                ..Default::default()
+                            },
+                        )? {
+                            connection_out(&connection, false)?;
+                        }
+                        return Ok(());
+                    }
                 };
                 let c = manager.connect_path(
                     &path,
