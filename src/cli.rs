@@ -380,6 +380,17 @@ fn pick_session(manager: Manager, args: PickerArgs, detach: bool) -> Result<()> 
         move |e| preview.preview(e),
         move |e| remove.remove(e),
         move |e, name| rename.rename(e, name),
+        |entries| {
+            if !entries.iter().any(|entry| entry.source == Source::Rex) {
+                return None;
+            }
+            manager
+                .rex
+                .context()
+                .ok()
+                .and_then(|context| context["session_id"].as_str().map(str::to_owned))
+                .map(picker::InitialFocus::Session)
+        },
         options,
     )?;
     if let Some(outcome) = chosen {
@@ -741,6 +752,12 @@ fn worktree_command(manager: Manager, command: WorktreeCommand, detach: bool) ->
                         None,
                     )?;
                     Ok(Entry::new(branch, prepared.path, Source::Worktree))
+                },
+                |_| {
+                    worktrees
+                        .current(&selection)
+                        .ok()
+                        .map(|current| picker::InitialFocus::Worktree(current.path))
                 },
                 options,
             )?;

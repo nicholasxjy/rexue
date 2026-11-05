@@ -83,6 +83,8 @@ The worktree picker stays open when discovery fails or finds no checkouts, showi
 
 ## Picker settings
 
+With an empty initial query, the session picker focuses the launching Rex session by its full ID. The worktree picker focuses the checkout containing the current directory (or `--path`), including subdirectories and symlinked paths. If that entry is unavailable, the first row stays selected. Initial focus applies once when opening; a prefilled `--query` uses normal search ordering.
+
 Requires fzf **0.63+** on PATH. `[tui]` applies to both pickers:
 
 | Key | Default | Behavior |

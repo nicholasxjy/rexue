@@ -148,7 +148,8 @@ if (root/'agents-mode').exists():
         sys.exit(0)
     if a[0]=='capture':print('AGENT_PREVIEW_'+a[4]);sys.exit(0)
     if a[0]=='focus':print('{}');sys.exit(0)
-if a[:2]==['whoami','--json']:print('{}')
+if a[:2]==['whoami','--json']:
+    print(json.dumps({'session_id':(root/'current-session').read_text()}) if (root/'current-session').exists() else '{}')
 elif a[:2]==['ls','--json']:
     killed=(root/'killed').read_text().splitlines() if (root/'killed').exists() else []
     print(json.dumps({'sessions':[{'session_id':'session:'+i,'label':labels.get('session:'+i,fixture['name'])} for i in ['first','second'] if 'session:'+i not in killed]}))
@@ -183,6 +184,32 @@ else:
                 return s.text()
             finally:
                 s.close()
+
+        (root/'current-session').write_text('session:second')
+        text = run_case('initial-focus-current-session-full-id-with-duplicate-names', ['picker', '--rex'],
+                        lambda s: (s.expect('PREVIEW_session:second'), s.send(b'\r')))
+        assert re.search(r'session:second\r?\nREXUE_TTY_REPORT=', text), text[-2000:]
+        (root/'labels.json').write_text(json.dumps({'session:first': 'first unique', 'session:second': 'second unique'}))
+        def current_session_search(s):
+            s.expect('PREVIEW_session:second')
+            offset = len(s.capture)
+            s.send(b'first unique')
+            s.expect('1/1')
+            s.until(lambda: b'PREVIEW_session:first' in s.capture[offset:], 'search did not focus its matching result')
+            offset = len(s.capture)
+            s.send(b'\x7f' * len('first unique'))
+            s.until(lambda: b'2/2' in s.capture[offset:], 'clearing search did not restore both sessions')
+            s.send(b'\r')
+        text = run_case('initial-focus-does-not-repeat-after-search', ['picker', '--rex'], current_session_search)
+        assert re.search(r'session:first\r?\nREXUE_TTY_REPORT=', text), text[-2000:]
+        (root/'labels.json').unlink()
+        text = run_case('prefilled-query-keeps-first-search-result', ['picker', '--rex', '--query=same'],
+                        lambda s: (s.expect('PREVIEW_session:first'), s.send(b'\r')))
+        assert re.search(r'session:first\r?\nREXUE_TTY_REPORT=', text), text[-2000:]
+        (root/'current-session').write_text('session:missing')
+        run_case('initial-focus-missing-session-falls-back-to-first', ['picker', '--rex'],
+                 lambda s: (s.expect('PREVIEW_session:first'), s.send(b'\x1b')))
+        (root/'current-session').unlink()
 
         (root/'agents-mode').touch()
         def agent_navigation(s):
@@ -476,6 +503,24 @@ os.execv('''+repr(real_wt)+''',['wt','--config','''+repr(str(wt_config))+''',*sy
 ''')
         cfg.write_text(config + '\n[[worktree]]\npath=' + json.dumps(str(repo)) + '\n')
         env = {'PATH': str(bin_dir) + os.pathsep + os.environ['PATH'], 'REXUE_WT':str(bin_dir/'wt-wrapper')}
+        worktree_config = cfg.read_text()
+        cfg.write_text(worktree_config + '\n[default_session]\npreview_command="printf CHECKOUT_PREVIEW_; git -C {} branch --show-current"\n')
+        nested = repo/'nested'; nested.mkdir()
+        linked = root/'repo link'; linked.symlink_to(nested, target_is_directory=True)
+        for label, path_args, cwd, branch in [
+            ('explicit-path', ['--path', str(repo)], root, 'main'),
+            ('cwd-subdirectory', [], nested, 'main'),
+            ('symlink-subdirectory', ['--path', str(linked)], root, 'main'),
+            ('prefilled-query', ['--path', str(repo), '--query=feature/scoped'], root, 'feature/scoped'),
+        ]:
+            s = Session(binary, cfg, root, arguments=[*base, 'worktree', 'picker', *path_args], env_extra=env, cwd=cwd)
+            try:
+                s.expect('CHECKOUT_PREVIEW_' + branch)
+                s.send(b'\x1b')
+                checks.append({'case': 'initial-focus-worktree-' + label, **s.finish()})
+            finally:
+                s.close()
+        cfg.write_text(worktree_config)
         empty_hint = 'Not a Git repository or no worktrees found'
         before_empty = (root/'rex-calls.jsonl').read_bytes()
         for path_args in [[], ['--path', str(root)]]:
@@ -676,9 +721,10 @@ cancel = ['alt-q', 'alt-z']
         ]:
             if script is not None:
                 executable(isolated/'fzf', script)
-            result = subprocess.run([*([binary]+base), 'picker', '--config'], env=dict(os.environ, PATH=str(isolated)), capture_output=True, text=True, timeout=8)
-            assert result.returncode == 1 and expected in result.stderr, (label, result)
-            checks.append({'case': label, 'exit': result.returncode})
+            for source in (['--config'] if label == 'fzf-error' else ['--config', '--rex']):
+                result = subprocess.run([*([binary]+base), 'picker', source], env=dict(os.environ, PATH=str(isolated)), capture_output=True, text=True, timeout=8)
+                assert result.returncode == 1 and expected in result.stderr, (label, source, result)
+                checks.append({'case': label + ('-rex' if source == '--rex' else ''), 'exit': result.returncode})
         # Missing/old fzf preflight made no Rex calls; failed interactive fzf only
         # fetched config rows and performed no connection or removal.
         assert (root/'rex-calls.jsonl').read_bytes() == before

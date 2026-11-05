@@ -29,6 +29,12 @@ pub struct Alias {
 }
 
 #[derive(Debug, Clone)]
+pub enum InitialFocus {
+    Session(String),
+    Worktree(PathBuf),
+}
+
+#[derive(Debug, Clone)]
 pub struct PickerOptions {
     pub show_icons: bool,
     pub separator_aware: bool,
@@ -97,6 +103,7 @@ struct Catalog {
     last_query: String,
     auto_armed: bool,
     status: String,
+    initial_focus: Option<InitialFocus>,
 }
 fn same_entry(a: &Entry, b: &Entry) -> bool {
     if a.source == Source::Agent && b.source == Source::Agent {
@@ -119,6 +126,7 @@ impl Catalog {
             next_id: 0,
             auto_armed: false,
             status: String::new(),
+            initial_focus: None,
         };
         state.replace(entries);
         state
@@ -343,6 +351,22 @@ impl Bridge {
                         match request.action.as_str() {
                             "rows" => rows(&state, &request.query),
                             "status" => Ok(state.lock().unwrap().header().into_bytes()),
+                            "initial" => {
+                                let mut s = state.lock().unwrap();
+                                // Consume once, even if the user started typing before load.
+                                // Subsequent query reloads and dialogs keep normal fzf focus.
+                                let focus = s.initial_focus.take();
+                                let position = focus.filter(|_| request.query.is_empty()).and_then(|focus| {
+                                    s.entries.iter().position(|id| {
+                                        let entry = &s.targets[id];
+                                        match &focus {
+                                            InitialFocus::Session(id) => entry.source == Source::Rex && entry.session_id.as_ref() == Some(id),
+                                            InitialFocus::Worktree(path) => entry.source == Source::Worktree && crate::session::same_path(&entry.path, path),
+                                        }
+                                    })
+                                });
+                                Ok(position.map_or_else(Vec::new, |i| format!("pos({})", i + 1).into_bytes()))
+                            }
                             "loaded" => {
                                 let auto_refresh = { let s = state.lock().unwrap(); s.options.worktree && s.options.auto_refresh };
                                 if auto_refresh && !refresh_once.swap(true, Ordering::AcqRel) {
@@ -632,7 +656,9 @@ fn finder(options: &PickerOptions, bridge: &Bridge, header: &str, query: &str) -
         .arg(format!("--header={header}"))
         .arg(format!("--bind=start:reload({HELPER} rows)"))
         .arg(format!("--bind=change:bg-cancel+reload({HELPER} rows)"))
-        .arg(format!("--bind=load:bg-transform({HELPER} loaded)"));
+        .arg(format!(
+            "--bind=load:transform({HELPER} initial)+bg-transform({HELPER} loaded)"
+        ));
     let bindings = &options.keybindings;
     bindings.reset(&mut command, &Keybindings::picker_actions(options.worktree));
     for (action, fzf_action) in [
@@ -972,6 +998,7 @@ pub fn pick(
     preview: impl Fn(&Entry) -> Result<String> + Send + Sync + 'static,
     remove: impl Fn(&Entry) -> Result<Option<crate::session::WorktreeRemoval>> + Send + Sync + 'static,
     rename: impl Fn(&Entry, &str) -> Result<()> + Send + Sync + 'static,
+    initial_focus: impl FnOnce(&[Entry]) -> Option<InitialFocus>,
     options: PickerOptions,
 ) -> Result<Option<PickOutcome>> {
     pick_with_create(
@@ -980,6 +1007,7 @@ pub fn pick(
         remove,
         rename,
         |_| bail!("creation is not available in this picker"),
+        initial_focus,
         options,
     )
 }
@@ -990,6 +1018,7 @@ pub fn pick_with_create(
     remove: impl Fn(&Entry) -> Result<Option<crate::session::WorktreeRemoval>> + Send + Sync + 'static,
     rename: impl Fn(&Entry, &str) -> Result<()> + Send + Sync + 'static,
     create: impl Fn(&str) -> Result<Entry> + Send + Sync + 'static,
+    initial_focus: impl FnOnce(&[Entry]) -> Option<InitialFocus>,
     options: PickerOptions,
 ) -> Result<Option<PickOutcome>> {
     check_fzf()?;
@@ -1001,10 +1030,16 @@ pub fn pick_with_create(
         }
         Err(error) => return Err(error),
     };
+    let initial_focus = if options.query.is_empty() && !entries.is_empty() {
+        initial_focus(&entries)
+    } else {
+        None
+    };
     let fetch: Fetch = Arc::new(Mutex::new(Box::new(fetch)));
     let mut query = options.query.clone();
     let mut catalog = Catalog::new(options.clone(), entries);
     catalog.status = status;
+    catalog.initial_focus = initial_focus;
     let state = Arc::new(Mutex::new(catalog));
     let bridge = Bridge::start(state.clone(), fetch.clone(), Arc::new(preview))?;
     loop {
