@@ -54,6 +54,8 @@ elif args[:1]==['new']:
     (root/'sessions.json').write_text(json.dumps(sessions+[session]))
     print(json.dumps({'session_id':session['session_id'],'initial_windows':[{'block_ids':['block:fixture']}]}))
 elif args[:1]==['kill']:
+    if (root/'kill-fail').exists():
+        print('fixture close failure',file=sys.stderr);sys.exit(7)
     (root/'sessions.json').write_text(json.dumps([s for s in sessions if s['session_id']!=args[1]]))
     print('{}')
 else:
@@ -73,11 +75,13 @@ else:
         run('git', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false',
             'commit', '--quiet', '--allow-empty', '-m', 'fixture', cwd=seed)
         for case, global_picker, empty_worktrees, other_sessions in [
+            ('noncurrent-worktree-closes-related-sessions', False, False, True),
             ('current-worktree-first-row', False, False, True),
             ('global-current-worktree-first-row', True, False, True),
             ('current-worktree-creates-first-session', False, False, False),
             ('current-worktree-switch-fails', False, False, True),
-            ('noncurrent-worktree-keeps-sessions', False, False, True),
+            ('current-worktree-close-fails', False, False, True),
+            ('cli-current-worktree', False, False, True),
             ('last-worktree-first-session', False, True, True),
             ('last-worktree-no-other-sessions', False, True, False),
         ]:
@@ -94,70 +98,97 @@ else:
             nested = current_tree/'nested'
             nested.mkdir()
             current_id, target_id = 'session:current-full', 'session:first-full'
-            sessions = [{'session_id': current_id, 'label': 'duplicate', 'path': str(nested)}]
+            linked = root/(case + '-link')
+            linked.symlink_to(current_tree, target_is_directory=True)
+            related_ids = ['session:related-one-full', 'session:related-two-full']
+            sessions = [
+                {'session_id': current_id, 'label': 'duplicate', 'path': str(nested)},
+                {'session_id': related_ids[0], 'label': 'duplicate', 'path': str(linked/'nested')},
+                {'session_id': related_ids[1], 'label': 'duplicate', 'path': str(current_tree)},
+            ]
             if other_sessions:
                 sessions.extend([
                     {'session_id': target_id, 'label': 'duplicate', 'path': str(target_path)},
                     {'session_id': 'session:other-full', 'label': 'other', 'path': str(root)},
                 ])
-            if case == 'noncurrent-worktree-keeps-sessions':
+            if case == 'noncurrent-worktree-closes-related-sessions':
                 sessions[0]['path'] = str(target_path)
+                sibling = root/(current_tree.name + '-sibling')
+                sibling.mkdir()
+                sessions.append({'session_id': 'session:sibling-full', 'label': 'duplicate', 'path': str(sibling)})
             if case == 'current-worktree-switch-fails':
                 (root/'switch-fail').touch()
+            if case == 'current-worktree-close-fails':
+                (root/'kill-fail').touch()
             (root/'sessions.json').write_text(json.dumps(sessions))
             (root/'current.json').write_text(json.dumps(current_id))
             (root/'calls.jsonl').write_text('')
             config.write_text('strict_mode=true\n[frecency]\nlist_command="true"\nadd_command="true"\n[tui]\npreview=false\n[[worktree]]\npath=' + json.dumps(str(repository)) + '\n')
+            if case == 'noncurrent-worktree-closes-related-sessions':
+                config.write_text('blacklist=["duplicate"]\n' + config.read_text())
+            cli_remove = case == 'cli-current-worktree'
             picker = ['picker'] if global_picker else ['worktree', 'picker', '--path', str(current_tree)]
-            s = Session(binary, config, root, arguments=['--rex-bin', str(rex), '-C', str(config), *picker, '--query=' + branch], env_extra=env, cwd=nested)
+            arguments = ['worktree', 'remove', branch, '--path', str(current_tree), '--json'] if cli_remove else [*picker, '--query=' + branch]
+            s = Session(binary, config, root, arguments=['--rex-bin', str(rex), '-C', str(config), *arguments], env_extra=env, cwd=nested)
             try:
-                s.expect(branch)
-                s.send(b'\x18')
-                s.expect('Remove this worktree using Worktrunk?')
-                if case == 'current-worktree-first-row':
-                    offset = len(s.capture)
-                    s.send(b'n')
-                    s.until(lambda: b'Enter connect' in s.capture[offset:], 'cancel did not reopen worktree picker')
-                    assert current_tree.is_dir()
-                    dirty = current_tree/'dirty'
-                    dirty.write_text('preserve me')
-                    offset = len(s.capture)
+                if not cli_remove:
+                    s.expect(branch)
                     s.send(b'\x18')
-                    s.until(lambda: b'Confirm >' in s.capture[offset:], 'dirty removal confirmation missing')
+                    s.expect('Remove this worktree using Worktrunk?')
+                    if case == 'current-worktree-first-row':
+                        offset = len(s.capture)
+                        s.send(b'n')
+                        s.until(lambda: b'Enter connect' in s.capture[offset:], 'cancel did not reopen worktree picker')
+                        assert current_tree.is_dir()
+                        dirty = current_tree/'dirty'
+                        dirty.write_text('preserve me')
+                        offset = len(s.capture)
+                        s.send(b'\x18')
+                        s.until(lambda: b'Confirm >' in s.capture[offset:], 'dirty removal confirmation missing')
+                        s.send(b'y')
+                        s.expect('Worktrunk remove failed')
+                        calls = [json.loads(line) for line in (root/'calls.jsonl').read_text().splitlines()]
+                        assert dirty.read_text() == 'preserve me'
+                        assert not any(call[0] == 'kill' or 'session.select' in call for call in calls)
+                        dirty.unlink()
+                        offset = len(s.capture)
+                        s.send(b'\x18')
+                        s.until(lambda: b'Confirm >' in s.capture[offset:], 'final removal confirmation missing')
                     s.send(b'y')
-                    s.expect('Worktrunk remove failed')
-                    calls = [json.loads(line) for line in (root/'calls.jsonl').read_text().splitlines()]
-                    assert dirty.read_text() == 'preserve me'
-                    assert not any(call[0] == 'kill' or 'session.select' in call for call in calls)
-                    dirty.unlink()
-                    offset = len(s.capture)
-                    s.send(b'\x18')
-                    s.until(lambda: b'Confirm >' in s.capture[offset:], 'final removal confirmation missing')
-                s.send(b'y')
-                if case == 'noncurrent-worktree-keeps-sessions':
-                    s.until(lambda: not current_tree.exists(), 'noncurrent worktree was not removed')
-                    s.expect('0/0')
-                    s.send(b'\x1b')
-                report = s.finish(expected=1 if case == 'current-worktree-switch-fails' else 0)
+                    if case == 'noncurrent-worktree-closes-related-sessions':
+                        s.until(lambda: not current_tree.exists(), 'noncurrent worktree was not removed')
+                        s.expect('0/0')
+                        s.send(b'\x1b')
+                report = s.finish(expected=1 if case in ['current-worktree-switch-fails', 'current-worktree-close-fails'] else 0)
                 assert not current_tree.exists()
                 calls = [json.loads(line) for line in (root/'calls.jsonl').read_text().splitlines()]
                 kills = [call for call in calls if call[0] == 'kill']
                 switches = [call for call in calls if call[0] == '-C' and 'session.select' in call]
-                if case in ['current-worktree-switch-fails', 'noncurrent-worktree-keeps-sessions']:
-                    assert kills == [], kills
+                if case == 'current-worktree-close-fails':
+                    assert kills == [['kill', related_ids[0]]], kills
+                    assert 'could not close Rex session ' + related_ids[0] in s.text()
+                    assert len(switches) == 1, switches
+                elif case in ['current-worktree-switch-fails', 'noncurrent-worktree-closes-related-sessions']:
+                    expected_kills = [] if case == 'current-worktree-switch-fails' else [
+                        ['kill', 'session:related-one-full'], ['kill', 'session:related-two-full']]
+                    assert kills == expected_kills, kills
                     assert any(s['session_id'] == current_id for s in json.loads((root/'sessions.json').read_text()))
                     if case == 'current-worktree-switch-fails':
                         assert len(switches) == 1 and 'fixture switch failure' in s.text()
                     else:
                         assert switches == [], switches
                 else:
-                    assert kills == [['kill', current_id]], kills
+                    assert kills == [['kill', id] for id in [*related_ids, current_id]], kills
                     if other_sessions or not empty_worktrees:
                         expected_id = target_id if other_sessions else 'session:created-full'
                         assert len(switches) == 1 and json.loads(switches[0][switches[0].index('--args')+1])['session_id'] == expected_id, switches
                         assert calls.index(switches[0]) < calls.index(kills[0]), calls
                     else:
                         assert switches == [], switches
+                removed_ids = set() if case == 'current-worktree-close-fails' else {call[1] for call in kills}
+                assert {s['session_id'] for s in json.loads((root/'sessions.json').read_text())} == {
+                    s['session_id'] for s in sessions if s['session_id'] not in removed_ids
+                } | ({'session:created-full'} if not other_sessions and not empty_worktrees else set())
                 checks.append({'case': case, **report})
             except AssertionError:
                 transcript = [line.strip() for line in s.text().splitlines() if line.strip()]
@@ -166,6 +197,7 @@ else:
             finally:
                 s.close()
                 (root/'switch-fail').unlink(missing_ok=True)
+                (root/'kill-fail').unlink(missing_ok=True)
     receipt = json.dumps({'checks': checks, 'count': len(checks)}, indent=2)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)

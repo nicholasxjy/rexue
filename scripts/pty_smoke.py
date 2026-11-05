@@ -682,6 +682,10 @@ cancel = ['alt-q', 'alt-z']
         finally:
             s.close()
 
+        assert set((root/'killed').read_text().splitlines()) == {'session:first', 'session:second'}
+        # Restore a private live session for the independent literal-name probes.
+        (root/'killed').write_text('session:first\n')
+        (root/'fixture.json').write_text(json.dumps({'name': name, 'path': str(root)}))
         saved_configuration = cfg.read_text()
         wanted, wrong = root/'wanted', root/'wrong'
         wanted.mkdir(); wrong.mkdir()

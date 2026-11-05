@@ -24,7 +24,15 @@ python3 scripts/worktree_removal_smoke.py --binary target/debug/rexue
 
 Runs real fzf in a controlling PTY with Rex/Worktrunk test doubles. Covers filtering, aliases, numbered selection, configurable shortcuts, previews, rename/removal, worktree creation/refresh and terminal restoration. Includes empty/non-repository worktree lists, recovery after refresh, shell punctuation, inherited fzf settings and missing/old/failing fzf.
 
-The focused removal script uses real Git/Worktrunk and a stateful Rex fixture. It checks removal of the current worktree from both pickers, selection or creation of the next session, preservation of the original session after a failed switch, cancellation, dirty-checkout protection, full session IDs and terminal restoration.
+The focused removal script uses real Git/Worktrunk and a stateful Rex fixture. It checks cleanup of all related sessions from both pickers and the CLI, current-session handoff, multiple sessions with identical labels, symlinked subdirectories, hidden sessions, unrelated checkout preservation, switch/close failures, cancellation, dirty-checkout protection, full session IDs and terminal restoration.
+
+For live session/tab/pane/process cleanup, run:
+
+```sh
+python3 scripts/live_worktree_cleanup_smoke.py --binary target/debug/rexue
+```
+
+This creates a temporary repository and three test-owned sessions on the connected Rex server. It verifies that removing the checkout closes two sessions, three tabs and four agent panes, terminates their inert test processes and preserves an unrelated session. It closes only its own sessions, including during cleanup, without switching the app's selected session.
 
 ## Extended keyboard acceptance
 
@@ -44,7 +52,7 @@ Requires Python 3, Git and Worktrunk **0.81.0+** (`wt` on PATH):
 python3 scripts/worktree_smoke.py --binary target/debug/rexue --output docs/verification/worktree.json
 ```
 
-Uses real Git/Worktrunk, temporary repositories/configuration/hooks and a stateful Rex test double. Covers discovery, both list schemas, detached checkouts, path templates, create/connect reuse, hook approvals and protected removal. Verifies that the `worktree remove` command keeps the Rex session and that recreated checkouts handle session-name conflicts. Picker removal and navigation are covered by interactive picker acceptance above.
+Uses real Git/Worktrunk, temporary repositories/configuration/hooks and a stateful Rex test double. Covers discovery, both list schemas, detached checkouts, path templates, create/connect reuse, hook approvals and protected removal. Verifies that `worktree remove` closes sessions identified by Rexue's recorded connection paths and that recreated checkouts handle session-name conflicts. Picker removal and navigation are covered by interactive picker acceptance above.
 
 ## Focused CLI probes
 

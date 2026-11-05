@@ -869,7 +869,7 @@ fn confirm(entry: &Entry, bindings: &Keybindings) -> Result<bool> {
     let question = if entry.source == Source::Rex {
         "Kill this Rex session?"
     } else if entry.source == Source::Worktree {
-        "Remove this worktree using Worktrunk? Removing the current worktree also closes its Rex session."
+        "Remove this worktree using Worktrunk? This also closes all associated Rex sessions, tabs, panes and agents."
     } else {
         "Remove this directory from history?"
     };

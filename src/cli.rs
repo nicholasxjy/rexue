@@ -264,7 +264,7 @@ pub enum WorktreeCommand {
         #[arg(short = 'q', long)]
         query: Option<String>,
     },
-    /// Remove a selected worktree using Worktrunk protections; keep its Rex session.
+    /// Remove a worktree using Worktrunk protections and close its Rex sessions.
     #[command(aliases=["rm","r"])]
     Remove {
         target: String,
@@ -696,7 +696,7 @@ fn worktree_command(manager: Manager, command: WorktreeCommand, detach: bool) ->
             no_delete_branch,
             json,
         } => {
-            let result = worktrees.remove(
+            let (result, removal) = manager.remove_worktree(
                 &repo.selection()?,
                 &target,
                 RemoveOptions {
@@ -707,6 +707,15 @@ fn worktree_command(manager: Manager, command: WorktreeCommand, detach: bool) ->
             )?;
             if json {
                 out(&serde_json::to_string_pretty(&result)?)?;
+            }
+            if let Some(removal) = removal {
+                manager.complete_worktree_removal(
+                    removal,
+                    &ConnectOptions {
+                        detach,
+                        ..Default::default()
+                    },
+                )?;
             }
         }
         WorktreeCommand::Picker {

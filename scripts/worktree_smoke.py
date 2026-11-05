@@ -50,7 +50,10 @@ elif args[:2]==['whoami','--json']: print('{}')
 elif args[:2]==['session','inspect']:
  s=next(s for s in sessions if s['session_id']==args[2]);print(json.dumps({'session':s,'windows':[]}))
 elif args[0]=='new':
- s={'session_id':'session:'+str(len(sessions)+1),'label':args[1],'path':args[args.index('-c')+1]};sessions.append(s);state.write_text(json.dumps(sessions));print(json.dumps({'session_id':s['session_id'],'initial_windows':[{'block_ids':['block:fixture']}]}))
+ counter=root/'next-session-id';number=int(counter.read_text())+1 if counter.exists() else 1;counter.write_text(str(number))
+ s={'session_id':'session:'+str(number),'label':args[1],'path':args[args.index('-c')+1]};sessions.append(s);state.write_text(json.dumps(sessions));print(json.dumps({'session_id':s['session_id'],'initial_windows':[{'block_ids':['block:fixture']}]}))
+elif args[0]=='kill':
+ state.write_text(json.dumps([s for s in sessions if s['session_id']!=args[1]]));print('{}')
 else: print('{}')
 ''')
         fake.chmod(0o755)
@@ -133,13 +136,16 @@ else: print('{}')
         failure = cli('worktree', 'remove', 'feature/widgets', expected=1)
         assert tree.is_dir() and (tree / 'dirty file').read_text() == 'unsaved'
         assert 'uncommitted' in failure.stderr.lower() or 'dirty' in failure.stderr.lower(), failure.stderr
+        assert not any(call[0] == 'kill' for call in [json.loads(line) for line in (root / 'rex-calls.jsonl').read_text().splitlines()])
         (tree / 'dirty file').unlink()
         result = json.loads(cli('worktree', 'remove', str(tree), '--no-delete-branch', '--json').stdout)
         assert not tree.exists() and git('show-ref', '--verify', 'refs/heads/feature/widgets')
         assert result[0]['branch_outcome'] == 'not_attempted'
         assert (repo / 'removed-hooks').read_text().endswith('removed')
-        assert not any(call[0] == 'kill' for call in [json.loads(line) for line in (root / 'rex-calls.jsonl').read_text().splitlines()])
-        checks.extend(['dirty-checkout-protection', 'foreground-remove', 'keep-branch', 'approved-pre-remove-hook', 'keep-rex-session'])
+        kills = [call for call in [json.loads(line) for line in (root / 'rex-calls.jsonl').read_text().splitlines()] if call[0] == 'kill']
+        assert kills == [['kill', connected['session_id']]], kills
+        assert not json.loads((root / 'rex-sessions.json').read_text())
+        checks.extend(['dirty-checkout-protection', 'foreground-remove', 'keep-branch', 'approved-pre-remove-hook', 'close-rex-session-by-recorded-path'])
         error = cli('worktree', 'remove', 'feature/widgets', expected=1)
         assert 'not a registered worktree' in error.stderr
         wt_config.write_text(wt_config.read_text().replace('custom trees', 'new layout'))

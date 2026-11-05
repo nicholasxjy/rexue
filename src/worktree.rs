@@ -191,13 +191,8 @@ impl<'a> Worktrees<'a> {
             created: value["action"] == "created",
         })
     }
-    /// Only remove a selected registered worktree, never a branch-only row.
-    pub fn remove(
-        &self,
-        selection: &Selection,
-        target: &str,
-        options: RemoveOptions,
-    ) -> Result<Value> {
+    /// Resolve a registered checkout before its directory is removed.
+    pub fn resolve(&self, selection: &Selection, target: &str) -> Result<WorktreeEntry> {
         ensure!(
             !target.is_empty(),
             "provide the worktree branch or path to remove"
@@ -209,16 +204,22 @@ impl<'a> Worktrees<'a> {
         } else {
             dir.join(target_path)
         };
-        let entry = self
-            .list(selection)?
+        self.list(selection)?
             .into_iter()
             .find(|entry| {
                 entry.branch.as_deref() == Some(target) || same_path(&entry.path, &target_path)
             })
-            .context(
-                "target is not a registered worktree; use `rexue worktree list` to select one",
-            )?;
-        let mut command = self.command(&dir);
+            .context("target is not a registered worktree; use `rexue worktree list` to select one")
+    }
+    /// Only remove a selected registered worktree, never a branch-only row.
+    pub fn remove(
+        &self,
+        selection: &Selection,
+        target: &str,
+        options: RemoveOptions,
+    ) -> Result<Value> {
+        let entry = self.resolve(selection, target)?;
+        let mut command = self.command(&selection.directory()?);
         command.args(["remove", "--foreground", "--format=json"]);
         if options.force {
             command.arg("--force");

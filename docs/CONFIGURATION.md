@@ -77,7 +77,9 @@ add_command = "zoxide add -- {}"
 
 Requires Worktrunk **0.81.0+** (`wt` on PATH, or `REXUE_WT`). Configure checkout paths, branch defaults, hooks, approvals and removal policy in [Worktrunk](https://worktrunk.dev/config/).
 
-Removing the current checkout from either picker switches to the first remaining worktree in worktree picker order, then closes the original Rex session. If no worktrees remain, it switches to the first other live session; if no sessions remain either, it closes the original session. The current worktree is identified from the launching Rex session's directory, including subdirectories. Removing another checkout or using `worktree remove` keeps its Rex session alive.
+Removing a checkout from either picker or with `worktree remove` also closes all associated Rex sessions, including their tabs, panes and running agents. Sessions are matched by their current directory or Rexue's recorded connection path, including subdirectories and symlinked paths; names and picker visibility do not determine ownership. Unrelated sessions stay open. Cancelled or failed Worktrunk removal does not close any sessions.
+
+When the launching session belongs to the removed checkout, Rexue first switches to the first remaining worktree in worktree picker order. If no worktrees remain, it switches to the first live session outside the removed checkout. It then closes the associated sessions, with the launching session last and after picker teardown. If there is no remaining destination, it closes them without switching. A failed switch preserves the sessions for recovery, and session-close failures are reported with the full session ID.
 
 The worktree picker stays open when discovery fails or finds no checkouts, showing `Not a Git repository or no worktrees found` and any error. Refresh retries discovery. Create and cancel remain available with an empty list or no filter matches.
 

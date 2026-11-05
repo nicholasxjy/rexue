@@ -44,7 +44,7 @@ pub struct Connection {
 /// Successful removal that needs a session handoff after picker teardown.
 #[derive(Debug)]
 pub struct WorktreeRemoval {
-    session_id: String,
+    session_ids: Vec<String>,
     repository: PathBuf,
 }
 #[derive(Debug, Clone)]
@@ -756,22 +756,7 @@ impl Manager {
                 self.frecency("remove", &entry.path.to_string_lossy())?;
             }
             Source::Worktree => {
-                if let Some(id) = self.rex.context()?["session_id"].as_str() {
-                    let mut current = self.rex.list_session(id, None)?;
-                    self.restore_paths(&mut current, &self.state()?);
-                    if current.iter().any(|session| {
-                        !session.path.as_os_str().is_empty()
-                            && normalize(&session.path).starts_with(normalize(&entry.path))
-                    }) {
-                        removal = Some(WorktreeRemoval {
-                            session_id: id.to_owned(),
-                            // The launching cwd may disappear with this checkout.
-                            repository: git_common_dir(&entry.path)
-                                .context("cannot resolve the current worktree's Git directory")?,
-                        });
-                    }
-                }
-                crate::worktree::Worktrees::new(&self.config).remove(
+                (_, removal) = self.remove_worktree(
                     &crate::worktree::Selection {
                         path: Some(entry.path.clone()),
                     },
@@ -783,6 +768,78 @@ impl Manager {
         };
         self.invalidate();
         Ok(removal)
+    }
+    pub fn remove_worktree(
+        &self,
+        selection: &crate::worktree::Selection,
+        target: &str,
+        options: crate::worktree::RemoveOptions,
+    ) -> Result<(serde_json::Value, Option<WorktreeRemoval>)> {
+        let worktrees = crate::worktree::Worktrees::new(&self.config);
+        let entry = worktrees.resolve(selection, target)?;
+        let root = normalize(&entry.path);
+        let state = self.state()?;
+        // Snapshot full IDs and canonical paths before Worktrunk removes the
+        // checkout. Include sessions hidden by picker filters and saved paths
+        // when the active terminal has moved or cannot report its directory.
+        let mut session_ids: Vec<_> = self
+            .rex
+            .list_sources(true, false)?
+            .into_iter()
+            .filter_map(|session| {
+                let id = session.session_id?;
+                let live = !session.path.as_os_str().is_empty()
+                    && normalize(&session.path).starts_with(&root);
+                let recorded = state.paths.get(&id).is_some_and(|path| {
+                    !path.as_os_str().is_empty() && normalize(path).starts_with(&root)
+                });
+                (live || recorded).then_some(id)
+            })
+            .collect();
+        let current = if session_ids.is_empty() {
+            None
+        } else {
+            self.rex.context()?["session_id"]
+                .as_str()
+                .map(str::to_owned)
+        };
+        let repository = if let Some(position) = current
+            .as_ref()
+            .and_then(|id| session_ids.iter().position(|candidate| candidate == id))
+        {
+            // Close the launcher's session last, after picker teardown and handoff.
+            let id = session_ids.remove(position);
+            session_ids.push(id);
+            Some(
+                git_common_dir(&entry.path)
+                    .context("cannot resolve the current worktree's Git directory")?,
+            )
+        } else {
+            None
+        };
+        let result = worktrees.remove(selection, &entry.path.to_string_lossy(), options)?;
+        self.invalidate();
+        let pending = match repository {
+            Some(repository) => Some(WorktreeRemoval {
+                session_ids,
+                repository,
+            }),
+            None => {
+                self.close_worktree_sessions(&session_ids)?;
+                None
+            }
+        };
+        Ok((result, pending))
+    }
+    fn close_worktree_sessions(&self, session_ids: &[String]) -> Result<()> {
+        for id in session_ids {
+            // Rex owns the cascade: killing a session closes every tab and pane
+            // and terminates their terminal processes, including coding agents.
+            self.rex.kill(id).with_context(|| {
+                format!("worktree removed, but could not close Rex session {id}")
+            })?;
+        }
+        Ok(())
     }
     pub fn complete_worktree_removal(
         &self,
@@ -806,14 +863,19 @@ impl Manager {
                     ..Default::default()
                 })?
                 .into_iter()
-                .find(|entry| entry.session_id.as_deref() != Some(&removal.session_id)),
+                .find(|entry| {
+                    !entry
+                        .session_id
+                        .as_ref()
+                        .is_some_and(|id| removal.session_ids.contains(id))
+                }),
         };
         let connection = next
             .map(|entry| self.connect_entry(entry, opts))
             .transpose()?;
         // Picker teardown restores the terminal before closing its host session.
         // A failed connection leaves that session available for recovery.
-        self.rex.kill(&removal.session_id)?;
+        self.close_worktree_sessions(&removal.session_ids)?;
         self.invalidate();
         Ok(connection)
     }
