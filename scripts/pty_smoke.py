@@ -213,6 +213,7 @@ else:
 
         (root/'agents-mode').touch()
         def agent_navigation(s):
+            s.expect('agent-project [shell] [agents]')
             s.expect('── Agents ──')
             s.expect('3/3')
             s.expect('pi · pane 1')

@@ -78,6 +78,8 @@ pub struct Entry {
     pub source: Source,
     #[serde(default)]
     pub session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tab_names: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<Agent>,
     #[serde(default)]
@@ -98,6 +100,7 @@ impl Entry {
             path: path.into(),
             source,
             session_id: None,
+            tab_names: Vec::new(),
             agent: None,
             group: 0,
             icon: None,

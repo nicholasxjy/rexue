@@ -206,6 +206,45 @@ fn agents_fixture(fake: &FakeRex) {
 }
 
 #[test]
+fn session_tab_names_preserve_order_duplicates_and_full_identity() {
+    let fake = FakeRex::new();
+    let session = fake.session("session:tabs-full", "project", fake.dir.path());
+    fake.json("sessions.json", json!({"sessions": [session]}));
+    fake.json(
+        "inspect-session:tabs-full.json",
+        json!({
+            "windows": [
+                {"window_id": "window:shell", "label": "Shell"},
+                {"window_id": "window:editor", "label": "编辑器"},
+                {"window_id": "window:other-shell", "label": "Shell"},
+                {"window_id": "window:unnamed"},
+                {"window_id": "window:empty", "label": ""}
+            ]
+        }),
+    );
+    let entries = fake.rex.list().unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name, "project");
+    assert_eq!(entries[0].target(), "session:tabs-full");
+    assert_eq!(
+        serde_json::to_value(&entries[0]).unwrap()["tab_names"],
+        json!(["Shell", "编辑器", "Shell"])
+    );
+
+    for inspect in [json!({}), json!({"windows": []})] {
+        fake.json("inspect-session:tabs-full.json", inspect);
+        let entries = fake.rex.list().unwrap();
+        assert_eq!(entries[0].name, "project");
+        assert!(
+            serde_json::to_value(&entries[0])
+                .unwrap()
+                .get("tab_names")
+                .is_none()
+        );
+    }
+}
+
+#[test]
 fn agents_discover_inactive_tabs_and_panes_without_stale_status_or_dedup_loss() {
     let fake = FakeRex::new();
     agents_fixture(&fake);

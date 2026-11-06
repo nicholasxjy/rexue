@@ -1198,6 +1198,11 @@ fn display(entry: &Entry, options: &PickerOptions) -> String {
             text.push_str(&format!("[{}] ", clean(&alias.alias)));
         }
         text.push_str(&clean(&entry.display_name()));
+        if entry.source == Source::Rex {
+            for name in &entry.tab_names {
+                text.push_str(&format!(" [{}]", clean(name)));
+            }
+        }
     }
     text
 }
@@ -1325,6 +1330,53 @@ mod tests {
         );
         assert!(target(&state, Some("9999")).is_err());
     }
+    #[test]
+    fn session_tab_names_render_and_refresh_without_changing_selection() {
+        let mut entry: Entry = serde_json::from_value(serde_json::json!({
+            "name": "project",
+            "source": "rex",
+            "session_id": "session:project-full",
+            "tab_names": ["Shell", "编辑器", "Shell", "\x1b[31mLogs\x1b[0m\t\n\0"]
+        }))
+        .unwrap();
+        let mut options = PickerOptions {
+            show_icons: false,
+            ..Default::default()
+        };
+        options.aliases.insert(
+            "p".into(),
+            Alias {
+                alias: "p".into(),
+                target: "project".into(),
+                auto_connect: false,
+            },
+        );
+        let state = Mutex::new(Catalog::new(options, vec![entry.clone()]));
+        let id = state.lock().unwrap().entries[0];
+        let text = String::from_utf8(rows(&state, "").unwrap()).unwrap();
+        assert_eq!(
+            text,
+            format!("{id}\tproject\t[p] project [Shell] [编辑器] [Shell] [Logs]\0")
+        );
+        assert_eq!(
+            target(&state, Some(&id.to_string())).unwrap().target(),
+            "session:project-full"
+        );
+
+        // Tab metadata may change while the session keeps the same picker ID.
+        entry = serde_json::from_value(serde_json::json!({
+            "name": "project",
+            "source": "rex",
+            "session_id": "session:project-full",
+            "tab_names": ["Renamed"]
+        }))
+        .unwrap();
+        state.lock().unwrap().replace(vec![entry]);
+        assert_eq!(state.lock().unwrap().entries, vec![id]);
+        let text = String::from_utf8(rows(&state, "").unwrap()).unwrap();
+        assert_eq!(text, format!("{id}\tproject\t[p] project [Renamed]\0"));
+    }
+
     #[test]
     fn group_separators_render_on_separate_lines() {
         let options = PickerOptions {

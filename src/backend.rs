@@ -158,6 +158,14 @@ impl Rex {
         if sessions {
             let mut entry = Entry::new(name, PathBuf::new(), Source::Rex);
             entry.session_id = Some(id.into());
+            entry.tab_names = inspect["windows"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|window| window["label"].as_str())
+                .filter(|label| !label.is_empty())
+                .map(str::to_owned)
+                .collect();
             if let Some(process) = &focused_process {
                 entry.path = process_path(process).unwrap_or_default();
             }
