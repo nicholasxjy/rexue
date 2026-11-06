@@ -154,17 +154,19 @@ impl Rex {
         };
         let focused = active_window(&inspect).and_then(|w| w["focused_block_id"].as_str());
         let focused_process = focused.and_then(|block| self.block_process(id, block).ok());
+        let windows: Vec<_> = inspect["windows"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|window| (window, self.tab_title(id, window)))
+            .collect();
         let mut entries = Vec::new();
         if sessions {
             let mut entry = Entry::new(name, PathBuf::new(), Source::Rex);
             entry.session_id = Some(id.into());
-            entry.tab_names = inspect["windows"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|window| window["label"].as_str())
-                .filter(|label| !label.is_empty())
-                .map(str::to_owned)
+            entry.tab_names = windows
+                .iter()
+                .filter_map(|(_, title)| title.clone())
                 .collect();
             if let Some(process) = &focused_process {
                 entry.path = process_path(process).unwrap_or_default();
@@ -178,11 +180,11 @@ impl Rex {
         }
         if agents {
             let mut blocks = Vec::new();
-            for window in inspect["windows"].as_array().into_iter().flatten() {
+            for (window, title) in &windows {
                 let Some(window_id) = window["window_id"].as_str() else {
                     continue;
                 };
-                let window_name = window["label"].as_str().unwrap_or(window_id);
+                let window_name = title.as_deref().unwrap_or(window_id);
                 let mut pane = 0;
                 for layer in window["layers"].as_array().into_iter().flatten() {
                     for block in layer["blocks"].as_array().into_iter().flatten() {
@@ -235,6 +237,38 @@ impl Rex {
             )?);
         }
         Ok(entries)
+    }
+    fn tab_title(&self, session: &str, window: &Value) -> Option<String> {
+        let label = window["label"].as_str().unwrap_or("");
+        // Rex assigns unnamed tabs "Window <last eight ID characters>".
+        // Their visible title comes from the focused terminal instead.
+        let generated = label.strip_prefix("Window ").is_some_and(|suffix| {
+            suffix.len() == 8
+                && window["window_id"]
+                    .as_str()
+                    .is_some_and(|id| id.ends_with(suffix))
+        });
+        if !label.is_empty() && !generated {
+            return Some(label.into());
+        }
+        let focused = window["focused_block_id"].as_str()?;
+        let block = window["layers"]
+            .as_array()?
+            .iter()
+            .flat_map(|layer| layer["blocks"].as_array().into_iter().flatten())
+            .find(|block| block["block_id"] == focused)?;
+        if block["creator_name"] == "com.superlogical.terminal" {
+            let response = self
+                .json(&["block", "call", "-s", session, "-b", focused, "title"])
+                .unwrap_or(Value::Null);
+            if let Some(title) = response["title"].as_str().filter(|title| !title.is_empty()) {
+                return Some(title.into());
+            }
+        }
+        block["label"]
+            .as_str()
+            .filter(|label| !label.is_empty())
+            .map(str::to_owned)
     }
     pub fn block_process(&self, session: &str, block: &str) -> Result<Value> {
         self.json(&["block", "call", "-s", session, "-b", block, "process"])

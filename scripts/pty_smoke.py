@@ -135,13 +135,15 @@ if (root/'agents-mode').exists():
     if a[:2]==['session','inspect']:
         windows=[]
         for window,blocks in [('shell',['shell']),('agents',['first','second'])]:
-            windows.append({'window_id':'window:'+window,'label':window,'focused_block_id':'block:'+blocks[0],
+            windows.append({'window_id':'window:'+window+'-00000000','label':'Window 00000000','focused_block_id':'block:'+blocks[0],
                             'layers':[{'blocks':[{'block_id':'block:'+b,'creator_name':'com.superlogical.terminal'} for b in blocks]}]})
-        print(json.dumps({'active_window_id':'window:shell','windows':windows}));sys.exit(0)
+        print(json.dumps({'active_window_id':'window:shell-00000000','windows':windows}));sys.exit(0)
     if a[:2]==['block','call']:
         block=a[5]
         pid=2 if block=='block:first' else 3
-        if a[6]=='process':
+        if a[6]=='title':
+            print(json.dumps({'title':{'block:shell':'Shell title','block:first':'Agent title','block:second':'Other pane title'}[block]}))
+        elif a[6]=='process':
             print(json.dumps({'last_exit':None,'foreground':{'pid':pid,'name':'node' if block!='block:shell' else 'zsh','argv0':'pi' if block!='block:shell' else 'zsh','cwd':fixture['path']}}))
         else:
             print(json.dumps({'records':[{'app':'pi','state':'working' if block=='block:first' else 'blocked','owner':{'pid':pid,'name':'node'}}] if block!='block:shell' else []}))
@@ -213,7 +215,7 @@ else:
 
         (root/'agents-mode').touch()
         def agent_navigation(s):
-            s.expect('agent-project [shell] [agents]')
+            s.expect('agent-project [Shell title] [Agent title]')
             s.expect('── Agents ──')
             s.expect('3/3')
             s.expect('pi · pane 1')

@@ -206,6 +206,67 @@ fn agents_fixture(fake: &FakeRex) {
 }
 
 #[test]
+fn session_tab_names_resolve_titles_for_generated_window_labels() {
+    let fake = FakeRex::new();
+    let session = fake.session("session:titles-full", "project", fake.dir.path());
+    fake.json("sessions.json", json!({"sessions": [session]}));
+    fake.json("inspect-session:titles-full.json", json!({
+        "windows": [
+            {"window_id": "window:00000000-0000-0000-0000-000027a15bcd", "label": "Window 27a15bcd", "focused_block_id": "block:editor-full", "layers": [{"blocks": [
+                {"block_id": "block:other-full", "creator_name": "com.superlogical.terminal", "label": "Other pane"},
+                {"block_id": "block:editor-full", "creator_name": "com.superlogical.terminal", "label": "shell"}
+            ]}]},
+            {"window_id": "window:named-full", "label": "Deploy", "focused_block_id": "block:deploy-full"}
+        ]
+    }));
+    fake.json(
+        "title-block:other-full.json",
+        json!({"title": "Wrong pane title"}),
+    );
+    fake.json(
+        "title-block:editor-full.json",
+        json!({"title": "编辑器 | rexue"}),
+    );
+    fake.json(
+        "title-block:deploy-full.json",
+        json!({"title": "A different terminal title"}),
+    );
+
+    let entries = fake.rex.list().unwrap();
+    assert_eq!(entries[0].tab_names, ["编辑器 | rexue", "Deploy"]);
+    assert_eq!(entries[0].target(), "session:titles-full");
+
+    fake.json(
+        "title-block:editor-full.json",
+        json!({"title": "Renamed editor"}),
+    );
+    assert_eq!(
+        fake.rex.list().unwrap()[0].tab_names,
+        ["Renamed editor", "Deploy"]
+    );
+
+    fake.json(
+        "process-block:editor-full.json",
+        json!({"foreground": {"pid": 2, "name": "node", "argv0": "pi", "cwd": fake.dir.path()}}),
+    );
+    let entries = fake.rex.list_sources(true, true).unwrap();
+    assert_eq!(entries[1].name, "pi · pane 2 · project / Renamed editor");
+    let agent = entries[1].agent.as_ref().unwrap();
+    assert_eq!(
+        agent.window_id,
+        "window:00000000-0000-0000-0000-000027a15bcd"
+    );
+    assert_eq!(agent.block_id, "block:editor-full");
+
+    for title in [json!({"title": ""}), json!({})] {
+        fake.json("title-block:editor-full.json", title);
+        assert_eq!(fake.rex.list().unwrap()[0].tab_names, ["shell", "Deploy"]);
+    }
+    fs::write(fake.dir.path().join("title-block:editor-full.exit"), "").unwrap();
+    assert_eq!(fake.rex.list().unwrap()[0].tab_names, ["shell", "Deploy"]);
+}
+
+#[test]
 fn session_tab_names_preserve_order_duplicates_and_full_identity() {
     let fake = FakeRex::new();
     let session = fake.session("session:tabs-full", "project", fake.dir.path());
