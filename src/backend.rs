@@ -160,14 +160,93 @@ impl Rex {
             .flatten()
             .map(|window| (window, self.tab_title(id, window)))
             .collect();
-        let mut entries = Vec::new();
+        let mut blocks = Vec::new();
+        for (window, title) in &windows {
+            let Some(window_id) = window["window_id"].as_str() else {
+                continue;
+            };
+            let window_name = title.as_deref().unwrap_or(window_id);
+            let mut pane = 0;
+            for layer in window["layers"].as_array().into_iter().flatten() {
+                for block in layer["blocks"].as_array().into_iter().flatten() {
+                    if block["creator_name"] != "com.superlogical.terminal" {
+                        continue;
+                    }
+                    pane += 1;
+                    if let Some(block_id) = block["block_id"].as_str()
+                        && target_block.is_none_or(|target| target == block_id)
+                    {
+                        blocks.push((window_id, window_name, block_id, pane));
+                    }
+                }
+            }
+        }
+        // Session rows also need live agent identity to decorate their tabs.
+        let mut entries =
+            parallel_entries(&blocks, |&(window_id, window_name, block_id, pane)| {
+                let process = if focused == Some(block_id) {
+                    focused_process.clone()
+                } else {
+                    self.block_process(id, block_id).ok()
+                };
+                let Some(process) = process else {
+                    return Ok(Vec::new());
+                };
+                // Status is optional on older Rex versions and on agents that do
+                // not implement OSC 7501. Process identity still works.
+                let status = self
+                    .json(&["block", "call", "-s", id, "-b", block_id, "program_status"])
+                    .unwrap_or(Value::Null);
+                let Some(running) = crate::agent::running(&process, &status) else {
+                    return Ok(Vec::new());
+                };
+                let mut agent = Entry::new(
+                    format!("{} · pane {pane} · {name} / {window_name}", running.app),
+                    running.path,
+                    Source::Agent,
+                );
+                agent.session_id = Some(id.into());
+                agent.agent = Some(Agent {
+                    app: running.app.into(),
+                    state: running.state,
+                    session_name: name.into(),
+                    window_id: window_id.into(),
+                    block_id: block_id.into(),
+                });
+                Ok(vec![agent])
+            })?;
+        let mut session = None;
         if sessions {
             let mut entry = Entry::new(name, PathBuf::new(), Source::Rex);
             entry.session_id = Some(id.into());
-            entry.tab_names = windows
-                .iter()
-                .filter_map(|(_, title)| title.clone())
-                .collect();
+            for (window, title) in &windows {
+                let tab_agents: Vec<_> = entries
+                    .iter()
+                    .filter_map(|entry| entry.agent.as_ref())
+                    .filter(|agent| window["window_id"] == agent.window_id)
+                    .collect();
+                let mut titles: Vec<_> = title.iter().cloned().collect();
+                for agent in &tab_agents {
+                    if let Some(title) = self.block_title(id, &agent.block_id)
+                        && !titles.contains(&title)
+                    {
+                        titles.push(title);
+                    }
+                }
+                if titles.is_empty() {
+                    for agent in &tab_agents {
+                        if !titles.contains(&agent.app) {
+                            titles.push(agent.app.clone());
+                        }
+                    }
+                }
+                if !titles.is_empty() {
+                    if !tab_agents.is_empty() {
+                        entry.agent_tab_indices.push(entry.tab_names.len());
+                    }
+                    entry.tab_names.push(titles.join(" · "));
+                }
+            }
             if let Some(process) = &focused_process {
                 entry.path = process_path(process).unwrap_or_default();
             }
@@ -176,65 +255,13 @@ impl Rex {
             {
                 entry.path = self.reported_path(id, block).unwrap_or_default();
             }
-            entries.push(entry);
+            session = Some(entry);
         }
-        if agents {
-            let mut blocks = Vec::new();
-            for (window, title) in &windows {
-                let Some(window_id) = window["window_id"].as_str() else {
-                    continue;
-                };
-                let window_name = title.as_deref().unwrap_or(window_id);
-                let mut pane = 0;
-                for layer in window["layers"].as_array().into_iter().flatten() {
-                    for block in layer["blocks"].as_array().into_iter().flatten() {
-                        if block["creator_name"] != "com.superlogical.terminal" {
-                            continue;
-                        }
-                        pane += 1;
-                        if let Some(block_id) = block["block_id"].as_str()
-                            && target_block.is_none_or(|target| target == block_id)
-                        {
-                            blocks.push((window_id, window_name, block_id, pane));
-                        }
-                    }
-                }
-            }
-            entries.extend(parallel_entries(
-                &blocks,
-                |&(window_id, window_name, block_id, pane)| {
-                    let process = if focused == Some(block_id) {
-                        focused_process.clone()
-                    } else {
-                        self.block_process(id, block_id).ok()
-                    };
-                    let Some(process) = process else {
-                        return Ok(Vec::new());
-                    };
-                    // Status is optional on older Rex versions and on agents that do
-                    // not implement OSC 7501. Process identity still works.
-                    let status = self
-                        .json(&["block", "call", "-s", id, "-b", block_id, "program_status"])
-                        .unwrap_or(Value::Null);
-                    let Some(running) = crate::agent::running(&process, &status) else {
-                        return Ok(Vec::new());
-                    };
-                    let mut agent = Entry::new(
-                        format!("{} · pane {pane} · {name} / {window_name}", running.app),
-                        running.path,
-                        Source::Agent,
-                    );
-                    agent.session_id = Some(id.into());
-                    agent.agent = Some(Agent {
-                        app: running.app.into(),
-                        state: running.state,
-                        session_name: name.into(),
-                        window_id: window_id.into(),
-                        block_id: block_id.into(),
-                    });
-                    Ok(vec![agent])
-                },
-            )?);
+        if !agents {
+            entries.clear();
+        }
+        if let Some(session) = session {
+            entries.insert(0, session);
         }
         Ok(entries)
     }
@@ -257,17 +284,21 @@ impl Rex {
             .iter()
             .flat_map(|layer| layer["blocks"].as_array().into_iter().flatten())
             .find(|block| block["block_id"] == focused)?;
-        if block["creator_name"] == "com.superlogical.terminal" {
-            let response = self
-                .json(&["block", "call", "-s", session, "-b", focused, "title"])
-                .unwrap_or(Value::Null);
-            if let Some(title) = response["title"].as_str().filter(|title| !title.is_empty()) {
-                return Some(title.into());
-            }
+        if block["creator_name"] == "com.superlogical.terminal"
+            && let Some(title) = self.block_title(session, focused)
+        {
+            return Some(title);
         }
         block["label"]
             .as_str()
             .filter(|label| !label.is_empty())
+            .map(str::to_owned)
+    }
+    fn block_title(&self, session: &str, block: &str) -> Option<String> {
+        self.json(&["block", "call", "-s", session, "-b", block, "title"])
+            .ok()?["title"]
+            .as_str()
+            .filter(|title| !title.is_empty())
             .map(str::to_owned)
     }
     pub fn block_process(&self, session: &str, block: &str) -> Result<Value> {

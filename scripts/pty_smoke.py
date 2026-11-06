@@ -135,14 +135,14 @@ if (root/'agents-mode').exists():
     if a[:2]==['session','inspect']:
         windows=[]
         for window,blocks in [('shell',['shell']),('agents',['first','second'])]:
-            windows.append({'window_id':'window:'+window+'-00000000','label':'Window 00000000','focused_block_id':'block:'+blocks[0],
+            windows.append({'window_id':'window:'+window+'-00000000','label':'Agents' if window=='agents' else 'Window 00000000','focused_block_id':'block:'+blocks[0],
                             'layers':[{'blocks':[{'block_id':'block:'+b,'creator_name':'com.superlogical.terminal'} for b in blocks]}]})
         print(json.dumps({'active_window_id':'window:shell-00000000','windows':windows}));sys.exit(0)
     if a[:2]==['block','call']:
         block=a[5]
         pid=2 if block=='block:first' else 3
         if a[6]=='title':
-            print(json.dumps({'title':{'block:shell':'Shell title','block:first':'Agent title','block:second':'Other pane title'}[block]}))
+            print(json.dumps({'title':{'block:shell':'Shell |  | title','block:first':'Agent title','block:second':'Other pane title'}[block]}))
         elif a[6]=='process':
             print(json.dumps({'last_exit':None,'foreground':{'pid':pid,'name':'node' if block!='block:shell' else 'zsh','argv0':'pi' if block!='block:shell' else 'zsh','cwd':fixture['path']}}))
         else:
@@ -215,7 +215,8 @@ else:
 
         (root/'agents-mode').touch()
         def agent_navigation(s):
-            s.expect('agent-project [Shell title] [Agent title]')
+            s.resize(240, 30)
+            s.expect('agent-project [ Shell title] [󰚩 Agents · Agent title · Other pane title]')
             s.expect('── Agents ──')
             s.expect('3/3')
             s.expect('pi · pane 1')
@@ -229,6 +230,20 @@ else:
         run_case('agents-after-session-group-inactive-tab-duplicate-names-exact-pane', ['picker', '--agents', '--rex'], agent_navigation)
         calls=[json.loads(line) for line in (root/'rex-calls.jsonl').read_text().splitlines()]
         assert ['focus','-s','session:agents','block:second'] in calls,calls
+
+        def session_agent_titles(s, icons):
+            s.resize(240, 30)
+            if icons:
+                s.expect('agent-project [ Shell title] [󰚩 Agents · Agent title · Other pane title]')
+            else:
+                s.expect('agent-project [Shell title] [Agents · Agent title · Other pane title]')
+                assert '' not in s.text() and '󰚩' not in s.text(), s.text()
+            s.expect('1/1')
+            s.send(b'\x1b')
+        run_case('session-only-agent-tab-titles-and-icons', ['picker', '--rex'],
+                 lambda s: session_agent_titles(s, True))
+        run_case('session-tab-icons-can-be-disabled', ['picker', '--rex', '--icons=false'],
+                 lambda s: session_agent_titles(s, False))
 
         def agent_guards(s):
             s.expect('AGENT_PREVIEW_block:first')

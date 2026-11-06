@@ -91,7 +91,7 @@ Requires fzf **0.63+** on PATH. `[tui]` applies to both pickers:
 
 | Key | Default | Behavior |
 | --- | --- | --- |
-| `show_icons` | `true` | Show source/custom icons. |
+| `show_icons` | `true` | Show source/custom icons and tab type icons (`` ordinary, `󰚩` live agent). |
 | `prompt` | `"> "` | Search prompt; empty uses the default. |
 | `placeholder` | `"Filter Sessions..."` | Empty uses the default. Worktrees use `"Filter worktrees..."` unless customized. |
 | `pointer` | `"> "` | Empty or wider than two terminal cells uses the default. |

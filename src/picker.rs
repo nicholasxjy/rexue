@@ -1199,8 +1199,29 @@ fn display(entry: &Entry, options: &PickerOptions) -> String {
         }
         text.push_str(&clean(&entry.display_name()));
         if entry.source == Source::Rex {
-            for name in &entry.tab_names {
-                text.push_str(&format!(" [{}]", clean(name)));
+            for (index, name) in entry.tab_names.iter().enumerate() {
+                let is_agent = entry.agent_tab_indices.contains(&index);
+                let name = clean(name);
+                let name = if is_agent {
+                    name
+                } else {
+                    name.replace('|', " ")
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                };
+                text.push_str(" [");
+                if options.show_icons {
+                    let icon = if is_agent {
+                        Source::Agent.glyph()
+                    } else {
+                        ""
+                    };
+                    text.push_str(icon);
+                    text.push(' ');
+                }
+                text.push_str(&name);
+                text.push(']');
             }
         }
     }
@@ -1375,6 +1396,47 @@ mod tests {
         assert_eq!(state.lock().unwrap().entries, vec![id]);
         let text = String::from_utf8(rows(&state, "").unwrap()).unwrap();
         assert_eq!(text, format!("{id}\tproject\t[p] project [Renamed]\0"));
+    }
+
+    #[test]
+    fn session_tab_icons_distinguish_agents_and_follow_icon_toggle() {
+        let mut entry: Entry = serde_json::from_value(serde_json::json!({
+            "name": "project",
+            "source": "rex",
+            "session_id": "session:project-full",
+            "tab_names": [" zsh |  | ~/Projects/rexue  ", "Shell | Agent", "\x1b[31mFix picker\x1b[0m\t\n\0"],
+            "agent_tab_indices": [1, 2]
+        }))
+        .unwrap();
+        let mut options = PickerOptions::default();
+        assert_eq!(
+            display(&entry, &options),
+            " project [ zsh ~/Projects/rexue] [󰚩 Shell | Agent] [󰚩 Fix picker]"
+        );
+        options.show_icons = false;
+        assert_eq!(
+            display(&entry, &options),
+            "project [zsh ~/Projects/rexue] [Shell | Agent] [Fix picker]"
+        );
+
+        options.show_icons = true;
+        let state = Mutex::new(Catalog::new(options, vec![entry.clone()]));
+        let id = state.lock().unwrap().entries[0];
+        entry = serde_json::from_value(serde_json::json!({
+            "name": "project",
+            "source": "rex",
+            "session_id": "session:project-full",
+            "tab_names": ["Shell", "Shell | Agent", "Fix picker"]
+        }))
+        .unwrap();
+        state.lock().unwrap().replace(vec![entry]);
+        assert_eq!(state.lock().unwrap().entries, vec![id]);
+        let text = String::from_utf8(rows(&state, "").unwrap()).unwrap();
+        assert!(text.contains("project [ Shell] [ Shell Agent] [ Fix picker]"));
+        assert_eq!(
+            target(&state, Some(&id.to_string())).unwrap().target(),
+            "session:project-full"
+        );
     }
 
     #[test]

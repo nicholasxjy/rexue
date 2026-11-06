@@ -306,6 +306,80 @@ fn session_tab_names_preserve_order_duplicates_and_full_identity() {
 }
 
 #[test]
+fn session_tabs_include_live_agent_titles_even_without_agent_rows() {
+    let fake = FakeRex::new();
+    agents_fixture(&fake);
+    fake.json(
+        "title-block:pi-full.json",
+        json!({"title": "Fix picker titles"}),
+    );
+    fake.json(
+        "title-block:codex-full.json",
+        json!({"title": "Review changes"}),
+    );
+    fake.json("title-block:stale-full.json", json!({"title": "Old task"}));
+
+    let entries = fake.rex.list().unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].target(), "session:agents-full");
+    assert_eq!(
+        entries[0].tab_names,
+        ["Shell", "Agents · Fix picker titles · Review changes"]
+    );
+    assert_eq!(
+        serde_json::to_value(&entries[0]).unwrap()["agent_tab_indices"],
+        json!([1])
+    );
+
+    // A shell can have focus while an agent runs in another pane of the tab.
+    let mut inspect: Value = serde_json::from_slice(
+        &fs::read(fake.dir.path().join("inspect-session:agents-full.json")).unwrap(),
+    )
+    .unwrap();
+    inspect["windows"][1]["focused_block_id"] = "block:stale-full".into();
+    fake.json("inspect-session:agents-full.json", inspect.clone());
+    assert_eq!(fake.rex.list().unwrap()[0].tab_names, entries[0].tab_names);
+
+    // Repeated pane titles appear once within a tab; empty/unavailable titles
+    // retain the tab name, and stale status never marks a shell as an agent.
+    fake.json(
+        "title-block:codex-full.json",
+        json!({"title": "Fix picker titles"}),
+    );
+    assert_eq!(
+        fake.rex.list().unwrap()[0].tab_names,
+        ["Shell", "Agents · Fix picker titles"]
+    );
+    fake.json("title-block:pi-full.json", json!({"title": ""}));
+    fs::write(fake.dir.path().join("title-block:codex-full.exit"), "").unwrap();
+    assert_eq!(fake.rex.list().unwrap()[0].tab_names, ["Shell", "Agents"]);
+
+    // A tab without a name or title still exposes its live agent.
+    fake.json("title-block:stale-full.json", json!({"title": ""}));
+    inspect["windows"][1]["label"] = "".into();
+    fake.json("inspect-session:agents-full.json", inspect);
+    assert_eq!(
+        fake.rex.list().unwrap()[0].tab_names,
+        ["Shell", "pi · codex"]
+    );
+
+    for block in ["pi", "codex"] {
+        fake.json(
+            &format!("process-block:{block}-full.json"),
+            json!({"last_exit": {"exit_code": 0}}),
+        );
+    }
+    let entry = &fake.rex.list().unwrap()[0];
+    assert_eq!(entry.tab_names, ["Shell"]);
+    assert!(
+        serde_json::to_value(entry)
+            .unwrap()
+            .get("agent_tab_indices")
+            .is_none()
+    );
+}
+
+#[test]
 fn agents_discover_inactive_tabs_and_panes_without_stale_status_or_dedup_loss() {
     let fake = FakeRex::new();
     agents_fixture(&fake);

@@ -80,6 +80,9 @@ pub struct Entry {
     pub session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tab_names: Vec<String>,
+    /// Display indices into tab_names; session and pane identity use full IDs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub agent_tab_indices: Vec<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<Agent>,
     #[serde(default)]
@@ -101,6 +104,7 @@ impl Entry {
             source,
             session_id: None,
             tab_names: Vec::new(),
+            agent_tab_indices: Vec::new(),
             agent: None,
             group: 0,
             icon: None,
