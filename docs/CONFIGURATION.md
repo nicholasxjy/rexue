@@ -101,7 +101,6 @@ Requires fzf **0.63+** on PATH. `[tui]` applies to both pickers:
 | `preview_width` | `60` | Percentage, clamped to 10–90; zero/negative uses 60. |
 | `preview_min_width` | `100` | Minimum terminal width for preview; zero/negative uses 100. |
 | `preview_border` | `"line"` | `none`, `line`, `thick`, `double`; unknown uses `line`. |
-| `group_separator` | `false` | Nonselectable source boundaries; Agents always shows a boundary with an empty query. |
 
 CLI overrides: `picker --icons`, `--separator-aware`, `--prompt`, `--placeholder`, `--query`, `--preview`, `--no-preview`, `--no-alias-auto`. `--no-preview` wins over `--preview`. Boolean values use `=`, e.g. `--icons=false`. Worktree picker accepts icons, prompt, placeholder and query overrides. CLI prompt/placeholder overrides may be empty.
 

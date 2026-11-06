@@ -1274,7 +1274,7 @@ fn order_entries(entries: Vec<Entry>, order: &[SortGroup]) -> Vec<Entry> {
         .map(|e| (normalize(&e.path), e.score))
         .collect();
     let mut result = Vec::new();
-    for (index, sources) in groups.iter().enumerate() {
+    for sources in &groups {
         let mut group = Vec::new();
         for source in sources {
             group.extend(entries.iter().filter(|e| e.source == *source).cloned());
@@ -1286,9 +1286,6 @@ fn order_entries(entries: Vec<Entry>, order: &[SortGroup]) -> Vec<Entry> {
                 }
             }
             group.sort_by(|a, b| b.score.total_cmp(&a.score));
-        }
-        for entry in &mut group {
-            entry.group = index;
         }
         result.extend(group);
     }
@@ -1419,10 +1416,6 @@ mod tests {
                 "history"
             ]
         );
-        assert_eq!(ordered[0].group, ordered[1].group);
-        assert_ne!(ordered[1].group, ordered[2].group);
-        assert_eq!(ordered[2].group, ordered[3].group);
-        assert_ne!(ordered[3].group, ordered[4].group);
 
         let explicit = order_entries(entries, &[SortGroup::Source("agent".into())]);
         assert_eq!(explicit[0].source, Source::Agent);
@@ -1612,8 +1605,6 @@ mod tests {
             merged.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
             ["notes", "hot", "unknown", "cold", "live"]
         );
-        assert_eq!(merged[0].group, merged[3].group);
-        assert_ne!(merged[3].group, merged[4].group);
         let flat = order_entries(entries, &[SortGroup::Source("zoxide".into())]);
         assert_eq!(flat[0].name, "hot");
         assert_eq!(flat[2].name, "live");

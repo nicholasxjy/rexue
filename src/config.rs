@@ -151,7 +151,6 @@ pub struct TuiConfig {
     pub preview_width: u16,
     pub preview_min_width: usize,
     pub preview_border: String,
-    pub group_separator: bool,
     pub keybindings: Keybindings,
 }
 impl Default for TuiConfig {
@@ -167,7 +166,6 @@ impl Default for TuiConfig {
             preview_width: 60,
             preview_min_width: 100,
             preview_border: "line".into(),
-            group_separator: false,
             keybindings: Keybindings::default(),
         }
     }
@@ -707,7 +705,6 @@ fn check_unknown_keys(value: &mut toml::Value, kind: &str, strict: bool) -> Resu
             "preview_width",
             "preview_min_width",
             "preview_border",
-            "group_separator",
             "keybindings",
         ],
         "keybindings" => {

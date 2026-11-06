@@ -57,6 +57,8 @@ fn removed_configuration_is_rejected_without_compatibility_mapping() {
         "[[window]]\nname='editor'",
         "[default_session]\nwindows=['editor']",
         "[tui]\nshow_windows=true",
+        "[tui]\ngroup_separator=true",
+        "[tui]\ngroup_separator=false",
         "[tui]\nwindow_name_format='{name}'",
         "[icons.tmux]\nicon='X'",
         "sort_order=['tmux']",
@@ -70,6 +72,8 @@ fn removed_configuration_is_rejected_without_compatibility_mapping() {
     }
     let ignored = load("vcs='git'\nterminal='Rex'\n[[window]]\nname='editor'\n[default_session]\nwindows=['editor']").unwrap();
     assert!(ignored.session.is_empty());
+    let ignored = load("[tui]\ngroup_separator=true\nshow_icons=false").unwrap();
+    assert!(!ignored.tui.show_icons);
 }
 
 #[test]

@@ -86,8 +86,6 @@ pub struct Entry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<Agent>,
     #[serde(default)]
-    pub group: usize,
-    #[serde(default)]
     pub icon: Option<String>,
     #[serde(default)]
     pub alias: Option<String>,
@@ -106,7 +104,6 @@ impl Entry {
             tab_names: Vec::new(),
             agent_tab_indices: Vec::new(),
             agent: None,
-            group: 0,
             icon: None,
             alias: None,
             alias_auto_connect: false,

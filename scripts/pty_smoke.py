@@ -217,11 +217,11 @@ else:
         def agent_navigation(s):
             s.resize(240, 30)
             s.expect('agent-project [ Shell title] [󰚩 Agents · Agent title · Other pane title]')
-            s.expect('── Agents ──')
             s.expect('3/3')
-            s.expect('pi · pane 1')
-            s.expect('pi · pane 2')
+            s.expect('agent-project / pi · pane 1 · Agents')
+            s.expect('agent-project / pi · pane 2 · Agents')
             s.expect('AGENT_PREVIEW_block:shell')
+            assert '── Agents ──' not in s.text(), s.text()
             s.send(b'\x1b[B')
             s.expect('AGENT_PREVIEW_block:first')
             s.send(b'\x1b[B')
@@ -254,23 +254,22 @@ else:
             s.send(b'\x1b')
         run_case('agents-reject-session-delete-and-rename-actions', ['picker', '--agents'], agent_guards)
         run_case('agents-filter-by-state-and-connect-pane', ['picker', '--agents'],
-                 lambda s: (s.expect('── Agents ──'), s.send(b'blocked'), s.expect('1/1'), s.expect('AGENT_PREVIEW_block:second'), s.send(b'\r')))
+                 lambda s: (s.expect('AGENT_PREVIEW_block:first'), s.send(b'blocked'), s.expect('1/1'), s.expect('AGENT_PREVIEW_block:second'), s.send(b'\r')))
         assert not (root/'killed').exists()
         (root/'agents-mode').unlink()
 
-        cfg.write_text(config.replace('[tui]\n', '[tui]\ngroup_separator=true\n') + 'preview_command="printf GROUP_CONFIG_PREVIEW"\n')
-        def grouped_navigation(s):
-            s.expect('── rex ──')
-            s.expect('── config ──')
+        cfg.write_text(config + 'preview_command="printf CONFIG_PREVIEW"\n')
+        def source_navigation(s):
             s.expect('3/3')
             s.expect('PREVIEW_session:first')
+            assert '── rex ──' not in s.text() and '── config ──' not in s.text(), s.text()
             s.send(b'\x1b[B')
             s.expect('PREVIEW_session:second')
             s.send(b'\x1b[B')
-            s.expect('GROUP_CONFIG_PREVIEW')
+            s.expect('CONFIG_PREVIEW')
             s.send(b'\x1b[A')
             s.send(b'\r')
-        text = run_case('group-separator-lines-skip-headings-and-preserve-selection', ['picker', '--rex', '--config'], grouped_navigation)
+        text = run_case('source-rows-without-headings-preserve-selection', ['picker', '--rex', '--config'], source_navigation)
         assert 'session:second' in text
         cfg.write_text(config)
 

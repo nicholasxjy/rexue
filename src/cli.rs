@@ -507,7 +507,6 @@ fn picker_options_for(
         preview_width: cfg.tui.preview_width,
         preview_min_width: cfg.tui.preview_min_width,
         preview_border: cfg.tui.preview_border.clone(),
-        group_separator: cfg.tui.group_separator,
         keybindings: cfg.tui.keybindings.clone(),
         worktree,
         ..Default::default()

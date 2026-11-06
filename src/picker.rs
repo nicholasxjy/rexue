@@ -54,7 +54,6 @@ pub struct PickerOptions {
     pub preview_width: u16,
     pub preview_min_width: usize,
     pub preview_border: String,
-    pub group_separator: bool,
     pub keybindings: Keybindings,
     pub worktree: bool,
     pub auto_refresh: bool,
@@ -80,7 +79,6 @@ impl Default for PickerOptions {
             preview_width: 60,
             preview_min_width: 100,
             preview_border: "line".into(),
-            group_separator: false,
             keybindings: Keybindings::default(),
             worktree: false,
             auto_refresh: true,
@@ -481,8 +479,6 @@ fn rows(state: &Mutex<Catalog>, query: &str) -> Result<Vec<u8>> {
         )
     };
     let mut input = Vec::new();
-    let mut previous_group = None;
-    let mut previous_source = None;
     for (id, entry) in &candidates {
         let search = if options.worktree || entry.source == Source::Agent {
             format!(
@@ -498,23 +494,7 @@ fn rows(state: &Mutex<Catalog>, query: &str) -> Result<Vec<u8>> {
         } else {
             search
         };
-        let mut display = display(entry, &options);
-        if query.is_empty()
-            && previous_group != Some(entry.group)
-            && (options.group_separator
-                || entry.source == Source::Agent
-                || previous_source == Some(Source::Agent))
-        {
-            // fzf --read0 displays newlines within one selectable record.
-            let label = if entry.source == Source::Agent {
-                "Agents"
-            } else {
-                entry.source.as_str()
-            };
-            display = format!("── {label} ──\n{display}");
-        }
-        previous_group = Some(entry.group);
-        previous_source = Some(entry.source);
+        let display = display(entry, &options);
         write!(input, "{id}\t{search}\t{display}\0")?;
     }
     // Use fzf itself for fuzzy matching and ordering. Keeping the visible finder
@@ -1440,31 +1420,29 @@ mod tests {
     }
 
     #[test]
-    fn group_separators_render_on_separate_lines() {
+    fn sources_render_as_single_rows_with_selection_and_numbering() {
         let options = PickerOptions {
-            group_separator: true,
             show_icons: false,
             ..Default::default()
         };
         let first = Entry::new("live first", "/first", Source::Rex);
-        let second = Entry::new("live second", "/second", Source::Rex);
-        let mut project = Entry::new("configured project", "/project", Source::Config);
-        project.group = 1;
+        let second = Entry::new("live agent", "/second", Source::Agent);
+        let project = Entry::new("configured project", "/project", Source::Config);
         let state = Mutex::new(Catalog::new(options, vec![first, second, project]));
         let text = String::from_utf8(rows(&state, "").unwrap()).unwrap();
         let records: Vec<_> = text.split('\0').filter(|row| !row.is_empty()).collect();
-        // Titles occupy a display line, never a selectable record or search field.
         assert_eq!(records.len(), 3);
         let fields: Vec<_> = records
             .iter()
             .map(|row| row.splitn(3, '\t').collect::<Vec<_>>())
             .collect();
         assert_eq!(fields[0][1], "live first");
-        assert_eq!(fields[0][2], "── rex ──\nlive first");
-        assert_eq!(fields[1][2], "live second");
-        assert_eq!(fields[2][2], "── config ──\nconfigured project");
+        assert_eq!(fields[0][2], "live first");
+        assert_eq!(fields[1][2], "live agent");
+        assert_eq!(fields[2][2], "configured project");
+        assert!(!text.contains('\n'));
         for fields in &fields {
-            assert_eq!(target(&state, Some(fields[0])).unwrap().name, fields[1]);
+            assert_eq!(target(&state, Some(fields[0])).unwrap().name, fields[2]);
         }
         let numbered = String::from_utf8(rows(&state, "#").unwrap()).unwrap();
         assert!(!numbered.contains("──"));
@@ -1473,9 +1451,9 @@ mod tests {
     }
 
     #[test]
-    fn agents_have_default_group_and_distinct_stable_pane_identities() {
+    fn agents_have_single_rows_and_distinct_stable_pane_identities() {
         use crate::model::Agent;
-        let mut first = Entry::new("pi · project / Agents", "/project", Source::Agent);
+        let mut first = Entry::new("project / pi · Agents", "/project", Source::Agent);
         first.session_id = Some("session:project".into());
         first.agent = Some(Agent {
             app: "pi".into(),
@@ -1486,8 +1464,6 @@ mod tests {
         });
         let mut second = first.clone();
         second.agent.as_mut().unwrap().block_id = "block:second".into();
-        first.group = 1;
-        second.group = 1;
         let session = Entry::new("project", "/project", Source::Rex);
         let mut catalog = Catalog::new(
             PickerOptions {
@@ -1503,7 +1479,8 @@ mod tests {
         assert_eq!(catalog.entries, vec![ids[0], ids[2], ids[1]]);
         let state = Mutex::new(catalog);
         let text = String::from_utf8(rows(&state, "").unwrap()).unwrap();
-        assert!(text.contains("── Agents ──\npi · project / Agents [working]"));
+        assert!(text.contains("\tproject / pi · Agents [working]\0"));
+        assert!(!text.contains('\n'));
         assert!(text.starts_with(&format!("{}\tproject\tproject\0", ids[0])));
         let filtered = String::from_utf8(rows(&state, "blocked").unwrap()).unwrap();
         assert_eq!(

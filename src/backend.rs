@@ -201,7 +201,7 @@ impl Rex {
                     return Ok(Vec::new());
                 };
                 let mut agent = Entry::new(
-                    format!("{} · pane {pane} · {name} / {window_name}", running.app),
+                    format!("{name} / {} · pane {pane} · {window_name}", running.app),
                     running.path,
                     Source::Agent,
                 );

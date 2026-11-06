@@ -250,7 +250,7 @@ fn session_tab_names_resolve_titles_for_generated_window_labels() {
         json!({"foreground": {"pid": 2, "name": "node", "argv0": "pi", "cwd": fake.dir.path()}}),
     );
     let entries = fake.rex.list_sources(true, true).unwrap();
-    assert_eq!(entries[1].name, "pi · pane 2 · project / Renamed editor");
+    assert_eq!(entries[1].name, "project / pi · pane 2 · Renamed editor");
     let agent = entries[1].agent.as_ref().unwrap();
     assert_eq!(
         agent.window_id,
@@ -412,8 +412,6 @@ fn agents_discover_inactive_tabs_and_panes_without_stale_status_or_dedup_loss() 
         all.iter().map(|entry| entry.source).collect::<Vec<_>>(),
         [Source::Rex, Source::Agent, Source::Agent]
     );
-    assert_ne!(all[0].group, all[1].group);
-    assert_eq!(all[1].group, all[2].group);
     let only_sessions = manager
         .list(&ListOptions {
             rex: true,
@@ -669,8 +667,8 @@ fn agents_in_the_same_tab_have_distinct_pane_labels() {
         entries[0].name, entries[1].name,
         "different panes must not appear as duplicate agents"
     );
-    assert!(entries[0].name.contains("pane 1"), "{}", entries[0].name);
-    assert!(entries[1].name.contains("pane 2"), "{}", entries[1].name);
+    assert_eq!(entries[0].name, "project / pi · pane 1 · Agents");
+    assert_eq!(entries[1].name, "project / pi · pane 2 · Agents");
     // An exited terminal and a returned shell must both retire stale OSC records.
     fake.json(
         "process-block:pi-full.json",
