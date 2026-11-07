@@ -11,11 +11,12 @@ rex.action{
   title = "Open Rex Session Picker",
   run = function(ctx, args)
     assert(ctx.client_id, "Open the picker from a Rex app client")
+    assert(ctx.block_id, "Open the picker from a terminal pane")
     local window, err = rex.session.new_window{
       layout = rex.layout.block{
         flavor = "com.superlogical.terminal.shell",
         options = {
-          command = { "rexue", "--client", ctx.client_id },
+          command = { "rexue", "--client", ctx.client_id, "picker", "--focus-pane", ctx.block_id },
         },
       },
     }

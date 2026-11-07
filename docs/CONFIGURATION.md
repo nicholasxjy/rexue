@@ -38,7 +38,7 @@ Each `[[session]]` requires a unique nonempty `name` and a nonempty `path`.
 
 Startup uses the first nonempty choice: `connect --command`, explicit session startup, enabled wildcard startup, then enabled defaults. Each layer keeps its script and command together; empty values fall through. A wildcard disable flag skips its startup and, without an explicit session, suppresses defaults. An explicit session's disable flag controls its default fallback; the default disable flag suppresses default startup globally. Reconnecting never reruns startup.
 
-Preview uses the first nonempty session, wildcard or default command. Startup and preview scripts run through `sh`; `{}` inserts the session path as data, preserving spaces and shell punctuation. Live previews capture the focused terminal; agent previews capture that agent's pane, including in inactive tabs.
+Preview uses the first nonempty session, wildcard or default command. Startup and preview scripts run through `sh`; `{}` inserts the session path as data, preserving spaces and shell punctuation. Session previews capture the active tab's focused terminal; tab previews capture that tab's focused terminal; pane previews capture the exact pane, including in inactive tabs.
 
 ```toml
 [default_session]
@@ -85,7 +85,9 @@ The worktree picker stays open when discovery fails or finds no checkouts, showi
 
 ## Picker settings
 
-With an empty initial query, the session picker focuses the launching Rex session by its full ID. The worktree picker focuses the checkout containing the current directory (or `--path`), including subdirectories and symlinked paths. If that entry is unavailable, the first row stays selected. Initial focus applies once when opening; a prefilled `--query` uses normal search ordering.
+The session picker shows live sessions as a tree: session roots, tab rows, then panes under each tab. Tabs keep their bracketed titles and ordinary/agent icons; agent panes keep their app, pane number and status. Enter on any level connects to that exact session, tab or pane using full IDs. Agent-only filtering keeps its flat agent list. Rename and session removal apply only to session roots.
+
+With an empty initial query, the session picker selects the current pane by its full ID, falling back to its tab, then its session root when a row is unavailable. Shortcut examples pass the invoking pane through `picker --focus-pane BLOCK_ID` so a new picker pane or tab keeps the original target selected. Floating shortcuts without this option select their current tab. The worktree picker focuses the checkout containing the current directory (or `--path`), including subdirectories and symlinked paths. If that entry is unavailable, the first row stays selected. Initial focus applies once when opening; a prefilled `--query` uses normal search ordering.
 
 Requires fzf **0.63+** on PATH. `[tui]` applies to both pickers:
 
@@ -102,7 +104,7 @@ Requires fzf **0.63+** on PATH. `[tui]` applies to both pickers:
 | `preview_min_width` | `100` | Minimum terminal width for preview; zero/negative uses 100. |
 | `preview_border` | `"line"` | `none`, `line`, `thick`, `double`; unknown uses `line`. |
 
-CLI overrides: `picker --icons`, `--separator-aware`, `--prompt`, `--placeholder`, `--query`, `--preview`, `--no-preview`, `--no-alias-auto`. `--no-preview` wins over `--preview`. Boolean values use `=`, e.g. `--icons=false`. Worktree picker accepts icons, prompt, placeholder and query overrides. CLI prompt/placeholder overrides may be empty.
+CLI overrides: `picker --focus-pane BLOCK_ID`, `--icons`, `--separator-aware`, `--prompt`, `--placeholder`, `--query`, `--preview`, `--no-preview`, `--no-alias-auto`. `--no-preview` wins over `--preview`. Boolean values use `=`, e.g. `--icons=false`. Worktree picker accepts icons, prompt, placeholder and query overrides. CLI prompt/placeholder overrides may be empty.
 
 In the session picker, `/` filters aliases and an exact alias auto-connects after typing; outside this mode, auto-connect requires `alias_auto_connect = true`. A prefilled `--query` does not auto-connect. A query starting with `#` enables numbered selection. These modes do not apply to the worktree picker.
 

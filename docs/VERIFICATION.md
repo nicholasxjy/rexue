@@ -22,7 +22,7 @@ python3 scripts/pty_smoke.py --binary target/debug/rexue --output docs/verificat
 python3 scripts/worktree_removal_smoke.py --binary target/debug/rexue
 ```
 
-Runs real fzf in a controlling PTY with Rex/Worktrunk test doubles. Covers filtering, aliases, numbered selection, configurable shortcuts, previews, rename/removal, worktree creation/refresh and terminal restoration. Includes empty/non-repository worktree lists, recovery after refresh, shell punctuation, inherited fzf settings and missing/old/failing fzf.
+Runs real fzf in a controlling PTY with Rex/Worktrunk test doubles. Covers the session → tab → pane tree, ordinary and agent pane selection, tab selection, filtering, aliases, numbered selection, configurable shortcuts, previews, rename/removal, worktree creation/refresh and terminal restoration. Includes empty/non-repository worktree lists, recovery after refresh, shell punctuation, inherited fzf settings and missing/old/failing fzf.
 
 The focused removal script uses real Git/Worktrunk and a stateful Rex fixture. It checks cleanup of all related sessions from both pickers and the CLI, current-session handoff, multiple sessions with identical labels, symlinked subdirectories, hidden sessions, unrelated checkout preservation, switch/close failures, cancellation, dirty-checkout protection, full session IDs and terminal restoration.
 
@@ -68,7 +68,7 @@ These use isolated fixtures to exercise the executable CLI.
 
 ## Agent picker navigation
 
-Connecting an agent must refresh its metadata and focus its session, current tab and exact pane. Rows include pane numbers to distinguish agents sharing a tab. Exited processes must disappear even if status records remain; a `done` status alone does not mean exit.
+Opening with an empty query selects the current pane, then its tab or session root as fallbacks. Shortcut pickers preserve their invoking pane with `--focus-pane`; legacy floating shortcuts select the current tab. This applies once and does not override a prefilled query. The session tree keeps each tab and pane selectable by full ID. Selecting a tab must focus that tab; selecting a pane must refresh its current tab and focus the exact pane. Connecting an agent must refresh its metadata and focus its session, current tab and exact pane. Rows include pane numbers to distinguish agents sharing a tab. Exited processes must disappear even if status records remain; a `done` status alone does not mean exit.
 
 The [floating shortcut](../examples/rex-picker-floating.lua) must resolve `ctx.block_id` through `session.describe_block`, then pass that block's `window_id` to `session.new_layer`. The server's active window can point to another tab after an agent switch.
 
@@ -87,6 +87,6 @@ rex config check examples/rex-picker-floating.lua
 
 ## Verification records
 
-[Picker](verification/fzf.json), [keyboard](verification/keyboard.json), [Worktrunk](verification/worktree.json) and [public CLI/completions](verification/public-cli.json) record earlier runs. [Worktree removal](verification/worktree-removal.json) records the focused removal checks. [Session/agent fixtures](verification/session-agents.json), [live agent navigation](verification/agent-picker.json) and [performance samples](verification/performance.json) retain focused evidence. They do not certify the current checkout.
+[Picker](verification/fzf.json), [keyboard](verification/keyboard.json), [Worktrunk](verification/worktree.json) and [public CLI/completions](verification/public-cli.json) record earlier runs. [Worktree removal](verification/worktree-removal.json) records the focused removal checks. [Session/agent fixtures](verification/session-agents.json), [live session tree navigation](verification/session-tree.json), [live initial focus](verification/initial-focus.json), [live agent navigation](verification/agent-picker.json) and [performance samples](verification/performance.json) retain focused evidence. They do not certify the current checkout.
 
 Update receipts only from checks actually run; omit `--output` for local checks without replacing a receipt. Report commands, outcomes and whether evidence used fixtures or the live app. Performance samples combine live read-only listing with fixture-based picker timing; they do not measure live app rendering. Other platforms require separate verification.

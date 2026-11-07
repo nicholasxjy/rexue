@@ -1,0 +1,31 @@
+{
+  "binary": "target/debug/rexue",
+  "scope": "Live Rex server and macOS app; initial selected rows observed through terminal capture, resulting targets through session inspection. No screenshot inspection.",
+  "floating_picker": "examples/rex-picker-floating.lua with the checkout binary, isolated configuration and larger bounds for capture",
+  "cleanup": "Restored the original session, tab and pane; closed the test-owned session.",
+  "checks": [
+    {
+      "case": "normal-picker-initial-current-pane-and-enter",
+      "passed": true
+    },
+    {
+      "case": "floating-origin-pane-at-open-1",
+      "passed": true,
+      "selected_row": ">      ├──  focus-check / zsh · pane 2 · Focus agents"
+    },
+    {
+      "case": "floating-origin-pane-at-open-2",
+      "passed": true,
+      "selected_row": ">      ├──  focus-check / zsh · pane 2 · Focus agents"
+    },
+    {
+      "case": "floating-default-enter-focuses-origin-pane",
+      "passed": true
+    },
+    {
+      "case": "legacy-floating-picker-defaults-to-current-tab",
+      "passed": true,
+      "selected_row": ">  └── [󰚩 Focus agents]"
+    }
+  ]
+}

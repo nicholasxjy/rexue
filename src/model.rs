@@ -71,6 +71,16 @@ pub struct Agent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Tab {
+    pub name: String,
+    pub window_id: String,
+    #[serde(default)]
+    pub is_agent: bool,
+    #[serde(default)]
+    pub panes: Vec<Entry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Entry {
     pub name: String,
     #[serde(default)]
@@ -78,6 +88,12 @@ pub struct Entry {
     pub source: Source,
     #[serde(default)]
     pub session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tabs: Vec<Tab>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tab_names: Vec<String>,
     /// Display indices into tab_names; session and pane identity use full IDs.
@@ -101,6 +117,9 @@ impl Entry {
             path: path.into(),
             source,
             session_id: None,
+            window_id: None,
+            block_id: None,
+            tabs: Vec::new(),
             tab_names: Vec::new(),
             agent_tab_indices: Vec::new(),
             agent: None,
@@ -111,11 +130,25 @@ impl Entry {
         }
     }
     pub fn target(&self) -> &str {
+        self.block_id()
+            .or(self.window_id())
+            .or(self.session_id.as_deref())
+            .unwrap_or(&self.name)
+    }
+    pub fn window_id(&self) -> Option<&str> {
+        self.agent
+            .as_ref()
+            .map(|agent| agent.window_id.as_str())
+            .or(self.window_id.as_deref())
+    }
+    pub fn block_id(&self) -> Option<&str> {
         self.agent
             .as_ref()
             .map(|agent| agent.block_id.as_str())
-            .or(self.session_id.as_deref())
-            .unwrap_or(&self.name)
+            .or(self.block_id.as_deref())
+    }
+    pub fn is_session(&self) -> bool {
+        self.source == Source::Rex && self.window_id().is_none() && self.block_id().is_none()
     }
     pub fn display_name(&self) -> String {
         match &self.agent {

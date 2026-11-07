@@ -1,0 +1,15 @@
+{
+  "binary": "target/debug/rexue",
+  "scope": "Live Rex server and connected macOS app. Target focus verified through session inspection; floating tree verified through terminal capture. No screenshot inspection.",
+  "checks": [
+    { "case": "select-session-root", "passed": true },
+    { "case": "select-shell-tab", "passed": true },
+    { "case": "select-agent-pane", "passed": true },
+    { "case": "select-ordinary-pane", "passed": true },
+    { "case": "select-agent-tab", "passed": true },
+    { "case": "floating-current-tab-1", "passed": true, "tree_visible_in_terminal_capture": true },
+    { "case": "floating-current-tab-2", "passed": true, "tree_visible_in_terminal_capture": true }
+  ],
+  "floating_picker": "examples/rex-picker-floating.lua, using the checkout binary and isolated configuration",
+  "cleanup": "Restored the launching session, tab and pane; closed the test-owned session and all its test panes."
+}

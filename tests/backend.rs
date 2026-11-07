@@ -530,6 +530,112 @@ fn agent_selection_previews_and_focuses_exact_pane_and_rejects_exited_target() {
 }
 
 #[test]
+fn session_tree_discovers_all_tabs_and_panes_with_full_ids() {
+    let fake = FakeRex::new();
+    agents_fixture(&fake);
+    let entries = fake.rex.list_sources(true, true).unwrap();
+    let session = serde_json::to_value(&entries[0]).unwrap();
+    let tabs = session["tabs"].as_array().expect("session tree metadata");
+    assert_eq!(tabs.len(), 2);
+    assert_eq!(tabs[0]["window_id"], "window:shell-full");
+    assert_eq!(tabs[0]["panes"].as_array().unwrap().len(), 2);
+    assert_eq!(tabs[0]["panes"][0]["block_id"], "block:shell-full");
+    assert_eq!(tabs[0]["panes"][1]["block_id"], "block:browser-full");
+    assert_eq!(tabs[1]["panes"].as_array().unwrap().len(), 4);
+    assert_eq!(tabs[1]["panes"][0]["agent"]["block_id"], "block:pi-full");
+    assert_eq!(tabs[1]["panes"][2]["block_id"], "block:stale-full");
+    assert!(tabs[1]["panes"][2]["agent"].is_null());
+    let manager = fake.manager(Config {
+        session: vec![SessionConfig {
+            name: "project".into(),
+            path: fake.dir.path().display().to_string(),
+            icon: Some("custom".into()),
+            ..Default::default()
+        }],
+        ..Default::default()
+    });
+    let sessions = manager
+        .list(&ListOptions {
+            rex: true,
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(sessions[0].tabs[1].panes[0].icon.as_deref(), Some("custom"));
+}
+
+#[test]
+fn session_tree_selection_focuses_tabs_and_ordinary_panes_and_rejects_missing_targets() {
+    for (window, block, current_window) in [
+        ("window:agents-full", None, "window:agents-full"),
+        (
+            "window:old-full",
+            Some("block:stale-full"),
+            "window:agents-full",
+        ),
+        (
+            "window:old-full",
+            Some("block:browser-full"),
+            "window:shell-full",
+        ),
+    ] {
+        let fake = FakeRex::new();
+        agents_fixture(&fake);
+        let mut manager = fake.manager(Config::default());
+        manager.config.frecency.add_command = Some("true".into());
+        let entry: Entry = serde_json::from_value(json!({
+            "name": "old display label", "source": "rex", "session_id": "session:agents-full",
+            "window_id": window, "block_id": block
+        }))
+        .unwrap();
+        assert!(manager.rename(&entry, "wrong").is_err());
+        assert!(manager.remove(&entry).is_err());
+        let connection = manager
+            .connect_entry(entry.clone(), &ConnectOptions::default())
+            .unwrap();
+        assert_eq!(
+            fs::canonicalize(connection.path).unwrap(),
+            fs::canonicalize(fake.dir.path()).unwrap()
+        );
+        let calls = fake.calls();
+        let target = block.unwrap_or(window);
+        assert!(
+            calls.iter().any(|a| a
+                .windows(4)
+                .any(|a| a == ["focus", "-s", "session:agents-full", target])),
+            "{calls:?}"
+        );
+        let switch = calls
+            .iter()
+            .find(|a| a.iter().any(|arg| arg == "session.select"))
+            .unwrap();
+        let index = switch.iter().position(|arg| arg == "--args").unwrap();
+        let selected: Value = serde_json::from_str(&switch[index + 1]).unwrap();
+        assert_eq!(selected["window_id"], current_window);
+        assert!(
+            manager
+                .preview(&entry)
+                .unwrap()
+                .contains("terminal fixture")
+        );
+        let calls = fake.calls();
+        assert!(calls.iter().any(|a| a.windows(5).any(|a| a
+            == [
+                "capture",
+                "-s",
+                "session:agents-full",
+                "-b",
+                block.unwrap_or("block:pi-full")
+            ])));
+        fake.json("inspect-session:agents-full.json", json!({"windows": []}));
+        let error = manager
+            .connect_entry(entry, &ConnectOptions::default())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("no longer exists"), "{error}");
+    }
+}
+
+#[test]
 fn discovery_overlaps_independent_sessions_and_preserves_order() {
     let fake = FakeRex::new();
     let rows: Vec<_> = (0..8)

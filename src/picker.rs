@@ -30,7 +30,11 @@ pub struct Alias {
 
 #[derive(Debug, Clone)]
 pub enum InitialFocus {
-    Session(String),
+    Session {
+        id: String,
+        window_id: Option<String>,
+        block_id: Option<String>,
+    },
     Worktree(PathBuf),
 }
 
@@ -97,6 +101,7 @@ struct Catalog {
     options: PickerOptions,
     entries: Vec<u64>,
     targets: BTreeMap<u64, Entry>,
+    branches: BTreeMap<u64, String>,
     next_id: u64,
     last_query: String,
     auto_armed: bool,
@@ -104,7 +109,7 @@ struct Catalog {
     initial_focus: Option<InitialFocus>,
 }
 fn same_entry(a: &Entry, b: &Entry) -> bool {
-    if a.source == Source::Agent && b.source == Source::Agent {
+    if a.session_id.is_some() && b.session_id.is_some() {
         return a.session_id == b.session_id && a.target() == b.target();
     }
     a.source == b.source && a.name == b.name && a.path == b.path && a.session_id == b.session_id
@@ -121,6 +126,7 @@ impl Catalog {
             options,
             entries: Vec::new(),
             targets: BTreeMap::new(),
+            branches: BTreeMap::new(),
             next_id: 0,
             auto_armed: false,
             status: String::new(),
@@ -160,7 +166,56 @@ impl Catalog {
                 }
             }
         }
-        self.entries = entries.into_iter().map(|e| self.remember(e)).collect();
+        let tree_sessions: Vec<_> = entries
+            .iter()
+            .filter(|entry| !entry.tabs.is_empty())
+            .filter_map(|entry| entry.session_id.clone())
+            .collect();
+        self.entries.clear();
+        self.branches.clear();
+        for entry in entries {
+            // Agents already appear under their owning tab when its root is present.
+            if entry.agent.is_some()
+                && entry
+                    .session_id
+                    .as_ref()
+                    .is_some_and(|id| tree_sessions.contains(id))
+            {
+                continue;
+            }
+            let id = self.remember(entry.clone());
+            self.entries.push(id);
+            for (index, tab) in entry.tabs.iter().enumerate() {
+                let last_tab = index + 1 == entry.tabs.len();
+                let mut child = Entry::new(&tab.name, &entry.path, Source::Rex);
+                child.session_id = entry.session_id.clone();
+                child.window_id = Some(tab.window_id.clone());
+                child.tab_names.push(tab.name.clone());
+                if tab.is_agent {
+                    child.agent_tab_indices.push(0);
+                }
+                let id = self.remember(child);
+                self.entries.push(id);
+                self.branches
+                    .insert(id, if last_tab { "└── " } else { "├── " }.into());
+                for (index, pane) in tab.panes.iter().enumerate() {
+                    let id = self.remember(pane.clone());
+                    self.entries.push(id);
+                    self.branches.insert(
+                        id,
+                        format!(
+                            "{}{}",
+                            if last_tab { "    " } else { "│   " },
+                            if index + 1 == tab.panes.len() {
+                                "└── "
+                            } else {
+                                "├── "
+                            }
+                        ),
+                    );
+                }
+            }
+        }
         // Alias-only mode can select configured targets excluded by source flags.
         for alias in self.options.aliases.values().cloned().collect::<Vec<_>>() {
             if !self
@@ -249,6 +304,32 @@ impl Catalog {
             true,
         )
     }
+    fn initial_position(&self, focus: InitialFocus) -> Option<usize> {
+        match focus {
+            InitialFocus::Session {
+                id,
+                window_id,
+                block_id,
+            } => {
+                let find = |target: &str| {
+                    self.entries.iter().position(|row| {
+                        let entry = &self.targets[row];
+                        entry.session_id.as_deref() == Some(&id) && entry.target() == target
+                    })
+                };
+                block_id
+                    .as_deref()
+                    .and_then(find)
+                    .or_else(|| window_id.as_deref().and_then(find))
+                    .or_else(|| find(&id))
+            }
+            InitialFocus::Worktree(path) => self.entries.iter().position(|id| {
+                let entry = &self.targets[id];
+                entry.source == Source::Worktree && crate::session::same_path(&entry.path, &path)
+            }),
+        }
+    }
+
     fn header(&self) -> String {
         let actions: &[(&str, &str)] = if self.options.worktree {
             &[
@@ -354,15 +435,8 @@ impl Bridge {
                                 // Consume once, even if the user started typing before load.
                                 // Subsequent query reloads and dialogs keep normal fzf focus.
                                 let focus = s.initial_focus.take();
-                                let position = focus.filter(|_| request.query.is_empty()).and_then(|focus| {
-                                    s.entries.iter().position(|id| {
-                                        let entry = &s.targets[id];
-                                        match &focus {
-                                            InitialFocus::Session(id) => entry.source == Source::Rex && entry.session_id.as_ref() == Some(id),
-                                            InitialFocus::Worktree(path) => entry.source == Source::Worktree && crate::session::same_path(&entry.path, path),
-                                        }
-                                    })
-                                });
+                                let position = focus.filter(|_| request.query.is_empty())
+                                    .and_then(|focus| s.initial_position(focus));
                                 Ok(position.map_or_else(Vec::new, |i| format!("pos({})", i + 1).into_bytes()))
                             }
                             "loaded" => {
@@ -494,7 +568,14 @@ fn rows(state: &Mutex<Catalog>, query: &str) -> Result<Vec<u8>> {
         } else {
             search
         };
-        let display = display(entry, &options);
+        let branch = state
+            .lock()
+            .unwrap()
+            .branches
+            .get(id)
+            .cloned()
+            .unwrap_or_default();
+        let display = format!("{branch}{}", display(entry, &options));
         write!(input, "{id}\t{search}\t{display}\0")?;
     }
     // Use fzf itself for fuzzy matching and ordering. Keeping the visible finder
@@ -1077,7 +1158,7 @@ pub fn pick_with_create(
         }
         let entry = target(&state, Some(&id))?;
         if chosen.action == ChoiceAction::Rename {
-            if entry.source != Source::Rex {
+            if !entry.is_session() {
                 state.lock().unwrap().status = "Only live Rex sessions can be renamed".into();
             } else if let Some(name) = rename_prompt(&entry, &options.keybindings)?
                 && name != entry.name
@@ -1092,12 +1173,16 @@ pub fn pick_with_create(
             continue;
         }
         if chosen.action == ChoiceAction::Remove {
-            if !matches!(
-                entry.source,
-                Source::Rex | Source::Zoxide | Source::Directory | Source::Worktree
-            ) {
+            if (entry.window_id().is_some() || entry.block_id().is_some())
+                || !matches!(
+                    entry.source,
+                    Source::Rex | Source::Zoxide | Source::Directory | Source::Worktree
+                )
+            {
                 state.lock().unwrap().status = if entry.source == Source::Agent {
                     "Agent rows cannot be removed; select their Rex session to close it"
+                } else if entry.window_id().is_some() || entry.block_id().is_some() {
+                    "Tab and pane rows cannot be removed; select their Rex session to close it"
                 } else {
                     "Configured sessions cannot be removed here; edit rexue.toml"
                 }
@@ -1138,6 +1223,9 @@ fn normalize(text: &str) -> String {
         .collect()
 }
 fn display(entry: &Entry, options: &PickerOptions) -> String {
+    if entry.window_id().is_some() && entry.block_id().is_none() {
+        return display_tab(&entry.name, !entry.agent_tab_indices.is_empty(), options);
+    }
     let mut text = String::new();
     if options.show_icons {
         let icon = entry
@@ -1178,34 +1266,38 @@ fn display(entry: &Entry, options: &PickerOptions) -> String {
             text.push_str(&format!("[{}] ", clean(&alias.alias)));
         }
         text.push_str(&clean(&entry.display_name()));
-        if entry.source == Source::Rex {
+        if entry.is_session() && entry.tabs.is_empty() {
             for (index, name) in entry.tab_names.iter().enumerate() {
                 let is_agent = entry.agent_tab_indices.contains(&index);
-                let name = clean(name);
-                let name = if is_agent {
-                    name
-                } else {
-                    name.replace('|', " ")
-                        .split_whitespace()
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                };
-                text.push_str(" [");
-                if options.show_icons {
-                    let icon = if is_agent {
-                        Source::Agent.glyph()
-                    } else {
-                        ""
-                    };
-                    text.push_str(icon);
-                    text.push(' ');
-                }
-                text.push_str(&name);
-                text.push(']');
+                text.push(' ');
+                text.push_str(&display_tab(name, is_agent, options));
             }
         }
     }
     text
+}
+fn display_tab(name: &str, is_agent: bool, options: &PickerOptions) -> String {
+    let name = clean(name);
+    let name = if is_agent {
+        name
+    } else {
+        name.replace('|', " ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    if options.show_icons {
+        format!(
+            "[{} {name}]",
+            if is_agent {
+                Source::Agent.glyph()
+            } else {
+                ""
+            }
+        )
+    } else {
+        format!("[{name}]")
+    }
 }
 #[cfg(test)]
 mod tests {
@@ -1489,6 +1581,64 @@ mod tests {
         );
         assert!(filtered.starts_with(&format!("{}\t", ids[1])));
         assert!(!filtered.contains("──"));
+    }
+
+    #[test]
+    fn session_tree_keeps_tab_and_pane_order_identity_and_search_context() {
+        let session: Entry = serde_json::from_value(serde_json::json!({
+            "name": "project", "source": "rex", "session_id": "session:full",
+            "tabs": [
+                {"name": "Shell | cwd", "window_id": "window:first", "is_agent": false, "panes": [
+                    {"name": "project / zsh · pane 1 · Shell", "source": "rex", "session_id": "session:full", "window_id": "window:first", "block_id": "block:shell"}
+                ]},
+                {"name": "Agents | task", "window_id": "window:second", "is_agent": true, "panes": [
+                    {"name": "project / pi · pane 1 · Agents", "source": "agent", "session_id": "session:full", "agent": {"app": "pi", "state": "working", "session_name": "project", "window_id": "window:second", "block_id": "block:agent"}}
+                ]}
+            ]
+        })).unwrap();
+        let agent = serde_json::from_value(serde_json::json!({
+            "name": "project / pi · pane 1 · Agents", "source": "agent", "session_id": "session:full",
+            "agent": {"app": "pi", "state": "working", "session_name": "project", "window_id": "window:second", "block_id": "block:agent"}
+        })).unwrap();
+        let state = Mutex::new(Catalog::new(
+            PickerOptions::default(),
+            vec![agent, session.clone()],
+        ));
+        let text = String::from_utf8(rows(&state, "").unwrap()).unwrap();
+        let fields: Vec<_> = text
+            .split('\0')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.splitn(3, '\t').collect::<Vec<_>>())
+            .collect();
+        assert_eq!(fields.len(), 5, "{text:?}");
+        assert_eq!(fields[0][2], " project");
+        assert_eq!(fields[1][2], "├── [ Shell cwd]");
+        assert!(fields[2][2].starts_with("│   └── "));
+        assert_eq!(fields[3][2], "└── [󰚩 Agents | task]");
+        assert!(fields[4][2].starts_with("    └── 󰚩 project / pi"));
+        for (row, expected) in fields.iter().zip([
+            "session:full",
+            "window:first",
+            "block:shell",
+            "window:second",
+            "block:agent",
+        ]) {
+            assert_eq!(target(&state, Some(row[0])).unwrap().target(), expected);
+        }
+        let ids = state.lock().unwrap().entries.clone();
+        let mut renamed = serde_json::to_value(session).unwrap();
+        renamed["tabs"][0]["name"] = "Renamed".into();
+        state
+            .lock()
+            .unwrap()
+            .replace(vec![serde_json::from_value(renamed).unwrap()]);
+        assert_eq!(state.lock().unwrap().entries, ids);
+        let filtered = String::from_utf8(rows(&state, "working").unwrap()).unwrap();
+        assert_eq!(filtered.split('\0').filter(|s| !s.is_empty()).count(), 1);
+        assert!(!filtered.contains("block:agent")); // IDs stay behind the row protocol.
+        assert!(filtered.contains("[working]"));
+        let numbered = String::from_utf8(rows(&state, "#").unwrap()).unwrap();
+        assert!(numbered.contains("#4 └── [󰚩 Agents | task]"));
     }
 
     #[test]

@@ -61,7 +61,7 @@ path = "~/Projects/app"
 icon = ""
 
 [tui]
-# Show row icons and ordinary/agent tab icons (requires a Nerd Font).
+# Show session tree row icons and ordinary/agent tab icons (requires a Nerd Font).
 show_icons = true
 prompt = "> "
 placeholder = "Filter Sessions..."

@@ -45,7 +45,19 @@ rexue connect app            # Connect by session name or configured alias.
 rexue last                   # Return to the previous session.
 ```
 
-The picker combines Rex sessions, running agents, configured projects, zoxide history, and registered worktrees. Each live session shows its tab titles in brackets, such as `app [ Shell] [󰚩 Agents · Fix login]`. Nerd Font icons distinguish ordinary tabs (``) from tabs containing live agents (`󰚩`), including when only sessions are listed. A custom tab name takes priority; otherwise, Rexue uses the focused terminal's title, falling back to its pane label when no title is available. Ordinary tab titles display `|` separators as spaces, collapsing adjacent spaces. Tabs also include their live agents' terminal titles, with repeated titles shown once per tab. An unnamed agent tab without a title falls back to the agent app name. Disable icons with `picker --icons=false` or `[tui] show_icons = false`. Agent rows start with their session name, such as `app / pi · pane 1 · Agents [working]`. Selecting an agent focuses its terminal pane and tab.
+The picker combines Rex sessions, running agents, configured projects, zoxide history, and registered worktrees. Live sessions form a three-level tree: a session root, its tabs, and each tab's panes. Select any row and press Enter to switch to that session, tab or exact pane. Tabs keep their bracketed titles, with Nerd Font icons distinguishing ordinary tabs (``) from tabs containing live agents (`󰚩`), including when only sessions are listed:
+
+```text
+ app
+├── [ Shell]
+│   └──  app / zsh · pane 1 · Shell
+└── [󰚩 Agents · Fix login]
+    └── 󰚩 app / pi · pane 1 · Agents [working]
+```
+
+A custom tab name takes priority; otherwise, Rexue uses the focused terminal's title, falling back to its pane label when no title is available. Ordinary tab titles display `|` separators as spaces, collapsing adjacent spaces. Tabs also include their live agents' terminal titles, with repeated titles shown once per tab. An unnamed agent tab without a title falls back to the agent app name. Disable icons with `picker --icons=false` or `[tui] show_icons = false`. Agent panes retain their session name, app, pane number and status. The agent-only picker (`picker --agents`) keeps a flat list of running agents.
+
+With an empty search, the picker initially selects the current pane, falling back to its tab or session when needed.
 
 **Enter** connects, **Esc** cancels, **Ctrl+J/K** moves, and **Ctrl+O** toggles preview. **Ctrl+R** renames a session; **Ctrl+X** asks to remove a live session, history entry, or worktree. Configure one or more keys per action in [`[tui.keybindings]`](docs/CONFIGURATION.md#keybindings); omitted actions keep these defaults.
 

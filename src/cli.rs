@@ -179,6 +179,9 @@ impl ConnectArgs {
 pub struct PickerArgs {
     #[command(flatten)]
     pub sources: Sources,
+    /// Initially select the pane that opened a shortcut picker, using its full block ID.
+    #[arg(long)]
+    pub focus_pane: Option<String>,
     #[arg(short = 'i', long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
     pub icons: Option<bool>,
     #[arg(short = 's', long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
@@ -381,15 +384,54 @@ fn pick_session(manager: Manager, args: PickerArgs, detach: bool) -> Result<()> 
         move |e| remove.remove(e),
         move |e, name| rename.rename(e, name),
         |entries| {
-            if !entries.iter().any(|entry| entry.source == Source::Rex) {
+            if !entries.iter().any(|entry| entry.session_id.is_some()) {
                 return None;
             }
-            manager
-                .rex
-                .context()
-                .ok()
-                .and_then(|context| context["session_id"].as_str().map(str::to_owned))
-                .map(picker::InitialFocus::Session)
+            let context = manager.rex.context().ok()?;
+            let id = context["session_id"].as_str()?.to_owned();
+            let mut window_id = context["window_id"].as_str().map(str::to_owned);
+            let mut block_id = args
+                .focus_pane
+                .clone()
+                .or_else(|| context["block_id"].as_str().map(str::to_owned));
+            if args.focus_pane.is_some() {
+                // Shortcut pickers run in a new pane; retain the invoking pane's tab.
+                window_id = entries
+                    .iter()
+                    .filter(|entry| entry.session_id.as_deref() == Some(&id))
+                    .flat_map(|entry| entry.tabs.iter())
+                    .find(|tab| {
+                        tab.panes
+                            .iter()
+                            .any(|pane| pane.block_id() == block_id.as_deref())
+                    })
+                    .map(|tab| tab.window_id.clone())
+                    .or(window_id);
+            } else if let Some(block) = block_id.as_deref()
+                && let Ok(inspect) = manager.rex.inspect(&id)
+                && inspect["windows"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .flat_map(|tab| tab["layers"].as_array().into_iter().flatten())
+                    .any(|layer| {
+                        layer["kind"] == "floating"
+                            && layer["blocks"]
+                                .as_array()
+                                .into_iter()
+                                .flatten()
+                                .any(|pane| pane["block_id"] == block)
+                    })
+            {
+                // Legacy floating shortcuts cannot supply the invoking pane.
+                // Select their tab rather than the transient picker pane itself.
+                block_id = None;
+            }
+            Some(picker::InitialFocus::Session {
+                id,
+                window_id,
+                block_id,
+            })
         },
         options,
     )?;

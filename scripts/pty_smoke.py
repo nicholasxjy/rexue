@@ -137,21 +137,24 @@ if (root/'agents-mode').exists():
         for window,blocks in [('shell',['shell']),('agents',['first','second'])]:
             windows.append({'window_id':'window:'+window+'-00000000','label':'Agents' if window=='agents' else 'Window 00000000','focused_block_id':'block:'+blocks[0],
                             'layers':[{'blocks':[{'block_id':'block:'+b,'creator_name':'com.superlogical.terminal'} for b in blocks]}]})
+        if (root/'floating-mode').exists():
+            windows[1]['layers'].append({'kind':'floating','blocks':[{'block_id':'block:picker','creator_name':'com.superlogical.terminal'}]})
+            windows[1]['focused_block_id']='block:picker'
         print(json.dumps({'active_window_id':'window:shell-00000000','windows':windows}));sys.exit(0)
     if a[:2]==['block','call']:
         block=a[5]
         pid=2 if block=='block:first' else 3
         if a[6]=='title':
-            print(json.dumps({'title':{'block:shell':'Shell |  | title','block:first':'Agent title','block:second':'Other pane title'}[block]}))
+            print(json.dumps({'title':{'block:shell':'Shell |  | title','block:first':'Agent title','block:second':'Other pane title'}.get(block,'Picker')}))
         elif a[6]=='process':
-            print(json.dumps({'last_exit':None,'foreground':{'pid':pid,'name':'node' if block!='block:shell' else 'zsh','argv0':'pi' if block!='block:shell' else 'zsh','cwd':fixture['path']}}))
+            print(json.dumps({'last_exit':None,'foreground':{'pid':pid,'name':'node' if block not in ['block:shell','block:picker'] else 'zsh','argv0':'pi' if block not in ['block:shell','block:picker'] else 'zsh','cwd':fixture['path']}}))
         else:
-            print(json.dumps({'records':[{'app':'pi','state':'working' if block=='block:first' else 'blocked','owner':{'pid':pid,'name':'node'}}] if block!='block:shell' else []}))
+            print(json.dumps({'records':[{'app':'pi','state':'working' if block=='block:first' else 'blocked','owner':{'pid':pid,'name':'node'}}] if block not in ['block:shell','block:picker'] else []}))
         sys.exit(0)
     if a[0]=='capture':print('AGENT_PREVIEW_'+a[4]);sys.exit(0)
     if a[0]=='focus':print('{}');sys.exit(0)
 if a[:2]==['whoami','--json']:
-    print(json.dumps({'session_id':(root/'current-session').read_text()}) if (root/'current-session').exists() else '{}')
+    print((root/'current-context.json').read_text() if (root/'current-context.json').exists() else json.dumps({'session_id':(root/'current-session').read_text()}) if (root/'current-session').exists() else '{}')
 elif a[:2]==['ls','--json']:
     killed=(root/'killed').read_text().splitlines() if (root/'killed').exists() else []
     print(json.dumps({'sessions':[{'session_id':'session:'+i,'label':labels.get('session:'+i,fixture['name'])} for i in ['first','second'] if 'session:'+i not in killed]}))
@@ -200,7 +203,7 @@ else:
             s.until(lambda: b'PREVIEW_session:first' in s.capture[offset:], 'search did not focus its matching result')
             offset = len(s.capture)
             s.send(b'\x7f' * len('first unique'))
-            s.until(lambda: b'2/2' in s.capture[offset:], 'clearing search did not restore both sessions')
+            s.until(lambda: b'4/4' in s.capture[offset:], 'clearing search did not restore both session trees')
             s.send(b'\r')
         text = run_case('initial-focus-does-not-repeat-after-search', ['picker', '--rex'], current_session_search)
         assert re.search(r'session:first\r?\nREXUE_TTY_REPORT=', text), text[-2000:]
@@ -214,15 +217,71 @@ else:
         (root/'current-session').unlink()
 
         (root/'agents-mode').touch()
+        context = root/'current-context.json'
+        current = {'session_id': 'session:agents', 'window_id': 'window:agents-00000000', 'block_id': 'block:second'}
+        context.write_text(json.dumps(current))
+        for flags in [['--rex'], ['--agents']]:
+            before = len((root/'rex-calls.jsonl').read_text().splitlines())
+            run_case('initial-focus-current-pane-' + flags[0], ['picker', *flags],
+                     lambda s: (s.expect('AGENT_PREVIEW_block:second'), s.send(b'\r')))
+            calls = [json.loads(line) for line in (root/'rex-calls.jsonl').read_text().splitlines()[before:]]
+            assert ['focus', '-s', 'session:agents', 'block:second'] in calls, calls
+        current['block_id'] = 'block:missing'
+        context.write_text(json.dumps(current))
+        before = len((root/'rex-calls.jsonl').read_text().splitlines())
+        run_case('initial-focus-missing-pane-falls-back-to-tab', ['picker', '--rex'],
+                 lambda s: (s.expect('AGENT_PREVIEW_block:first'), s.send(b'\r')))
+        calls = [json.loads(line) for line in (root/'rex-calls.jsonl').read_text().splitlines()[before:]]
+        assert ['focus', '-s', 'session:agents', 'window:agents-00000000'] in calls, calls
+        current['window_id'] = 'window:missing'
+        context.write_text(json.dumps(current))
+        before = len((root/'rex-calls.jsonl').read_text().splitlines())
+        run_case('initial-focus-missing-tab-falls-back-to-session', ['picker', '--rex'],
+                 lambda s: (s.expect('AGENT_PREVIEW_block:shell'), s.send(b'\r')))
+        calls = [json.loads(line) for line in (root/'rex-calls.jsonl').read_text().splitlines()[before:]]
+        assert not any(call[0] == 'focus' for call in calls), calls
+        current.update(window_id='window:shell-00000000', block_id='block:shell')
+        context.write_text(json.dumps(current))
+        before = len((root/'rex-calls.jsonl').read_text().splitlines())
+        run_case('initial-focus-shortcut-origin-pane', ['picker', '--rex', '--focus-pane=block:second'],
+                 lambda s: (s.expect('AGENT_PREVIEW_block:second'), s.send(b'\r')))
+        calls = [json.loads(line) for line in (root/'rex-calls.jsonl').read_text().splitlines()[before:]]
+        assert ['focus', '-s', 'session:agents', 'block:second'] in calls, calls
+        current.update(window_id='window:agents-00000000', block_id='block:second')
+        context.write_text(json.dumps(current))
+        run_case('initial-focus-pane-does-not-override-prefilled-query', ['picker', '--rex', '--query=working'],
+                 lambda s: (s.expect('AGENT_PREVIEW_block:first'), s.send(b'\x1b')))
+        def pane_search(s):
+            s.expect('AGENT_PREVIEW_block:second')
+            s.send(b'working')
+            s.expect('1/1')
+            s.expect('AGENT_PREVIEW_block:first')
+            offset = len(s.capture)
+            s.send(b'\x7f' * len('working'))
+            s.until(lambda: b'AGENT_PREVIEW_block:shell' in s.capture[offset:], 'current pane focus repeated after clearing search')
+            s.send(b'\x1b')
+        run_case('initial-focus-pane-applies-once', ['picker', '--rex'], pane_search)
+        (root/'floating-mode').touch()
+        current.update(block_id='block:picker')
+        context.write_text(json.dumps(current))
+        before = len((root/'rex-calls.jsonl').read_text().splitlines())
+        run_case('initial-focus-legacy-floating-picker-selects-tab', ['picker', '--rex'],
+                 lambda s: (s.expect('AGENT_PREVIEW_block:picker'), s.send(b'\r')))
+        calls = [json.loads(line) for line in (root/'rex-calls.jsonl').read_text().splitlines()[before:]]
+        assert ['focus', '-s', 'session:agents', 'window:agents-00000000'] in calls, calls
+        assert ['focus', '-s', 'session:agents', 'block:picker'] not in calls, calls
+        (root/'floating-mode').unlink()
+        context.unlink()
+
         def agent_navigation(s):
             s.resize(240, 30)
-            s.expect('agent-project [ Shell title] [󰚩 Agents · Agent title · Other pane title]')
-            s.expect('3/3')
+            s.expect('├── [ Shell title]')
+            s.expect('└── [󰚩 Agents · Agent title · Other pane title]')
+            s.expect('6/6')
             s.expect('agent-project / pi · pane 1 · Agents')
             s.expect('agent-project / pi · pane 2 · Agents')
             s.expect('AGENT_PREVIEW_block:shell')
-            assert '── Agents ──' not in s.text(), s.text()
-            s.send(b'\x1b[B')
+            s.send(b'\x1b[B' * 4)
             s.expect('AGENT_PREVIEW_block:first')
             s.send(b'\x1b[B')
             s.expect('AGENT_PREVIEW_block:second')
@@ -231,14 +290,24 @@ else:
         calls=[json.loads(line) for line in (root/'rex-calls.jsonl').read_text().splitlines()]
         assert ['focus','-s','session:agents','block:second'] in calls,calls
 
+        run_case('tree-select-tab-with-current-format', ['picker', '--rex', '--query=Agents · Agent title · Other pane title'],
+                 lambda s: (s.expect('1/1'), s.expect('AGENT_PREVIEW_block:first'), s.send(b'\r')))
+        run_case('tree-select-ordinary-pane', ['picker', '--rex', '--query=pane 1 · Shell'],
+                 lambda s: (s.expect('1/1'), s.expect('AGENT_PREVIEW_block:shell'), s.send(b'\r')))
+        calls=[json.loads(line) for line in (root/'rex-calls.jsonl').read_text().splitlines()]
+        assert ['focus','-s','session:agents','window:agents-00000000'] in calls,calls
+        assert ['focus','-s','session:agents','block:shell'] in calls,calls
+
         def session_agent_titles(s, icons):
             s.resize(240, 30)
             if icons:
-                s.expect('agent-project [ Shell title] [󰚩 Agents · Agent title · Other pane title]')
+                s.expect('├── [ Shell title]')
+                s.expect('└── [󰚩 Agents · Agent title · Other pane title]')
             else:
-                s.expect('agent-project [Shell title] [Agents · Agent title · Other pane title]')
+                s.expect('├── [Shell title]')
+                s.expect('└── [Agents · Agent title · Other pane title]')
                 assert '' not in s.text() and '󰚩' not in s.text(), s.text()
-            s.expect('1/1')
+            s.expect('6/6')
             s.send(b'\x1b')
         run_case('session-only-agent-tab-titles-and-icons', ['picker', '--rex'],
                  lambda s: session_agent_titles(s, True))
@@ -260,14 +329,13 @@ else:
 
         cfg.write_text(config + 'preview_command="printf CONFIG_PREVIEW"\n')
         def source_navigation(s):
-            s.expect('3/3')
+            s.expect('5/5')
             s.expect('PREVIEW_session:first')
-            assert '── rex ──' not in s.text() and '── config ──' not in s.text(), s.text()
-            s.send(b'\x1b[B')
+            s.send(b'\x1b[B' * 2)
             s.expect('PREVIEW_session:second')
-            s.send(b'\x1b[B')
+            s.send(b'\x1b[B' * 2)
             s.expect('CONFIG_PREVIEW')
-            s.send(b'\x1b[A')
+            s.send(b'\x1b[A' * 2)
             s.send(b'\r')
         text = run_case('source-rows-without-headings-preserve-selection', ['picker', '--rex', '--config'], source_navigation)
         assert 'session:second' in text
@@ -292,7 +360,7 @@ else:
                             lambda s: (s.expect(name), s.send(b'\x1b')))
 
         text = run_case('duplicate-name-select-second-id', ['picker', '--rex'],
-                        lambda s: (s.expect(name), s.send(b'\x1b[B'), s.expect('PREVIEW_session:second'), s.send(b'\r')))
+                        lambda s: (s.expect(name), s.send(b'\x1b[B' * 2), s.expect('PREVIEW_session:second'), s.send(b'\r')))
         assert 'session:second' in text
         text = run_case('unicode-alias-auto-connect', ['picker', '--rex'],
                         lambda s: (s.expect(name), s.send('/ä'.encode())))
@@ -304,7 +372,7 @@ else:
                         lambda s: (s.expect(name), s.send('/ä'.encode()), s.expect('/ä'), s.send(b'\r')))
         assert 'session:first' in text
         text = run_case('index-shortcut-second-id', ['picker', '--rex'],
-                        lambda s: (s.expect(name), s.send(b'#'), s.expect('#2'), s.send(b'2')))
+                        lambda s: (s.expect(name), s.send(b'#'), s.expect('#3'), s.send(b'3')))
         assert 'session:second' in text
 
         custom_keys = '''
@@ -316,7 +384,7 @@ down = ['alt-j', 'alt-n']
 toggle_preview = ['alt-o', 'alt-v']
 rename = ['alt-r', 'f2']
 remove = ['alt-x', 'alt-d']
-select_2 = ['alt-2', 'alt-3']
+select_3 = ['alt-2', 'alt-3']
 confirm_yes = ['alt-y', 'alt-v']
 confirm_no = ['alt-n', 'alt-c']
 '''
@@ -333,15 +401,15 @@ confirm_no = ['alt-n', 'alt-c']
             s.expect('Alt-R rename')
             s.expect('PREVIEW_session:first')
             for down, up in [(b'\x1bj', b'\x1bk'), (b'\x1bn', b'\x1bp')]:
-                send_expect(s, down, 'PREVIEW_session:second')
-                send_expect(s, up, 'PREVIEW_session:first')
+                send_expect(s, down * 2, 'PREVIEW_session:second')
+                send_expect(s, up * 2, 'PREVIEW_session:first')
             s.send(b'\x1bz')
         run_case('configured-multiple-navigation-keys-and-header', ['picker', '--rex'], custom_navigation)
         for key in [b'\x1ba', b'\x1bs']:
             text = run_case('configured-accept-' + key.hex(), ['picker', '--rex'], lambda s, key=key: (s.expect('PREVIEW_session:first'), s.send(key)))
             assert 'session:first' in text
         for key in [b'\x1b2', b'\x1b3']:
-            text = run_case('configured-index-' + key.hex(), ['picker', '--rex', '--query=#'], lambda s, key=key: (s.expect('#2'), s.send(key)))
+            text = run_case('configured-index-' + key.hex(), ['picker', '--rex', '--query=#'], lambda s, key=key: (s.expect('#3'), s.send(key)))
             assert 'session:second' in text
         for key in [b'\x1bo', b'\x1bv']:
             run_case('configured-preview-' + key.hex(), ['picker', '--rex', '--no-preview'], lambda s, key=key: (s.expect('Alt-O preview'), s.send(key), s.expect('PREVIEW_session:first'), s.send(b'\x1bq')))

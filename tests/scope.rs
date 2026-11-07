@@ -50,6 +50,16 @@ fn public_commands_cover_only_sessions_worktrees_and_completion() {
 }
 
 #[test]
+fn picker_shortcuts_can_preserve_the_invoking_pane() {
+    let cli =
+        Cli::try_parse_from(["rexue", "picker", "--focus-pane", "block:origin-full"]).unwrap();
+    let Some(rexue::cli::Commands::Picker(args)) = cli.command else {
+        panic!("expected picker");
+    };
+    assert_eq!(args.focus_pane.as_deref(), Some("block:origin-full"));
+}
+
+#[test]
 fn removed_configuration_is_rejected_without_compatibility_mapping() {
     for setting in [
         "vcs='git'",

@@ -19,7 +19,7 @@ rex.action{
       layout = rex.layout.block{
         flavor = "com.superlogical.terminal.shell",
         options = {
-          command = { "rexue", "--client", ctx.client_id },
+          command = { "rexue", "--client", ctx.client_id, "picker", "--focus-pane", ctx.block_id },
         },
       },
     }

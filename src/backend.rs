@@ -1,6 +1,6 @@
 //! Documented Rex CLI adapter. Labels are for display; mutations use full IDs.
 use crate::{
-    model::{Agent, Entry, Source},
+    model::{Agent, Entry, Source, Tab},
     process,
 };
 use anyhow::{Context, Result, bail};
@@ -169,52 +169,65 @@ impl Rex {
             let mut pane = 0;
             for layer in window["layers"].as_array().into_iter().flatten() {
                 for block in layer["blocks"].as_array().into_iter().flatten() {
-                    if block["creator_name"] != "com.superlogical.terminal" {
-                        continue;
-                    }
                     pane += 1;
                     if let Some(block_id) = block["block_id"].as_str()
                         && target_block.is_none_or(|target| target == block_id)
                     {
-                        blocks.push((window_id, window_name, block_id, pane));
+                        blocks.push((window_id, window_name, block, pane));
                     }
                 }
             }
         }
         // Session rows also need live agent identity to decorate their tabs.
-        let mut entries =
-            parallel_entries(&blocks, |&(window_id, window_name, block_id, pane)| {
-                let process = if focused == Some(block_id) {
-                    focused_process.clone()
-                } else {
-                    self.block_process(id, block_id).ok()
-                };
-                let Some(process) = process else {
-                    return Ok(Vec::new());
-                };
-                // Status is optional on older Rex versions and on agents that do
-                // not implement OSC 7501. Process identity still works.
+        let mut entries = parallel_entries(&blocks, |&(window_id, window_name, block, pane)| {
+            let block_id = block["block_id"].as_str().unwrap();
+            let terminal = block["creator_name"] == "com.superlogical.terminal";
+            let process = if !terminal {
+                None
+            } else if focused == Some(block_id) {
+                focused_process.clone()
+            } else {
+                self.block_process(id, block_id).ok()
+            };
+            // Status is optional; process identity remains authoritative.
+            let running = process.as_ref().and_then(|process| {
                 let status = self
                     .json(&["block", "call", "-s", id, "-b", block_id, "program_status"])
                     .unwrap_or(Value::Null);
-                let Some(running) = crate::agent::running(&process, &status) else {
-                    return Ok(Vec::new());
-                };
-                let mut agent = Entry::new(
-                    format!("{name} / {} · pane {pane} · {window_name}", running.app),
-                    running.path,
-                    Source::Agent,
+                crate::agent::running(process, &status)
+            });
+            let Some(running) = running else {
+                let label = process
+                    .as_ref()
+                    .and_then(|p| p["foreground"]["name"].as_str())
+                    .or_else(|| block["label"].as_str().filter(|label| !label.is_empty()))
+                    .unwrap_or(if terminal { "terminal" } else { "pane" });
+                let mut entry = Entry::new(
+                    format!("{name} / {label} · pane {pane} · {window_name}"),
+                    process.as_ref().and_then(process_path).unwrap_or_default(),
+                    Source::Rex,
                 );
-                agent.session_id = Some(id.into());
-                agent.agent = Some(Agent {
-                    app: running.app.into(),
-                    state: running.state,
-                    session_name: name.into(),
-                    window_id: window_id.into(),
-                    block_id: block_id.into(),
-                });
-                Ok(vec![agent])
-            })?;
+                entry.session_id = Some(id.into());
+                entry.window_id = Some(window_id.into());
+                entry.block_id = Some(block_id.into());
+                return Ok(vec![entry]);
+            };
+
+            let mut agent = Entry::new(
+                format!("{name} / {} · pane {pane} · {window_name}", running.app),
+                running.path,
+                Source::Agent,
+            );
+            agent.session_id = Some(id.into());
+            agent.agent = Some(Agent {
+                app: running.app.into(),
+                state: running.state,
+                session_name: name.into(),
+                window_id: window_id.into(),
+                block_id: block_id.into(),
+            });
+            Ok(vec![agent])
+        })?;
         let mut session = None;
         if sessions {
             let mut entry = Entry::new(name, PathBuf::new(), Source::Rex);
@@ -240,6 +253,22 @@ impl Rex {
                         }
                     }
                 }
+                if let Some(window_id) = window["window_id"].as_str() {
+                    entry.tabs.push(Tab {
+                        name: if titles.is_empty() {
+                            window_id.into()
+                        } else {
+                            titles.join(" · ")
+                        },
+                        window_id: window_id.into(),
+                        is_agent: !tab_agents.is_empty(),
+                        panes: entries
+                            .iter()
+                            .filter(|pane| pane.window_id() == Some(window_id))
+                            .cloned()
+                            .collect(),
+                    });
+                }
                 if !titles.is_empty() {
                     if !tab_agents.is_empty() {
                         entry.agent_tab_indices.push(entry.tab_names.len());
@@ -257,9 +286,7 @@ impl Rex {
             }
             session = Some(entry);
         }
-        if !agents {
-            entries.clear();
-        }
+        entries.retain(|entry| agents && entry.source == Source::Agent);
         if let Some(session) = session {
             entries.insert(0, session);
         }

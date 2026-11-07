@@ -223,6 +223,11 @@ impl Manager {
         }
         for entry in &mut entries {
             entry.icon = self.entry_icon(entry)?;
+            for tab in &mut entry.tabs {
+                for pane in &mut tab.panes {
+                    pane.icon = self.entry_icon(pane)?;
+                }
+            }
         }
         // TUI resolves source icons when no custom icon applies.
         Ok(entries)
@@ -473,9 +478,11 @@ impl Manager {
         };
         let _lock = self.lock()?;
         let mut entry = resolve()?;
-        let mut agent = entry.agent.clone();
-        if agent.is_some() && opts.name.is_some() {
-            bail!("--name cannot be used when connecting to an agent");
+        let agent = entry.agent.clone();
+        let mut window_id = entry.window_id().map(str::to_owned);
+        let block_id = entry.block_id().map(str::to_owned);
+        if (window_id.is_some() || block_id.is_some()) && opts.name.is_some() {
+            bail!("--name cannot be used when connecting to a tab or pane");
         }
         if let Some(name) = &opts.name {
             if name.trim().is_empty() {
@@ -508,8 +515,34 @@ impl Manager {
                 })
                 .with_context(|| format!("agent in {} is no longer running", selected.block_id))?;
             path = normalize(&current.path);
-            agent = current.agent.clone();
-            existing.retain(|candidate| candidate.source == Source::Rex);
+            window_id = current.window_id().map(str::to_owned);
+            existing.retain(|candidate| candidate.is_session());
+        } else if let Some(selected_window) = &window_id {
+            let session = existing
+                .iter()
+                .find(|candidate| candidate.is_session())
+                .context("session no longer exists")?;
+            if let Some(block) = &block_id {
+                let current = session
+                    .tabs
+                    .iter()
+                    .flat_map(|tab| &tab.panes)
+                    .find(|pane| pane.block_id() == Some(block))
+                    .with_context(|| format!("pane {block} no longer exists"))?;
+                window_id = current.window_id().map(str::to_owned);
+                path = normalize(if current.path.as_os_str().is_empty() {
+                    &session.path
+                } else {
+                    &current.path
+                });
+            } else {
+                let tab = session
+                    .tabs
+                    .iter()
+                    .find(|tab| &tab.window_id == selected_window)
+                    .with_context(|| format!("tab {selected_window} no longer exists"))?;
+                window_id = Some(tab.window_id.clone());
+            }
         }
         let exact = entry.session_id.as_deref().and_then(|id| {
             existing
@@ -608,7 +641,7 @@ impl Manager {
                     .clone()
                     .context("existing session has no ID")?,
                 name: forced_name.unwrap_or_else(|| found.name.clone()),
-                path: if agent.is_some() || found.path.as_os_str().is_empty() {
+                path: if block_id.is_some() || found.path.as_os_str().is_empty() {
                     path
                 } else {
                     found.path.clone()
@@ -643,8 +676,8 @@ impl Manager {
                 created: true,
             }
         };
-        if let Some(agent) = &agent {
-            self.rex.focus(&result.session_id, &agent.block_id)?;
+        if let Some(target) = block_id.as_deref().or(window_id.as_deref()) {
+            self.rex.focus(&result.session_id, target)?;
         }
         if let Some(client) = &client {
             // whoami describes the launcher process, whose inherited session
@@ -659,11 +692,8 @@ impl Manager {
             } else {
                 None
             };
-            self.rex.switch_window(
-                client,
-                &result.session_id,
-                agent.as_ref().map(|agent| agent.window_id.as_str()),
-            )?;
+            self.rex
+                .switch_window(client, &result.session_id, window_id.as_deref())?;
             let history = state.history.entry(client.id.clone()).or_default();
             if let Some(previous) = previous.filter(|id| id != &result.session_id) {
                 history.retain(|id| id != &previous);
@@ -707,8 +737,18 @@ impl Manager {
         if let Some(id) = &entry.session_id
             && id.starts_with("session:")
         {
-            return if let Some(agent) = &entry.agent {
-                self.rex.capture_block(id, &agent.block_id)
+            return if let Some(block) = entry.block_id() {
+                self.rex.capture_block(id, block)
+            } else if let Some(window) = entry.window_id() {
+                let inspect = self.rex.inspect(id)?;
+                let block = inspect["windows"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .find(|tab| tab["window_id"] == window)
+                    .and_then(|tab| tab["focused_block_id"].as_str())
+                    .context("tab has no focused terminal")?;
+                self.rex.capture_block(id, block)
             } else {
                 self.rex.capture(id)
             };
@@ -723,7 +763,7 @@ impl Manager {
         directory_preview(&entry.path)
     }
     pub fn rename(&self, entry: &Entry, name: &str) -> Result<()> {
-        if entry.source != Source::Rex {
+        if !entry.is_session() {
             bail!("only live Rex sessions can be renamed");
         }
         let id = entry
@@ -744,6 +784,9 @@ impl Manager {
         Ok(())
     }
     pub fn remove(&self, entry: &Entry) -> Result<Option<WorktreeRemoval>> {
+        if entry.window_id().is_some() || entry.block_id().is_some() {
+            bail!("tab and pane rows cannot be removed; select their Rex session to close it");
+        }
         let mut removal = None;
         match entry.source {
             Source::Agent => {
