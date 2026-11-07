@@ -1,65 +1,47 @@
 # rexue
 
-An **fzf picker for Rex sessions, coding agents, and Git worktrees**. Connect to a project once; later visits reuse its session. Currently verified on macOS.
+An **fzf picker for Rex sessions, coding agents and Git worktrees**. Connect to a project once; later visits reuse its session. Verified on macOS.
 
 ## Demo
 
-Session and agent picker:
+![Sessions, agents and directory history](assets/s1.png)
 
-![Rexue session picker showing running sessions, coding agents, and directory history](assets/s1.png)
-
-Worktree picker:
-
-![Rexue worktree picker showing a Git branch and checkout path](assets/s.png)
+![Git worktree picker](assets/s.png)
 
 ## Install
 
-Install and open [Rex](https://www.superlogical.com/rex/docs/installation). Run the following commands inside a Rex terminal, where its `rex` CLI is already on `PATH`.
-
-With [Homebrew](https://brew.sh), install Rust and fzf, then rexue:
+Install and open [Rex](https://www.superlogical.com/rex/docs/installation), then run inside a Rex terminal:
 
 ```sh
 brew install rust fzf
 cargo install --locked rexue
 ```
 
-Requires Rust **1.90+**, fzf **0.63+**, and a C compiler. If Apple's Command Line Tools are missing, run `xcode-select --install` first. If `rexue` is not found after installation, add `export PATH="$HOME/.cargo/bin:$PATH"` to `~/.zshrc` and open a new terminal.
+Requires Rust **1.90+**, fzf **0.63+** and a C compiler. On macOS, `xcode-select --install` installs missing compiler tools. If `rexue` is not found, add `export PATH="$HOME/.cargo/bin:$PATH"` to `~/.zshrc` and reopen the terminal.
 
 Optional dependencies:
 
 ```sh
-brew install git worktrunk # Worktrees; provides wt (0.81.0+ required).
-brew install zoxide       # Directory history.
+brew install git worktrunk # Worktrees: wt 0.81.0+.
+brew install zoxide       # Directory history; also enable its shell integration.
 ```
 
-Follow [zoxide's shell setup](https://github.com/ajeetdsouza/zoxide#installation) to record directories as you navigate. To install rexue from a local checkout, use `cargo install --locked --path .`.
+See [zoxide setup](https://github.com/ajeetdsouza/zoxide#installation). For a local checkout, use `cargo install --locked --path .`.
 
 ## Use
 
 ```sh
 rexue                        # Open the picker.
 rexue list                   # List all sources.
-rexue list --agents          # List running coding agents.
-rexue connect ~/Projects/app  # Create or reuse a project session.
-rexue connect app            # Connect by session name or configured alias.
+rexue list --agents          # List running agents.
+rexue connect ~/Projects/app # Create or reuse a session.
+rexue connect app            # Resolve a session name or configured alias.
 rexue last                   # Return to the previous session.
 ```
 
-The picker combines Rex sessions, running agents, configured projects, zoxide history, and registered worktrees. Live sessions form a three-level tree: a session root, its tabs, and each tab's panes. Select any row and press Enter to switch to that session, tab or exact pane. Tabs keep their bracketed titles, with Nerd Font icons distinguishing ordinary tabs (``) from tabs containing live agents (`󰚩`), including when only sessions are listed:
+The picker combines live sessions, agents, configured projects, zoxide history and registered worktrees. Sessions expand into tabs and panes; Enter focuses the selected target. `picker --agents` shows a flat agent list. See [picker settings](docs/CONFIGURATION.md#picker-settings) for titles, icons and initial focus.
 
-```text
- app
-├── [ Shell]
-│   └──  app / zsh · pane 1 · Shell
-└── [󰚩 Agents · Fix login]
-    └── 󰚩 app / pi · pane 1 · Agents [working]
-```
-
-A custom tab name takes priority; otherwise, Rexue uses the focused terminal's title, falling back to its pane label when no title is available. Ordinary tab titles display `|` separators as spaces, collapsing adjacent spaces. Tabs also include their live agents' terminal titles, with repeated titles shown once per tab. An unnamed agent tab without a title falls back to the agent app name. Disable icons with `picker --icons=false` or `[tui] show_icons = false`. Agent panes retain their session name, app, pane number and status. The agent-only picker (`picker --agents`) keeps a flat list of running agents.
-
-With an empty search, the picker initially selects the current pane, falling back to its tab or session when needed. A floating picker excludes its own temporary pane from the session tree.
-
-**Enter** connects, **Esc** cancels, **Ctrl+J/K** moves, and **Ctrl+O** toggles preview. **Ctrl+R** renames a session; **Ctrl+X** asks to remove a live session, history entry, or worktree. Configure one or more keys per action in [`[tui.keybindings]`](docs/CONFIGURATION.md#keybindings); omitted actions keep these defaults.
+**Enter** connects, **Esc** cancels, **Ctrl+J/K** moves, **Ctrl+O** toggles preview, **Ctrl+R** renames a session and **Ctrl+X** requests removal. Customize these in [`[tui.keybindings]`](docs/CONFIGURATION.md#keybindings).
 
 For worktrees, run inside a Git repository or add `--path ~/Projects/app`:
 
@@ -70,15 +52,13 @@ rexue worktree connect feature/widgets
 rexue worktree remove feature/widgets --no-delete-branch
 ```
 
-[Worktrunk](https://worktrunk.dev/config/) manages checkout paths, hooks, and removal rules. With multiple Rex apps connected, select one with `rexue --client my-mac`. Use `rexue --help` or `rexue <command> --help` for all options.
+[Worktrunk](https://worktrunk.dev/config/) controls paths, hooks, approvals and removal policy. Removing a checkout also closes its associated Rex sessions; see [removal behavior](docs/CONFIGURATION.md#worktrees).
+
+Select a Rex app with `--client NAME` when several are connected. Use `rexue <command> --help` for options and `rexue completion --help` for supported shells.
 
 ## Configure
 
-Configuration is optional. Create `~/.config/rexue/rexue.toml`, or `$XDG_CONFIG_HOME/rexue/rexue.toml` when that variable is set:
-
-```sh
-mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/rexue"
-```
+Configuration is optional. Save this as `~/.config/rexue/rexue.toml`, or `$XDG_CONFIG_HOME/rexue/rexue.toml` if XDG_CONFIG_HOME is nonempty:
 
 ```toml
 strict_mode = true
@@ -92,20 +72,12 @@ alias = "a"
 preview = true
 ```
 
-Replace `path` with your project directory, then run `rexue connect a`. Add `startup_command` to a session to run a command when it is first created. Add `[[worktree]]` with a repository `path` to include its worktrees in the main picker.
+Run `rexue connect a`. Add `startup_command` to run a command on creation, or `[[worktree]]` with a repository `path` to include its checkouts. Override the file with `-C PATH`. See the [editable example](examples/rexue.toml) and [configuration reference](docs/CONFIGURATION.md).
 
-Use `rexue -C /path/to/rexue.toml` to load another file. See the [full example](examples/rexue.toml) and [configuration reference](docs/CONFIGURATION.md) for more settings.
-
-For a Rex shortcut, merge [Alt+S: floating picker](examples/rex-picker-floating.lua) or [Cmd+Shift+P: new tab](examples/rex-picker.lua) into your [Rex `init.lua`](https://www.superlogical.com/rex/docs/customize/config), then run:
-
-```sh
-rex config check && rex config reload
-```
-
-Generate shell completions with `rexue completion bash`, `zsh`, `fish`, `elvish`, or `powershell`.
+For shortcuts, merge [Alt+S: floating picker](examples/rex-picker-floating.lua) or [Cmd+Shift+P: new tab](examples/rex-picker.lua) into [Rex's `init.lua`](https://www.superlogical.com/rex/docs/customize/config), then run `rex config check && rex config reload`.
 
 ## Development
 
-Run `cargo fmt --check`, `cargo test`, and `cargo clippy --all-targets -- -D warnings`. See [verification](docs/VERIFICATION.md) for interactive checks.
+See [Rust checks](docs/VERIFICATION.md#rust-checks), [interactive acceptance](docs/VERIFICATION.md#interactive-picker-acceptance) and [performance measurements](docs/VERIFICATION.md#startup-and-idle-performance).
 
-MIT licensed. See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_LICENSES).
+[MIT license](LICENSE) · [Third-party notices](THIRD_PARTY_LICENSES)
