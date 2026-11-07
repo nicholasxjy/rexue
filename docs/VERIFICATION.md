@@ -75,7 +75,7 @@ The [floating shortcut](../examples/rex-picker-floating.lua) must resolve `ctx.b
 For navigation or shortcut changes, check in the live app:
 
 1. Connect to an agent and verify the selected session, tab and pane.
-2. From that terminal, invoke the configured floating shortcut twice. Each time, verify the list is visible in that tab and cancel the picker.
+2. From that terminal, invoke the configured floating shortcut twice. Each time, verify the list is visible in that tab, its row count excludes the temporary picker pane, and other floating panes remain listed. Check with an empty and a prefilled query, then cancel the picker.
 3. Restore the initial session/tab; close only test-created panes.
 
 Validate both Lua examples without installing them:

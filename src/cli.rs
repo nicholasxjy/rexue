@@ -379,7 +379,21 @@ fn pick_session(manager: Manager, args: PickerArgs, detach: bool) -> Result<()> 
     let remove = manager.clone();
     let rename = manager.clone();
     let chosen = picker::pick(
-        move || fetch.list(&opts),
+        move || {
+            let picker_block = if opts.rex || opts.agents || !(opts.config || opts.zoxide) {
+                fetch
+                    .rex
+                    .context()
+                    .ok()
+                    .and_then(|context| context["block_id"].as_str().map(str::to_owned))
+            } else {
+                None
+            };
+            fetch.list(&ListOptions {
+                picker_block,
+                ..opts.clone()
+            })
+        },
         move |e| preview.preview(e),
         move |e| remove.remove(e),
         move |e, name| rename.rename(e, name),

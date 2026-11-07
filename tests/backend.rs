@@ -636,6 +636,90 @@ fn session_tree_selection_focuses_tabs_and_ordinary_panes_and_rejects_missing_ta
 }
 
 #[test]
+fn picker_lists_omit_only_their_own_floating_pane() {
+    let fake = FakeRex::new();
+    agents_fixture(&fake);
+    let inspect_path = fake.dir.path().join("inspect-session:agents-full.json");
+    let mut inspect: Value = serde_json::from_slice(&fs::read(&inspect_path).unwrap()).unwrap();
+    inspect["active_window_id"] = "window:agents-full".into();
+    let window = &mut inspect["windows"][1];
+    window["label"] = "".into();
+    window["focused_block_id"] = "block:picker-full".into();
+    window["layers"].as_array_mut().unwrap().push(json!({
+        "kind": "floating", "blocks": [
+            {"block_id": "block:picker-full", "creator_name": "com.superlogical.terminal"},
+            {"block_id": "block:notes-full", "creator_name": "com.superlogical.terminal"}
+        ]
+    }));
+    fake.json("inspect-session:agents-full.json", inspect);
+    fake.json("title-block:picker-full.json", json!({"title": "Picker"}));
+    fake.json("title-block:pi-full.json", json!({"title": "Editor"}));
+    fake.json(
+        "process-block:picker-full.json",
+        json!({
+            "foreground": {"name": "fzf", "cwd": "/picker-directory"}
+        }),
+    );
+    let manager = fake.manager(Config::default());
+    let all = manager
+        .list(&ListOptions {
+            rex: true,
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(all[0].tabs[1].panes.len(), 6);
+    assert!(all[0].tabs[1].name.contains("Picker"));
+
+    let visible = manager
+        .list(&ListOptions {
+            rex: true,
+            agents: true,
+            picker_block: Some("block:picker-full".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    let session = &visible[0];
+    assert_eq!(session.tabs[1].panes.len(), 5);
+    assert!(session.tabs[1].name.contains("Editor"));
+    assert!(!session.tabs[1].name.contains("Picker"));
+    assert_eq!(session.path, fake.dir.path());
+    assert!(
+        session
+            .tabs
+            .iter()
+            .flat_map(|tab| &tab.panes)
+            .all(|pane| pane.block_id() != Some("block:picker-full"))
+    );
+    let notes = session.tabs[1]
+        .panes
+        .iter()
+        .find(|pane| pane.block_id() == Some("block:notes-full"))
+        .unwrap();
+    assert!(notes.name.contains("pane 5"), "{}", notes.name);
+    assert!(
+        visible
+            .iter()
+            .any(|entry| entry.block_id() == Some("block:pi-full"))
+    );
+
+    // A picker running in a normal tiled terminal keeps that terminal listed.
+    let tiled = manager
+        .list(&ListOptions {
+            rex: true,
+            picker_block: Some("block:pi-full".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(tiled[0].tabs[1].panes.len(), 6);
+    assert!(
+        tiled[0].tabs[1]
+            .panes
+            .iter()
+            .any(|pane| pane.block_id() == Some("block:pi-full"))
+    );
+}
+
+#[test]
 fn discovery_overlaps_independent_sessions_and_preserves_order() {
     let fake = FakeRex::new();
     let rows: Vec<_> = (0..8)

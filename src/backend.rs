@@ -115,12 +115,20 @@ impl Rex {
         self.list_sources(true, false)
     }
     pub fn list_sources(&self, sessions: bool, agents: bool) -> Result<Vec<Entry>> {
+        self.list_sources_excluding_picker(sessions, agents, None)
+    }
+    pub fn list_sources_excluding_picker(
+        &self,
+        sessions: bool,
+        agents: bool,
+        picker_block: Option<&str>,
+    ) -> Result<Vec<Entry>> {
         let response = self.json(&["ls", "--json"])?;
         let rows = response["sessions"]
             .as_array()
             .context("Rex response missing sessions")?;
         parallel_entries(rows, |row| {
-            self.inspect_entries(row, sessions, agents, None)
+            self.inspect_entries(row, sessions, agents, None, picker_block)
         })
     }
     /// Refresh a selected session and, optionally, only its selected agent pane.
@@ -130,7 +138,7 @@ impl Rex {
             .as_array()
             .context("Rex response missing sessions")?;
         match rows.iter().find(|row| row["session_id"] == id) {
-            Some(row) => self.inspect_entries(row, true, block.is_some(), block),
+            Some(row) => self.inspect_entries(row, true, block.is_some(), block, None),
             None => Ok(Vec::new()),
         }
     }
@@ -140,6 +148,7 @@ impl Rex {
         sessions: bool,
         agents: bool,
         target_block: Option<&str>,
+        picker_block: Option<&str>,
     ) -> Result<Vec<Entry>> {
         let id = row["session_id"]
             .as_str()
@@ -147,11 +156,41 @@ impl Rex {
         let name = row["label"].as_str().unwrap_or(id);
         // A session can disappear between list and inspect. Skip only that race;
         // malformed or unreachable service responses must remain visible errors.
-        let inspect = match self.inspect(id) {
+        let mut inspect = match self.inspect(id) {
             Ok(v) => v,
             Err(e) if e.to_string().contains("exit 3") => return Ok(Vec::new()),
             Err(e) => return Err(e),
         };
+        if let Some(picker) = picker_block {
+            for window in inspect["windows"].as_array_mut().into_iter().flatten() {
+                let mut removed = false;
+                for layer in window["layers"].as_array_mut().into_iter().flatten() {
+                    if layer["kind"] == "floating"
+                        && let Some(blocks) = layer["blocks"].as_array_mut()
+                    {
+                        blocks.retain(|block| {
+                            if block["block_id"] == picker {
+                                removed = true;
+                                false
+                            } else {
+                                true
+                            }
+                        });
+                    }
+                }
+                if removed && window["focused_block_id"] == picker {
+                    // The transient overlay must not supply the tab title or cwd.
+                    window["focused_block_id"] = window["layers"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .flat_map(|layer| layer["blocks"].as_array().into_iter().flatten())
+                        .find_map(|block| block.get("block_id"))
+                        .cloned()
+                        .unwrap_or(Value::Null);
+                }
+            }
+        }
         let focused = active_window(&inspect).and_then(|w| w["focused_block_id"].as_str());
         let focused_process = focused.and_then(|block| self.block_process(id, block).ok());
         let windows: Vec<_> = inspect["windows"]

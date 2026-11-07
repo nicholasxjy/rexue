@@ -57,7 +57,7 @@ The picker combines Rex sessions, running agents, configured projects, zoxide hi
 
 A custom tab name takes priority; otherwise, Rexue uses the focused terminal's title, falling back to its pane label when no title is available. Ordinary tab titles display `|` separators as spaces, collapsing adjacent spaces. Tabs also include their live agents' terminal titles, with repeated titles shown once per tab. An unnamed agent tab without a title falls back to the agent app name. Disable icons with `picker --icons=false` or `[tui] show_icons = false`. Agent panes retain their session name, app, pane number and status. The agent-only picker (`picker --agents`) keeps a flat list of running agents.
 
-With an empty search, the picker initially selects the current pane, falling back to its tab or session when needed.
+With an empty search, the picker initially selects the current pane, falling back to its tab or session when needed. A floating picker excludes its own temporary pane from the session tree.
 
 **Enter** connects, **Esc** cancels, **Ctrl+J/K** moves, and **Ctrl+O** toggles preview. **Ctrl+R** renames a session; **Ctrl+X** asks to remove a live session, history entry, or worktree. Configure one or more keys per action in [`[tui.keybindings]`](docs/CONFIGURATION.md#keybindings); omitted actions keep these defaults.
 

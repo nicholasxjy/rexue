@@ -26,6 +26,7 @@ pub struct ListOptions {
     pub hide_duplicates: bool,
     pub blacklisted: bool,
     pub no_cache: bool,
+    pub picker_block: Option<String>,
 }
 #[derive(Debug, Clone, Default)]
 pub struct ConnectOptions {
@@ -191,9 +192,11 @@ impl Manager {
         let mut entries = Vec::new();
         let configs = self.config.entries()?;
         if !selected || opts.rex || opts.agents {
-            let mut live = self
-                .rex
-                .list_sources(!selected || opts.rex, !selected || opts.agents)?;
+            let mut live = self.rex.list_sources_excluding_picker(
+                !selected || opts.rex,
+                !selected || opts.agents,
+                opts.picker_block.as_deref(),
+            )?;
             self.restore_paths(&mut live, &self.state()?);
             for entry in live.iter_mut().filter(|e| e.source == Source::Rex) {
                 if let Some(config) = configs.iter().find(|c| {

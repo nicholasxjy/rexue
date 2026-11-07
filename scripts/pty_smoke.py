@@ -266,10 +266,16 @@ else:
         context.write_text(json.dumps(current))
         before = len((root/'rex-calls.jsonl').read_text().splitlines())
         run_case('initial-focus-legacy-floating-picker-selects-tab', ['picker', '--rex'],
-                 lambda s: (s.expect('AGENT_PREVIEW_block:picker'), s.send(b'\r')))
+                 lambda s: (s.expect('6/6'), s.expect('AGENT_PREVIEW_block:picker'), s.send(b'\r')))
         calls = [json.loads(line) for line in (root/'rex-calls.jsonl').read_text().splitlines()[before:]]
         assert ['focus', '-s', 'session:agents', 'window:agents-00000000'] in calls, calls
         assert ['focus', '-s', 'session:agents', 'block:picker'] not in calls, calls
+        run_case('floating-picker-excludes-self-with-prefilled-query', ['picker', '--rex', "--query='pane"],
+                 lambda s: (s.expect('4/4'), s.send(b'\x1b')))
+        for index in range(2):
+            run_case('floating-picker-reopen-excludes-self-' + str(index + 1),
+                     ['picker', '--rex', '--focus-pane=block:second'],
+                     lambda s: (s.expect('6/6'), s.expect('AGENT_PREVIEW_block:second'), s.send(b'\x1b')))
         (root/'floating-mode').unlink()
         context.unlink()
 
