@@ -1,0 +1,559 @@
+{
+  "baseline_revision": "2107c5605053c5b033fb5a53ae0762dd64d6b303",
+  "candidate": "uncommitted working tree based on the baseline revision",
+  "build": "cargo build --release; unchanged release profile (thin LTO, stripped)",
+  "binary_sha256": {
+    "before": "13fa708eca277679c428561b017759aef368c316750d54378fe15e7ef6c3526f",
+    "after": "e8e89e43613d22e001f3b084ef5a78ae230121bdb26012f6a95947310ee46a7f"
+  },
+  "environment": {
+    "os": "macOS 27.2",
+    "arch": "arm64",
+    "rust": "1.99.1",
+    "fzf": "0.74.5 (Homebrew)",
+    "worktrunk": "0.81.0",
+    "rex": "0.0.1794006277-g2a79a1"
+  },
+  "validation": [
+    {
+      "command": "cargo fmt --check",
+      "status": "passed"
+    },
+    {
+      "command": "cargo test",
+      "status": "passed",
+      "tests": 154
+    },
+    {
+      "command": "cargo clippy --all-targets -- -D warnings",
+      "status": "passed"
+    },
+    {
+      "command": "cargo build && cargo build --release",
+      "status": "passed"
+    },
+    {
+      "command": "python3 scripts/pty_smoke.py --binary target/debug/rexue",
+      "status": "passed on rerun",
+      "cases": 83,
+      "interactive_terminal_checks": 78,
+      "expected_tool_error_cases": 5
+    },
+    {
+      "command": "python3 scripts/worktree_removal_smoke.py --binary target/debug/rexue",
+      "status": "passed",
+      "cases": 9
+    },
+    {
+      "command": "python3 scripts/worktree_smoke.py --binary target/debug/rexue",
+      "status": "passed",
+      "cases": 21
+    },
+    {
+      "command": "python3 scripts/performance_smoke.py --binary target/release/rexue --runs 7 --max-rex-calls 3",
+      "status": "passed"
+    },
+    {
+      "command": "python3 scripts/performance_smoke.py --binary target/release/rexue --runs 3 --legacy-rex --max-rex-calls 52",
+      "status": "passed"
+    },
+    {
+      "command": "git diff --check",
+      "status": "passed"
+    }
+  ],
+  "prior_acceptance_failure": {
+    "case": "worktree-confirm-cancel-then-safe-remove-and-refresh",
+    "symptom": "0/0 did not appear within the PTY fixture's eight-second timeout after checkout deletion",
+    "followup": "Focused removal (9 cases), Worktrunk (21 cases) and the complete picker suite (83 cases) passed on rerun. Added failure transcripts and Rex-call diagnostics to the case.",
+    "root_cause": "Not established; did not reproduce on rerun. No behavior fix was attributed to this timeout."
+  },
+  "regressions": {
+    "duplicate_title_reads": {
+      "before": "Focused agent title requested twice in one refresh",
+      "after": "One title request per refresh, and updates appear on the next refresh"
+    },
+    "retired_targets": {
+      "before": "Retained obsolete target after second refresh: 4 targets instead of 3",
+      "after": "32 refreshes retain only 3 current/hidden-alias targets; surviving IDs remain stable and retired IDs are rejected"
+    },
+    "native_snapshot": "Equivalent catalog from one Rex process; freshness, optional metadata, vanished sessions, invalid JSON, malformed snapshots and service errors covered"
+  },
+  "limitations": [
+    "Live timings are warmed local read-only CLI listing, with seven samples per binary per source and alternating order; configured-default retains the actual user configuration/history but isolates state.",
+    "CPU accounting covers CLI processes and reaped descendants and excludes the running Rex server.",
+    "Picker timings use real fzf with Rex fixtures and include the Python PTY wrapper's startup; no per-RPC network latency is simulated inside Lua.",
+    "No live app rendering, remote-server latency, peak memory or quantified per-keystroke allocation measurement was performed."
+  ],
+  "recorded_at": "2026-11-07T11:29:05.927337+00:00",
+  "isolated_picker": {
+    "before": {
+      "method": "Four sessions, one unnamed tab and four panes per session (three agents and one shell); each Rex CLI process sleeps 15ms to model process/connection setup (individual RPC latency within Lua is not simulated). Real fzf in a PTY; preview disabled. RSS sums the picker and its descendants; CPU is the idle CPU-time delta, excluding the Python wrapper. This does not measure live app rendering or peak startup memory.",
+      "runs": 7,
+      "legacy_rex": false,
+      "median": {
+        "open_ms": 942.75,
+        "open_rex_calls": 55,
+        "idle_rss_kib": 14752,
+        "idle_cpu_percent": 0.0
+      },
+      "samples": [
+        {
+          "open_ms": 1478.59,
+          "open_rex_calls": 55,
+          "idle_rss_kib": 14832,
+          "idle_cpu_percent": 0.0,
+          "idle_rex_calls": 0,
+          "terminal_restored": true
+        },
+        {
+          "open_ms": 927.04,
+          "open_rex_calls": 55,
+          "idle_rss_kib": 14736,
+          "idle_cpu_percent": 0.0,
+          "idle_rex_calls": 0,
+          "terminal_restored": true
+        },
+        {
+          "open_ms": 945.19,
+          "open_rex_calls": 55,
+          "idle_rss_kib": 14848,
+          "idle_cpu_percent": 0.0,
+          "idle_rex_calls": 0,
+          "terminal_restored": true
+        },
+        {
+          "open_ms": 953.71,
+          "open_rex_calls": 55,
+          "idle_rss_kib": 14688,
+          "idle_cpu_percent": 0.99,
+          "idle_rex_calls": 0,
+          "terminal_restored": true
+        },
+        {
+          "open_ms": 924.82,
+          "open_rex_calls": 55,
+          "idle_rss_kib": 14816,
+          "idle_cpu_percent": 0.0,
+          "idle_rex_calls": 0,
+          "terminal_restored": true
+        },
+        {
+          "open_ms": 942.75,
+          "open_rex_calls": 55,
+          "idle_rss_kib": 14704,
+          "idle_cpu_percent": 0.0,
+          "idle_rex_calls": 0,
+          "terminal_restored": true
+        },
+        {
+          "open_ms": 942.39,
+          "open_rex_calls": 55,
+          "idle_rss_kib": 14752,
+          "idle_cpu_percent": 0.0,
+          "idle_rex_calls": 0,
+          "terminal_restored": true
+        }
+      ]
+    },
+    "after": {
+      "method": "Four sessions, one unnamed tab and four panes per session (three agents and one shell); each Rex CLI process sleeps 15ms to model process/connection setup (individual RPC latency within Lua is not simulated). Real fzf in a PTY; preview disabled. RSS sums the picker and its descendants; CPU is the idle CPU-time delta, excluding the Python wrapper. This does not measure live app rendering or peak startup memory.",
+      "runs": 7,
+      "legacy_rex": false,
+      "median": {
+        "open_ms": 694.63,
+        "open_rex_calls": 3,
+        "idle_rss_kib": 14896,
+        "idle_cpu_percent": 0.0
+      },
+      "samples": [
+        {
+          "open_ms": 993.15,
+          "open_rex_calls": 3,
+          "idle_rss_kib": 14896,
+          "idle_cpu_percent": 0.0,
+          "idle_rex_calls": 0,
+          "terminal_restored": true
+        },
+        {
+          "open_ms": 685.52,
+          "open_rex_calls": 3,
+          "idle_rss_kib": 14672,
+          "idle_cpu_percent": 0.0,
+          "idle_rex_calls": 0,
+          "terminal_restored": true
+        },
+        {
+          "open_ms": 685.32,
+          "open_rex_calls": 3,
+          "idle_rss_kib": 14896,
+          "idle_cpu_percent": 0.0,
+          "idle_rex_calls": 0,
+          "terminal_restored": true
+        },
+        {
+          "open_ms": 669.13,
+          "open_rex_calls": 3,
+          "idle_rss_kib": 14576,
+          "idle_cpu_percent": 0.0,
+          "idle_rex_calls": 0,
+          "terminal_restored": true
+        },
+        {
+          "open_ms": 695.31,
+          "open_rex_calls": 3,
+          "idle_rss_kib": 15008,
+          "idle_cpu_percent": 0.99,
+          "idle_rex_calls": 0,
+          "terminal_restored": true
+        },
+        {
+          "open_ms": 694.63,
+          "open_rex_calls": 3,
+          "idle_rss_kib": 14672,
+          "idle_cpu_percent": 0.0,
+          "idle_rex_calls": 0,
+          "terminal_restored": true
+        },
+        {
+          "open_ms": 702.76,
+          "open_rex_calls": 3,
+          "idle_rss_kib": 14912,
+          "idle_cpu_percent": 0.98,
+          "idle_rex_calls": 0,
+          "terminal_restored": true
+        }
+      ]
+    },
+    "legacy": {
+      "method": "Four sessions, one unnamed tab and four panes per session (three agents and one shell); each Rex CLI process sleeps 15ms to model process/connection setup (individual RPC latency within Lua is not simulated). Real fzf in a PTY; preview disabled. RSS sums the picker and its descendants; CPU is the idle CPU-time delta, excluding the Python wrapper. This does not measure live app rendering or peak startup memory.",
+      "runs": 3,
+      "legacy_rex": true,
+      "median": {
+        "open_ms": 921.75,
+        "open_rex_calls": 52,
+        "idle_rss_kib": 14944,
+        "idle_cpu_percent": 0.98
+      },
+      "samples": [
+        {
+          "open_ms": 1250.45,
+          "open_rex_calls": 52,
+          "idle_rss_kib": 14944,
+          "idle_cpu_percent": 0.98,
+          "idle_rex_calls": 0,
+          "terminal_restored": true
+        },
+        {
+          "open_ms": 921.75,
+          "open_rex_calls": 52,
+          "idle_rss_kib": 15024,
+          "idle_cpu_percent": 0.98,
+          "idle_rex_calls": 0,
+          "terminal_restored": true
+        },
+        {
+          "open_ms": 916.11,
+          "open_rex_calls": 52,
+          "idle_rss_kib": 14752,
+          "idle_cpu_percent": 0.0,
+          "idle_rex_calls": 0,
+          "terminal_restored": true
+        }
+      ]
+    }
+  },
+  "live_listing": {
+    "method": "Read-only live Rex listing. Isolated empty config with disabled frecency for --rex, --agents and default; configured-default reads the actual user config/history with isolated state. One warmup per binary per source, then seven pairs in alternating order. CPU is getrusage(RUSAGE_CHILDREN) user+system time for the CLI and reaped descendants, excluding the already-running Rex server. No app focus changes.",
+    "sources": {
+      "--rex": {
+        "before": {
+          "samples_ms": [
+            414.61,
+            472.24,
+            417.5,
+            424.36,
+            419.5,
+            478.24,
+            422.76
+          ],
+          "cpu_samples_ms": [
+            948.42,
+            929.81,
+            952.05,
+            947.66,
+            938.12,
+            929.35,
+            946.92
+          ],
+          "entries": [
+            2,
+            2,
+            2,
+            2,
+            2,
+            2,
+            2
+          ],
+          "median_ms": 422.76,
+          "median_cpu_ms": 946.92
+        },
+        "after": {
+          "samples_ms": [
+            46.23,
+            39.66,
+            42.42,
+            42.76,
+            45.9,
+            41.35,
+            42.57
+          ],
+          "cpu_samples_ms": [
+            37.93,
+            36.0,
+            35.05,
+            39.24,
+            37.23,
+            37.77,
+            36.04
+          ],
+          "entries": [
+            2,
+            2,
+            2,
+            2,
+            2,
+            2,
+            2
+          ],
+          "median_ms": 42.57,
+          "median_cpu_ms": 37.23
+        }
+      },
+      "--agents": {
+        "before": {
+          "samples_ms": [
+            425.45,
+            409.43,
+            412.69,
+            399.95,
+            434.15,
+            405.72,
+            405.72
+          ],
+          "cpu_samples_ms": [
+            886.86,
+            866.65,
+            878.87,
+            860.71,
+            884.76,
+            872.63,
+            875.94
+          ],
+          "entries": [
+            2,
+            2,
+            2,
+            2,
+            2,
+            2,
+            2
+          ],
+          "median_ms": 409.43,
+          "median_cpu_ms": 875.94
+        },
+        "after": {
+          "samples_ms": [
+            41.43,
+            42.22,
+            41.9,
+            40.95,
+            40.33,
+            43.13,
+            43.12
+          ],
+          "cpu_samples_ms": [
+            35.24,
+            36.21,
+            37.43,
+            38.88,
+            36.25,
+            35.24,
+            36.69
+          ],
+          "entries": [
+            2,
+            2,
+            2,
+            2,
+            2,
+            2,
+            2
+          ],
+          "median_ms": 41.9,
+          "median_cpu_ms": 36.25
+        }
+      },
+      "default": {
+        "before": {
+          "samples_ms": [
+            418.75,
+            404.09,
+            425.35,
+            426.01,
+            462.04,
+            423.0,
+            427.56
+          ],
+          "cpu_samples_ms": [
+            940.94,
+            947.16,
+            953.61,
+            933.52,
+            961.05,
+            955.26,
+            935.6
+          ],
+          "entries": [
+            4,
+            4,
+            4,
+            4,
+            4,
+            4,
+            4
+          ],
+          "median_ms": 425.35,
+          "median_cpu_ms": 947.16
+        },
+        "after": {
+          "samples_ms": [
+            44.27,
+            44.56,
+            48.44,
+            46.26,
+            47.11,
+            45.36,
+            49.84
+          ],
+          "cpu_samples_ms": [
+            38.68,
+            38.68,
+            37.99,
+            37.11,
+            38.41,
+            39.82,
+            40.25
+          ],
+          "entries": [
+            4,
+            4,
+            4,
+            4,
+            4,
+            4,
+            4
+          ],
+          "median_ms": 46.26,
+          "median_cpu_ms": 38.68
+        }
+      },
+      "configured-default": {
+        "before": {
+          "samples_ms": [
+            417.24,
+            430.51,
+            412.63,
+            434.1,
+            431.48,
+            408.25,
+            415.56
+          ],
+          "cpu_samples_ms": [
+            941.81,
+            943.93,
+            936.68,
+            954.21,
+            953.51,
+            950.95,
+            944.08
+          ],
+          "entries": [
+            48,
+            48,
+            48,
+            48,
+            48,
+            48,
+            48
+          ],
+          "median_ms": 417.24,
+          "median_cpu_ms": 944.08
+        },
+        "after": {
+          "samples_ms": [
+            58.8,
+            53.64,
+            58.29,
+            53.31,
+            53.0,
+            54.76,
+            55.79
+          ],
+          "cpu_samples_ms": [
+            41.44,
+            40.71,
+            41.15,
+            41.59,
+            42.23,
+            41.62,
+            42.31
+          ],
+          "entries": [
+            48,
+            48,
+            48,
+            48,
+            48,
+            48,
+            48
+          ],
+          "median_ms": 54.76,
+          "median_cpu_ms": 41.59
+        }
+      }
+    }
+  },
+  "lua_runtime_checks": {
+    "method": "Actual Rex Lua runtime with rex.call replaced by isolated API fixtures; no live API mutations. The compiled release binary is separately checked against live read-only listing.",
+    "checks": [
+      {
+        "case": "floating-picker-and-nonterminal-excluded-other-floating-pane-kept",
+        "passed": true
+      },
+      {
+        "case": "vanished-session-skipped",
+        "passed": true
+      },
+      {
+        "case": "optional-method-failure-retained-as-missing-metadata",
+        "passed": true
+      },
+      {
+        "case": "non-race-session-error-propagates",
+        "passed": true
+      },
+      {
+        "case": "list-error-propagates",
+        "passed": true
+      }
+    ]
+  },
+  "summary": {
+    "configured_live_elapsed_reduction_percent": 86.88,
+    "configured_live_client_cpu_reduction_percent": 95.59,
+    "isolated_picker_open_reduction_percent": 26.32,
+    "isolated_picker_rex_process_reduction_percent": 94.55,
+    "idle_rss_conclusion": "No measured decrease in this small fixture; the regression test verifies bounded retained targets over 32 refreshes, not an RSS reduction."
+  }
+}

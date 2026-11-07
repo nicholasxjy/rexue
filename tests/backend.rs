@@ -35,6 +35,11 @@ impl FakeRex {
         let script = format!(
             r#"#!/bin/sh
 root={}
+if [ "$4" = '-S' ]; then request="$6 $7"; else request="$4 $5"; fi
+if [ "$request" = 'do --eval' ] && [ ! -f "$root/snapshot.json" ] && [ ! -f "$root/snapshot.exit" ] && [ ! -f "$root/fail.exit" ]; then
+    printf 'Error: unknown flag: --eval' >&2
+    exit 2
+fi
 printf '%s\000' "$@" > "$root/calls/$$"
 if [ -f "$root/fail.exit" ]; then
     /bin/cat "$root/fail.stderr" >&2
@@ -43,6 +48,12 @@ fi
 shift 3
 if [ "$1" = '-S' ]; then shift 2; fi
 case "$1 $2" in
+    'do --eval')
+        if [ -f "$root/snapshot.exit" ]; then
+            /bin/cat "$root/snapshot.stderr" >&2
+            exit "$(/bin/cat "$root/snapshot.exit")"
+        fi
+        /bin/cat "$root/snapshot.json" ;;
     'whoami --json') /bin/cat "$root/context.json" ;;
     'client ls') /bin/cat "$root/clients.json" ;;
     '-C '*)
@@ -264,6 +275,167 @@ fn session_tab_names_resolve_titles_for_generated_window_labels() {
     }
     fs::write(fake.dir.path().join("title-block:editor-full.exit"), "").unwrap();
     assert_eq!(fake.rex.list().unwrap()[0].tab_names, ["shell", "Deploy"]);
+}
+
+fn snapshot_fixture(fake: &FakeRex) -> Value {
+    let read = |name: &str| -> Value {
+        serde_json::from_slice(&fs::read(fake.dir.path().join(name)).unwrap()).unwrap()
+    };
+    let mut response = read("sessions.json");
+    let mut snapshots = serde_json::Map::new();
+    for session in response["sessions"].as_array().unwrap() {
+        let id = session["session_id"].as_str().unwrap();
+        let view = read(&format!("inspect-{id}.json"));
+        let mut blocks = serde_json::Map::new();
+        for window in view["windows"].as_array().into_iter().flatten() {
+            for layer in window["layers"].as_array().into_iter().flatten() {
+                for block in layer["blocks"].as_array().into_iter().flatten() {
+                    let block = block["block_id"].as_str().unwrap();
+                    let mut metadata = serde_json::Map::new();
+                    for method in ["process", "program_status", "title"] {
+                        let file = format!("{method}-{block}.json");
+                        if !fake
+                            .dir
+                            .path()
+                            .join(format!("{method}-{block}.exit"))
+                            .exists()
+                        {
+                            if fake.dir.path().join(&file).exists() {
+                                metadata.insert(method.into(), read(&file));
+                            } else if fake.dir.path().join(format!("{method}.json")).exists() {
+                                metadata.insert(method.into(), read(&format!("{method}.json")));
+                            }
+                        }
+                    }
+                    blocks.insert(block.into(), Value::Object(metadata));
+                }
+            }
+        }
+        snapshots.insert(id.into(), json!({"view": view, "blocks": blocks}));
+    }
+    response["snapshots"] = Value::Object(snapshots);
+    response
+}
+
+#[test]
+fn fast_snapshot_preserves_catalog_with_one_process_and_refreshes_metadata() {
+    let fake = FakeRex::new();
+    agents_fixture(&fake);
+    fake.json("title-block:pi-full.json", json!({"title": "Initial task"}));
+    let expected = fake.rex.list_sources(true, true).unwrap();
+    fake.json("snapshot.json", snapshot_fixture(&fake));
+    let before = fake.calls().len();
+    let actual = fake.rex.list_sources(true, true).unwrap();
+    assert_eq!(
+        serde_json::to_value(&actual).unwrap(),
+        serde_json::to_value(expected).unwrap()
+    );
+    assert_eq!(fake.calls().len() - before, 1);
+
+    let mut snapshot = snapshot_fixture(&fake);
+    snapshot["snapshots"]["session:agents-full"]["blocks"]["block:pi-full"]["title"] =
+        json!({"title": "Updated task"});
+    snapshot["snapshots"]["session:agents-full"]["blocks"]["block:pi-full"]["program_status"]["records"]
+        [0]["state"] = "working".into();
+    fake.json("snapshot.json", snapshot);
+    let entries = fake.rex.list_sources(true, true).unwrap();
+    assert!(entries[0].tab_names[1].contains("Updated task"));
+    assert_eq!(entries[1].agent.as_ref().unwrap().state, "working");
+    assert_eq!(entries[1].target(), "block:pi-full");
+}
+
+#[test]
+fn fast_snapshot_keeps_errors_visible_instead_of_falling_back() {
+    let fake = FakeRex::new();
+    agents_fixture(&fake);
+    fs::write(fake.dir.path().join("snapshot.exit"), "7").unwrap();
+    fs::write(
+        fake.dir.path().join("snapshot.stderr"),
+        "snapshot connection failed",
+    )
+    .unwrap();
+    let error = fake.rex.list().unwrap_err();
+    assert!(format!("{error:#}").contains("snapshot connection failed"));
+    assert_eq!(fake.calls().len(), 1);
+}
+
+#[test]
+fn fast_snapshot_rejects_malformed_metadata() {
+    let fake = FakeRex::new();
+    agents_fixture(&fake);
+    for response in [
+        json!({}),
+        json!({"sessions": [], "snapshots": []}),
+        json!({
+            "sessions": [{"session_id": "session:agents-full"}], "snapshots": {}
+        }),
+        json!({
+            "sessions": [{"session_id": "session:agents-full"}],
+            "snapshots": {"session:agents-full": {"view": null, "blocks": {}}}
+        }),
+    ] {
+        fake.json("snapshot.json", response);
+        assert!(fake.rex.list().is_err());
+    }
+    fs::write(fake.dir.path().join("snapshot.json"), "invalid JSON").unwrap();
+    assert!(fake.rex.list().is_err());
+}
+
+#[test]
+fn fast_snapshot_handles_empty_lua_tables_and_vanished_sessions() {
+    let fake = FakeRex::new();
+    fake.json("snapshot.json", json!({"sessions": {}, "snapshots": {}}));
+    assert!(fake.rex.list().unwrap().is_empty());
+    fake.json(
+        "snapshot.json",
+        json!({
+            "sessions": [{"session_id": "session:vanished-full"}],
+            "snapshots": {"session:vanished-full": {"missing": true}}
+        }),
+    );
+    assert!(fake.rex.list().unwrap().is_empty());
+    assert_eq!(fake.calls().len(), 2);
+}
+
+#[test]
+fn discovery_reads_each_needed_title_once_per_refresh() {
+    let fake = FakeRex::new();
+    agents_fixture(&fake);
+    let inspect_path = fake.dir.path().join("inspect-session:agents-full.json");
+    let mut inspect: Value = serde_json::from_slice(&fs::read(inspect_path).unwrap()).unwrap();
+    inspect["windows"][1]["label"] = "Window nts-full".into();
+    fake.json("inspect-session:agents-full.json", inspect);
+    fake.json("title-block:codex-full.json", json!({"title": "Review"}));
+
+    for (refresh, title) in ["Initial task", "Updated task"].iter().enumerate() {
+        fake.json("title-block:pi-full.json", json!({"title": title}));
+        let entries = fake.rex.list_sources(true, true).unwrap();
+        assert_eq!(
+            entries[0].tab_names,
+            ["Shell", &format!("{title} · Review")]
+        );
+        assert!(entries[1].name.ends_with(title));
+        for block in ["block:pi-full", "block:codex-full"] {
+            let calls = fake
+                .calls()
+                .iter()
+                .filter(|args| {
+                    args.windows(7).any(|args| {
+                        args == [
+                            "block",
+                            "call",
+                            "-s",
+                            "session:agents-full",
+                            "-b",
+                            block,
+                            "title",
+                        ]
+                    })
+                })
+                .count();
+            assert_eq!(calls, refresh + 1, "read {block}'s title once per refresh");
+        }
+    }
 }
 
 #[test]

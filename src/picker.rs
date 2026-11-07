@@ -5,7 +5,7 @@ use crate::model::{Entry, Source, alias_key};
 use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     io::{Read, Write},
     net::Shutdown,
     os::unix::net::{UnixListener, UnixStream},
@@ -230,6 +230,20 @@ impl Catalog {
                 self.remember(entry);
             }
         }
+        // Keep IDs stable for current rows and hidden aliases without retaining
+        // every session, pane or worktree that disappeared during a refresh.
+        let reachable: BTreeSet<_> = self
+            .entries
+            .iter()
+            .copied()
+            .chain(
+                self.options
+                    .aliases
+                    .values()
+                    .filter_map(|alias| self.alias_id(alias)),
+            )
+            .collect();
+        self.targets.retain(|id, _| reachable.contains(id));
     }
     fn removed(&mut self, entry: &Entry) {
         self.entries
@@ -536,53 +550,48 @@ fn refresh(state: &Mutex<Catalog>, fetch: &Mutex<Box<dyn Fn() -> Result<Vec<Entr
 }
 
 fn rows(state: &Mutex<Catalog>, query: &str) -> Result<Vec<u8>> {
-    let (candidates, pattern, fuzzy, options) = {
+    let (input, pattern, fuzzy, separator_aware, numbered) = {
         let mut s = state.lock().unwrap();
         if query != s.last_query {
             s.auto_armed = true;
             s.last_query = query.into();
         }
-        let (ids, query, fuzzy) = s.candidates(query);
+        let (ids, pattern, fuzzy) = s.candidates(query);
+        let options = &s.options;
+        let mut input = Vec::new();
+        for id in ids {
+            let entry = &s.targets[&id];
+            let search = if options.worktree || entry.source == Source::Agent {
+                format!(
+                    "{} {}",
+                    clean(&entry.display_name()),
+                    clean(&entry.path.display().to_string())
+                )
+            } else {
+                clean(&entry.name)
+            };
+            let search = if options.separator_aware {
+                normalize(&search)
+            } else {
+                search
+            };
+            let branch = s.branches.get(&id).map(String::as_str).unwrap_or("");
+            let display = display(entry, options);
+            write!(input, "{id}\t{search}\t{branch}{display}\0")?;
+        }
         (
-            ids.into_iter()
-                .map(|id| (id, s.targets[&id].clone()))
-                .collect::<Vec<_>>(),
-            query,
+            input,
+            pattern,
             fuzzy,
-            s.options.clone(),
+            options.separator_aware,
+            !options.worktree && query.starts_with('#') && options.alias_filter_prefix != "#",
         )
     };
-    let mut input = Vec::new();
-    for (id, entry) in &candidates {
-        let search = if options.worktree || entry.source == Source::Agent {
-            format!(
-                "{} {}",
-                clean(&entry.display_name()),
-                clean(&entry.path.display().to_string())
-            )
-        } else {
-            clean(&entry.name)
-        };
-        let search = if options.separator_aware {
-            normalize(&search)
-        } else {
-            search
-        };
-        let branch = state
-            .lock()
-            .unwrap()
-            .branches
-            .get(id)
-            .cloned()
-            .unwrap_or_default();
-        let display = format!("{branch}{}", display(entry, &options));
-        write!(input, "{id}\t{search}\t{display}\0")?;
-    }
     // Use fzf itself for fuzzy matching and ordering. Keeping the visible finder
     // disabled lets alias-only and index modes share exactly the same query box.
     // --filter is a short-lived, noninteractive fzf process, with no terminal use.
     let mut matched = if fuzzy && !pattern.is_empty() {
-        let pattern = if options.separator_aware {
+        let pattern = if separator_aware {
             normalize(&pattern)
         } else {
             pattern
@@ -614,7 +623,7 @@ fn rows(state: &Mutex<Catalog>, query: &str) -> Result<Vec<u8>> {
         input
     };
     // Number the actual filtered order, not backend positions.
-    if !options.worktree && query.starts_with('#') && (options.alias_filter_prefix != "#") {
+    if numbered {
         let mut numbered = Vec::new();
         for (i, row) in matched
             .split(|c| *c == 0)
@@ -1423,6 +1432,49 @@ mod tests {
         );
         assert!(target(&state, Some("9999")).is_err());
     }
+    #[test]
+    fn refresh_releases_retired_targets_and_preserves_current_ids_and_hidden_aliases() {
+        let mut options = PickerOptions::default();
+        options.aliases.insert(
+            "h".into(),
+            Alias {
+                alias: "h".into(),
+                target: "hidden".into(),
+                auto_connect: false,
+            },
+        );
+        let keep = Entry::new("keep", "/keep", Source::Directory);
+        let state = Mutex::new(Catalog::new(options, vec![keep.clone()]));
+        let keep_id = state.lock().unwrap().entries[0];
+        let hidden_id = state.lock().unwrap().candidates("/h").0[0];
+        let mut retired = None;
+        for refresh in 0..32 {
+            let current = {
+                let mut catalog = state.lock().unwrap();
+                catalog.replace(vec![
+                    keep.clone(),
+                    Entry::new(
+                        format!("temporary-{refresh}"),
+                        "/temporary",
+                        Source::Directory,
+                    ),
+                ]);
+                assert_eq!(catalog.entries[0], keep_id);
+                assert_eq!(catalog.candidates("/h").0, [hidden_id]);
+                assert_eq!(
+                    catalog.targets.len(),
+                    3,
+                    "retain only current and alias targets"
+                );
+                catalog.entries[1]
+            };
+            if let Some(id) = retired {
+                assert!(target(&state, Some(&format!("{id}"))).is_err());
+            }
+            retired = Some(current);
+        }
+    }
+
     #[test]
     fn session_tab_names_render_and_refresh_without_changing_selection() {
         let mut entry: Entry = serde_json::from_value(serde_json::json!({

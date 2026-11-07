@@ -6,7 +6,7 @@ use crate::{
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{path::PathBuf, process::Command, time::Duration};
+use std::{collections::BTreeMap, path::PathBuf, process::Command, time::Duration};
 
 #[derive(Debug, Clone)]
 pub struct Rex {
@@ -19,6 +19,20 @@ pub struct AppClient {
     pub id: String,
     pub label: String,
     pub platform: String,
+}
+#[derive(Deserialize)]
+struct Snapshot {
+    sessions: Vec<Value>,
+    snapshots: BTreeMap<String, SessionSnapshot>,
+}
+#[derive(Deserialize)]
+struct SessionSnapshot {
+    #[serde(default)]
+    missing: bool,
+    #[serde(default)]
+    view: Value,
+    #[serde(default)]
+    blocks: BTreeMap<String, BTreeMap<String, Value>>,
 }
 #[derive(Debug, Clone)]
 pub struct Created {
@@ -123,13 +137,71 @@ impl Rex {
         agents: bool,
         picker_block: Option<&str>,
     ) -> Result<Vec<Entry>> {
-        let response = self.json(&["ls", "--json"])?;
-        let rows = response["sessions"]
-            .as_array()
-            .context("Rex response missing sessions")?;
-        parallel_entries(rows, |row| {
-            self.inspect_entries(row, sessions, agents, None, picker_block)
+        let (rows, snapshots) = match self.snapshot(picker_block)? {
+            Some(snapshot) => (snapshot.sessions, Some(snapshot.snapshots)),
+            None => {
+                let response = self.json(&["ls", "--json"])?;
+                (
+                    response["sessions"]
+                        .as_array()
+                        .context("Rex response missing sessions")?
+                        .clone(),
+                    None,
+                )
+            }
+        };
+        parallel_entries(&rows, snapshots.is_none(), |row| {
+            let snapshot = snapshots
+                .as_ref()
+                .map(|snapshots| &snapshots[row["session_id"].as_str().unwrap()]);
+            self.inspect_entries(row, sessions, agents, None, picker_block, snapshot)
         })
+    }
+    fn snapshot(&self, picker_block: Option<&str>) -> Result<Option<Snapshot>> {
+        let args = serde_json::json!({"picker_block": picker_block}).to_string();
+        let mut response = match self.json(&[
+            "do",
+            "--eval",
+            include_str!("rex_snapshot.lua"),
+            "--args",
+            &args,
+            "--json",
+        ]) {
+            Ok(response) => response,
+            Err(error) => {
+                let message = format!("{error:#}");
+                // Older Rex CLIs reject Lua before connecting. Preserve their
+                // existing discovery path, but keep service/JSON errors visible.
+                if message.contains("unknown flag: --eval")
+                    || message.contains("unknown command \"do\"")
+                {
+                    return Ok(None);
+                }
+                return Err(error);
+            }
+        };
+        // Lua encodes an empty table as an object, including an empty session list.
+        if response["sessions"]
+            .as_object()
+            .is_some_and(|sessions| sessions.is_empty())
+        {
+            response["sessions"] = Value::Array(Vec::new());
+        }
+        let snapshot: Snapshot =
+            serde_json::from_value(response).context("invalid Rex snapshot")?;
+        for row in &snapshot.sessions {
+            let id = row["session_id"]
+                .as_str()
+                .context("Rex session missing session_id")?;
+            let session = snapshot
+                .snapshots
+                .get(id)
+                .context("Rex snapshot missing session metadata")?;
+            if !session.missing && !session.view.is_object() {
+                bail!("Rex snapshot missing session view");
+            }
+        }
+        Ok(Some(snapshot))
     }
     /// Refresh a selected session and, optionally, only its selected agent pane.
     pub fn list_session(&self, id: &str, block: Option<&str>) -> Result<Vec<Entry>> {
@@ -138,7 +210,7 @@ impl Rex {
             .as_array()
             .context("Rex response missing sessions")?;
         match rows.iter().find(|row| row["session_id"] == id) {
-            Some(row) => self.inspect_entries(row, true, block.is_some(), block, None),
+            Some(row) => self.inspect_entries(row, true, block.is_some(), block, None, None),
             None => Ok(Vec::new()),
         }
     }
@@ -149,6 +221,7 @@ impl Rex {
         agents: bool,
         target_block: Option<&str>,
         picker_block: Option<&str>,
+        snapshot: Option<&SessionSnapshot>,
     ) -> Result<Vec<Entry>> {
         let id = row["session_id"]
             .as_str()
@@ -156,10 +229,14 @@ impl Rex {
         let name = row["label"].as_str().unwrap_or(id);
         // A session can disappear between list and inspect. Skip only that race;
         // malformed or unreachable service responses must remain visible errors.
-        let mut inspect = match self.inspect(id) {
-            Ok(v) => v,
-            Err(e) if e.to_string().contains("exit 3") => return Ok(Vec::new()),
-            Err(e) => return Err(e),
+        let mut inspect = match snapshot {
+            Some(snapshot) if snapshot.missing => return Ok(Vec::new()),
+            Some(snapshot) => snapshot.view.clone(),
+            None => match self.inspect(id) {
+                Ok(v) => v,
+                Err(e) if e.to_string().contains("exit 3") => return Ok(Vec::new()),
+                Err(e) => return Err(e),
+            },
         };
         if let Some(picker) = picker_block {
             for window in inspect["windows"].as_array_mut().into_iter().flatten() {
@@ -192,12 +269,14 @@ impl Rex {
             }
         }
         let focused = active_window(&inspect).and_then(|w| w["focused_block_id"].as_str());
-        let focused_process = focused.and_then(|block| self.block_process(id, block).ok());
+        let focused_process =
+            focused.and_then(|block| self.block_metadata(id, block, "process", snapshot).ok());
+        let mut titles = BTreeMap::new();
         let windows: Vec<_> = inspect["windows"]
             .as_array()
             .into_iter()
             .flatten()
-            .map(|window| (window, self.tab_title(id, window)))
+            .map(|window| (window, self.tab_title(id, window, &mut titles, snapshot)))
             .collect();
         let mut blocks = Vec::new();
         for (window, title) in &windows {
@@ -218,55 +297,80 @@ impl Rex {
             }
         }
         // Session rows also need live agent identity to decorate their tabs.
-        let mut entries = parallel_entries(&blocks, |&(window_id, window_name, block, pane)| {
-            let block_id = block["block_id"].as_str().unwrap();
-            let terminal = block["creator_name"] == "com.superlogical.terminal";
-            let process = if !terminal {
-                None
-            } else if focused == Some(block_id) {
-                focused_process.clone()
-            } else {
-                self.block_process(id, block_id).ok()
-            };
-            // Status is optional; process identity remains authoritative.
-            let running = process.as_ref().and_then(|process| {
-                let status = self
-                    .json(&["block", "call", "-s", id, "-b", block_id, "program_status"])
-                    .unwrap_or(Value::Null);
-                crate::agent::running(process, &status)
-            });
-            let Some(running) = running else {
-                let label = process
-                    .as_ref()
-                    .and_then(|p| p["foreground"]["name"].as_str())
-                    .or_else(|| block["label"].as_str().filter(|label| !label.is_empty()))
-                    .unwrap_or(if terminal { "terminal" } else { "pane" });
-                let mut entry = Entry::new(
-                    format!("{name} / {label} · pane {pane} · {window_name}"),
-                    process.as_ref().and_then(process_path).unwrap_or_default(),
-                    Source::Rex,
-                );
-                entry.session_id = Some(id.into());
-                entry.window_id = Some(window_id.into());
-                entry.block_id = Some(block_id.into());
-                return Ok(vec![entry]);
-            };
+        let inspected = parallel_entries(
+            &blocks,
+            snapshot.is_none(),
+            |&(window_id, window_name, block, pane)| {
+                let block_id = block["block_id"].as_str().unwrap();
+                let terminal = block["creator_name"] == "com.superlogical.terminal";
+                let process = if !terminal {
+                    None
+                } else if focused == Some(block_id) {
+                    focused_process.clone()
+                } else {
+                    self.block_metadata(id, block_id, "process", snapshot).ok()
+                };
+                // Status is optional; process identity remains authoritative.
+                let running = process.as_ref().and_then(|process| {
+                    let status = self
+                        .block_metadata(id, block_id, "program_status", snapshot)
+                        .unwrap_or(Value::Null);
+                    crate::agent::running(process, &status)
+                });
+                let Some(running) = running else {
+                    let label = process
+                        .as_ref()
+                        .and_then(|p| p["foreground"]["name"].as_str())
+                        .or_else(|| block["label"].as_str().filter(|label| !label.is_empty()))
+                        .unwrap_or(if terminal { "terminal" } else { "pane" });
+                    let mut entry = Entry::new(
+                        format!("{name} / {label} · pane {pane} · {window_name}"),
+                        process.as_ref().and_then(process_path).unwrap_or_default(),
+                        Source::Rex,
+                    );
+                    entry.session_id = Some(id.into());
+                    entry.window_id = Some(window_id.into());
+                    entry.block_id = Some(block_id.into());
+                    return Ok(vec![(entry, None)]);
+                };
 
-            let mut agent = Entry::new(
-                format!("{name} / {} · pane {pane} · {window_name}", running.app),
-                running.path,
-                Source::Agent,
-            );
-            agent.session_id = Some(id.into());
-            agent.agent = Some(Agent {
-                app: running.app.into(),
-                state: running.state,
-                session_name: name.into(),
-                window_id: window_id.into(),
-                block_id: block_id.into(),
-            });
-            Ok(vec![agent])
-        })?;
+                let mut agent = Entry::new(
+                    format!("{name} / {} · pane {pane} · {window_name}", running.app),
+                    running.path,
+                    Source::Agent,
+                );
+                agent.session_id = Some(id.into());
+                agent.agent = Some(Agent {
+                    app: running.app.into(),
+                    state: running.state,
+                    session_name: name.into(),
+                    window_id: window_id.into(),
+                    block_id: block_id.into(),
+                });
+                // Reuse the focused title fetched for an unnamed tab, including an
+                // empty/failed result. Fetch other agent titles in the bounded pane
+                // workers instead of serially after all process queries complete.
+                let title = if sessions {
+                    titles
+                        .get(block_id)
+                        .cloned()
+                        .unwrap_or_else(|| self.block_title(id, block_id, snapshot))
+                } else {
+                    None
+                };
+                Ok(vec![(agent, title)])
+            },
+        )?;
+        let agent_titles: BTreeMap<_, _> = inspected
+            .iter()
+            .filter_map(|(entry, title)| {
+                entry
+                    .agent
+                    .as_ref()
+                    .map(|agent| (agent.block_id.clone(), title.clone()))
+            })
+            .collect();
+        let mut entries: Vec<_> = inspected.into_iter().map(|(entry, _)| entry).collect();
         let mut session = None;
         if sessions {
             let mut entry = Entry::new(name, PathBuf::new(), Source::Rex);
@@ -279,10 +383,10 @@ impl Rex {
                     .collect();
                 let mut titles: Vec<_> = title.iter().cloned().collect();
                 for agent in &tab_agents {
-                    if let Some(title) = self.block_title(id, &agent.block_id)
-                        && !titles.contains(&title)
+                    if let Some(Some(title)) = agent_titles.get(&agent.block_id)
+                        && !titles.contains(title)
                     {
-                        titles.push(title);
+                        titles.push(title.clone());
                     }
                 }
                 if titles.is_empty() {
@@ -331,7 +435,13 @@ impl Rex {
         }
         Ok(entries)
     }
-    fn tab_title(&self, session: &str, window: &Value) -> Option<String> {
+    fn tab_title(
+        &self,
+        session: &str,
+        window: &Value,
+        titles: &mut BTreeMap<String, Option<String>>,
+        snapshot: Option<&SessionSnapshot>,
+    ) -> Option<String> {
         let label = window["label"].as_str().unwrap_or("");
         // Rex assigns unnamed tabs "Window <last eight ID characters>".
         // Their visible title comes from the focused terminal instead.
@@ -350,18 +460,42 @@ impl Rex {
             .iter()
             .flat_map(|layer| layer["blocks"].as_array().into_iter().flatten())
             .find(|block| block["block_id"] == focused)?;
-        if block["creator_name"] == "com.superlogical.terminal"
-            && let Some(title) = self.block_title(session, focused)
-        {
-            return Some(title);
+        if block["creator_name"] == "com.superlogical.terminal" {
+            let title = self.block_title(session, focused, snapshot);
+            titles.insert(focused.into(), title.clone());
+            if title.is_some() {
+                return title;
+            }
         }
         block["label"]
             .as_str()
             .filter(|label| !label.is_empty())
             .map(str::to_owned)
     }
-    fn block_title(&self, session: &str, block: &str) -> Option<String> {
-        self.json(&["block", "call", "-s", session, "-b", block, "title"])
+    fn block_metadata(
+        &self,
+        session: &str,
+        block: &str,
+        method: &str,
+        snapshot: Option<&SessionSnapshot>,
+    ) -> Result<Value> {
+        if let Some(snapshot) = snapshot {
+            return snapshot
+                .blocks
+                .get(block)
+                .and_then(|metadata| metadata.get(method))
+                .cloned()
+                .context("terminal metadata unavailable in Rex snapshot");
+        }
+        self.json(&["block", "call", "-s", session, "-b", block, method])
+    }
+    fn block_title(
+        &self,
+        session: &str,
+        block: &str,
+        snapshot: Option<&SessionSnapshot>,
+    ) -> Option<String> {
+        self.block_metadata(session, block, "title", snapshot)
             .ok()?["title"]
             .as_str()
             .filter(|title| !title.is_empty())
@@ -445,11 +579,12 @@ impl Rex {
 }
 /// Preserve catalog order while bounding discovery to four sessions and four panes
 /// per session at a time. Small/targeted queries need no worker thread.
-fn parallel_entries<T: Sync>(
+fn parallel_entries<T: Sync, U: Send>(
     items: &[T],
-    query: impl Fn(&T) -> Result<Vec<Entry>> + Sync,
-) -> Result<Vec<Entry>> {
-    if items.len() <= 1 {
+    parallel: bool,
+    query: impl Fn(&T) -> Result<Vec<U>> + Sync,
+) -> Result<Vec<U>> {
+    if !parallel || items.len() <= 1 {
         return items.iter().try_fold(Vec::new(), |mut entries, item| {
             entries.extend(query(item)?);
             Ok(entries)
@@ -460,7 +595,7 @@ fn parallel_entries<T: Sync>(
             .chunks(items.len().div_ceil(4))
             .map(|chunk| {
                 let query = &query;
-                scope.spawn(move || -> Result<Vec<Entry>> {
+                scope.spawn(move || -> Result<Vec<U>> {
                     chunk.iter().try_fold(Vec::new(), |mut entries, item| {
                         entries.extend(query(item)?);
                         Ok(entries)

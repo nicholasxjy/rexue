@@ -1803,6 +1803,7 @@ mod tests {
         fs::write(&executable,r#"#!/bin/sh
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --eval) printf 'Error: unknown flag: --eval' >&2; exit 2 ;;
     ls) printf '%s' '{"sessions":[{"session_id":"session:existing","label":"already-running"}]}'; exit 0 ;;
     inspect) printf '%s' '{"active_window_id":"window:one","windows":[{"window_id":"window:one","label":"Terminal","focused_block_id":"block:one","layers":[{"blocks":[{"block_id":"block:one","label":"shell"}]}]}]}'; exit 0 ;;
     process|pwd) printf '%s' '{}'; exit 0 ;;
@@ -1909,7 +1910,9 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     client) printf '%s' '{"clients":[{"client_id":"client:desk","info":{"kind":"app","label":"desk"},"connection_state":"connected"}]}'; exit 0 ;;
     actions) printf '%s' '{"actions":[{"name":"session.select"}]}'; exit 0 ;;
-    do) printf '%s' '{}'; exit 0 ;;
+    do)
+      if [ "$2" = '--eval' ]; then printf 'Error: unknown flag: --eval' >&2; exit 2; fi
+      printf '%s' '{}'; exit 0 ;;
     whoami) printf '{"session_id":"%s"}' "$REX_SESSION"; exit 0 ;;
     ls) printf '%s' '{"sessions":[{"session_id":"session:launcher","label":"launcher"},{"session_id":"session:one","label":"one"},{"session_id":"session:two","label":"two"}]}'; exit 0 ;;
     inspect) printf '%s' '{"windows":[]}'; exit 0 ;;

@@ -42,6 +42,8 @@ args=sys.argv[1:]
 while args and args[0].startswith('-'):
  if args[0] in ('--timeout','-S'):args=args[2:]
  else:args=args[1:]
+if args[:2]==['do','--eval']:
+ print('Error: unknown flag: --eval',file=sys.stderr);sys.exit(2)
 with (root/'rex-calls.jsonl').open('a') as f:f.write(json.dumps(args)+'\\n')
 state=root/'rex-sessions.json'
 sessions=json.loads(state.read_text()) if state.exists() else []

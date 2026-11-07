@@ -128,6 +128,8 @@ fixture=json.loads((root/'fixture.json').read_text())
 labels=json.loads((root/'labels.json').read_text()) if (root/'labels.json').exists() else {}
 a=sys.argv[4:]
 if a[:1]==['-S']:a=a[2:]
+if a[:2]==['do','--eval']:
+    print('Error: unknown flag: --eval',file=sys.stderr);sys.exit(2)
 with (root/'rex-calls.jsonl').open('a') as f:f.write(json.dumps(a)+'\\n')
 if (root/'agents-mode').exists():
     if a[:2]==['ls','--json']:
@@ -770,6 +772,10 @@ cancel = ['alt-q', 'alt-z']
             s.until(lambda: not tree.exists(), 'worktree confirmation did not remove checkout')
             s.expect('0/0'); s.send(b'\x1b')
             checks.append({'case':'worktree-confirm-cancel-then-safe-remove-and-refresh',**s.finish()})
+        except AssertionError:
+            transcript = [line.strip() for line in s.text().splitlines() if line.strip()]
+            print(json.dumps({'transcript': transcript[-35:], 'rex_calls': (root/'rex-calls.jsonl').read_text().splitlines()[-20:]}, ensure_ascii=False, indent=2))
+            raise
         finally:
             s.close()
 

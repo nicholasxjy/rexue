@@ -33,6 +33,8 @@ def main():
 root=pathlib.Path(__file__).parent
 args=sys.argv[4:]
 if args[:1]==['-S']:args=args[2:]
+if args[:2]==['do','--eval']:
+    print('Error: unknown flag: --eval',file=sys.stderr);sys.exit(2)
 with (root/'calls.jsonl').open('a') as f:f.write(json.dumps(args)+'\\n')
 sessions=json.loads((root/'sessions.json').read_text())
 current=json.loads((root/'current.json').read_text())
