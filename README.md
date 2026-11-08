@@ -4,7 +4,7 @@ An **fzf picker for Rex sessions, coding agents and Git worktrees**. Connect to 
 
 ## Demo
 
-![Git worktree picker](assets/s.png)
+![Rex session picker](assets/s.png)
 
 ## Install
 
