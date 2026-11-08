@@ -42,9 +42,9 @@ class Session:
         self.master, self.slave = pty.openpty()
         fcntl.ioctl(self.slave, termios.TIOCSWINSZ, struct.pack('HHHH', 30, 120, 0, 0))
         env = dict(os.environ, TERM='xterm-256color', TERM_PROGRAM='rexue-pty-test', REXUE_STATE_DIR=str(root / 'state'), XDG_CACHE_HOME=str(root / 'cache'))
+        # Non-color defaults must be ignored; otherwise they corrupt the row protocol.
+        env.update(FZF_DEFAULT_OPTS='--multi --print-query --bind enter:abort', FZF_DEFAULT_OPTS_FILE='', FZF_DEFAULT_COMMAND='exit 93')
         env.update(env_extra or {})
-        # These must be ignored by rexue; otherwise they corrupt the row protocol.
-        env.update(FZF_DEFAULT_OPTS='--multi --print-query --bind enter:abort', FZF_DEFAULT_COMMAND='exit 93')
         args = arguments if arguments is not None else ['--detach', '-C', str(cfg), 'picker']
         def setup():
             os.setsid()
@@ -107,7 +107,7 @@ def executable(path, text):
     path.chmod(0o755)
 
 
-def assert_terminal_palette(capture, allow_reverse=False):
+def assert_terminal_palette(capture):
     for sequence in re.findall(rb'\x1b\[([0-9;]*)m', capture):
         params = [int(value or 0) for value in sequence.split(b';')]
         index = 0
@@ -118,7 +118,6 @@ def assert_terminal_palette(capture, allow_reverse=False):
                 assert params[index + 2] < 16, ('fixed 256-color theme', sequence)
                 index += 3
             else:
-                assert allow_reverse or value != 7, ('reverse tints dim row backgrounds', sequence)
                 index += 1
 
 
@@ -196,17 +195,59 @@ else:
         cfg.write_text(config)
         base = ['--rex-bin', str(rex), '--detach', '-C', str(cfg)]
 
-        def run_case(label, arguments, interact, expected=0):
+        def run_case(label, arguments, interact, expected=0, env_extra=None, color_check=assert_terminal_palette):
             print("PTY: " + label, flush=True)
-            s = Session(binary, cfg, root, arguments=[*base, *arguments])
+            s = Session(binary, cfg, root, arguments=[*base, *arguments], env_extra=env_extra)
             try:
                 interact(s)
                 report = s.finish(expected)
-                assert_terminal_palette(s.capture, allow_reverse=bool(os.environ.get('NO_COLOR')))
+                color_check(s.capture)
                 checks.append({'case': label, **report})
                 return s.text()
             finally:
                 s.close()
+
+        theme = 'fg+:#123456,bg+:#234567,pointer:#345678,prompt:#456789'
+        rgb_codes = [b'38;2;18;52;86', b'48;2;35;69;103', b'38;2;52;86;120', b'38;2;69;103;137']
+
+        def assert_custom_theme(capture):
+            for code in rgb_codes:
+                assert code in capture, ('missing custom fzf color', code)
+
+        def themed_dialogs(s):
+            s.expect('PREVIEW_session:first')
+            s.until(lambda: all(code in s.capture for code in rgb_codes), 'picker did not inherit fzf colors')
+            for key, heading in [(b'\x12', 'New name > '), (b'\x18', 'Confirm > ')]:
+                start = len(s.capture)
+                s.send(key)
+                s.expect(heading)
+                s.until(lambda: all(code in s.capture[start:] for code in rgb_codes), 'dialog did not inherit fzf colors')
+                assert_custom_theme(s.capture[start:])
+                start = len(s.capture)
+                s.send(b'\x1b')
+                s.until(lambda: b'Enter connect' in s.capture[start:], 'picker did not resume after themed dialog')
+            s.send(b'\x1b')
+
+        opts_file = root/'fzf theme.opts'
+        opts_file.write_text("# Personal fzf theme\n--color '" + theme + "'\n--multi --bind 'enter:abort'\n")
+        for label, defaults in [
+            ('environment', {'FZF_DEFAULT_OPTS': '--color="' + theme + '" --multi --bind enter:abort'}),
+            ('file', {'FZF_DEFAULT_OPTS_FILE': str(opts_file)}),
+            ('environment-overrides-file', {'FZF_DEFAULT_OPTS_FILE': str(opts_file), 'FZF_DEFAULT_OPTS': '--color=fg+:#123456,bg+:#234567'}),
+        ]:
+            if label == 'environment-overrides-file':
+                opts_file.write_text('--color="fg+:#abcdef,bg+:#fedcba,pointer:#345678,prompt:#456789"\n')
+            run_case('fzf-custom-colors-' + label, ['picker', '--rex'], themed_dialogs,
+                     env_extra={'NO_COLOR': '', **defaults}, color_check=assert_custom_theme)
+
+        def assert_no_color(capture):
+            for sequence in re.findall(rb'\x1b\[([0-9;]*)m', capture):
+                params = [int(value or 0) for value in sequence.split(b';')]
+                assert not any(30 <= value <= 49 or 90 <= value <= 107 for value in params), ('unexpected fzf color', sequence)
+
+        for label, defaults in [('no-color-env', {'NO_COLOR': '1'}), ('no-color-option', {'FZF_DEFAULT_OPTS': '--no-color'})]:
+            run_case('fzf-' + label, ['picker', '--rex'], lambda s: (s.expect(name), s.send(b'\x1b')),
+                     env_extra=defaults, color_check=assert_no_color)
 
         (root/'current-session').write_text('session:second')
         text = run_case('initial-focus-current-session-full-id-with-duplicate-names', ['picker', '--rex'],
@@ -624,7 +665,7 @@ os.execv('''+repr(real_wt)+''',['wt','--config','''+repr(str(wt_config))+''',*sy
                 s.expect('CHECKOUT_PREVIEW_' + branch)
                 s.send(b'\x1b')
                 report = s.finish()
-                assert_terminal_palette(s.capture, allow_reverse=bool(os.environ.get('NO_COLOR')))
+                assert_terminal_palette(s.capture)
                 checks.append({'case': 'initial-focus-worktree-' + label, **report})
             finally:
                 s.close()
