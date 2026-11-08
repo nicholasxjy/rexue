@@ -49,6 +49,8 @@ path = "~/Projects/app"
 icon = ""
 
 [tui]
+# Colors default to the terminal palette; customize with fzf --color/--no-color
+# in FZF_DEFAULT_OPTS_FILE or FZF_DEFAULT_OPTS (the latter takes precedence).
 # Show unified tab icons and Rex program artwork for panes; character icons use a Nerd Font.
 show_icons = true
 prompt = "> "

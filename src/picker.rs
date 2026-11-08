@@ -612,7 +612,7 @@ fn rows(state: &Mutex<Catalog>, query: &str) -> Result<Vec<u8>> {
             pattern
         };
         let mut command = Command::new("fzf");
-        clean_fzf_env(&mut command);
+        clean_fzf_env(&mut command)?;
         let output = pipe_output(
             command.args([
                 "--read0",
@@ -666,8 +666,8 @@ fn rows(state: &Mutex<Catalog>, query: &str) -> Result<Vec<u8>> {
     Ok(matched)
 }
 
-fn clean_fzf_env(command: &mut Command) {
-    // Protocol and callback integrity cannot depend on personal fzf defaults.
+fn clean_fzf_env(command: &mut Command) -> Result<()> {
+    // Only inherit colors; other personal defaults can corrupt the row protocol.
     command
         .env_remove("FZF_DEFAULT_OPTS")
         .env_remove("FZF_DEFAULT_OPTS_FILE")
@@ -675,6 +675,35 @@ fn clean_fzf_env(command: &mut Command) {
         .env_remove("FZF_API_KEY")
         .env_remove("FZF_FILTER")
         .env("SHELL", "/bin/sh");
+    // Terminal palette entries follow live theme changes; 256-color grays do not.
+    if std::env::var_os("NO_COLOR").is_none_or(|value| value.is_empty()) {
+        command.arg("--color=16");
+    }
+    if let Some(path) = std::env::var_os("FZF_DEFAULT_OPTS_FILE").filter(|path| !path.is_empty()) {
+        let defaults = std::fs::read_to_string(&path)
+            .with_context(|| format!("read fzf defaults from {}", Path::new(&path).display()))?;
+        command.args(fzf_color_args(&defaults).context("parse FZF_DEFAULT_OPTS_FILE")?);
+    }
+    command.args(
+        fzf_color_args(&std::env::var("FZF_DEFAULT_OPTS").unwrap_or_default())
+            .context("parse FZF_DEFAULT_OPTS")?,
+    );
+    Ok(())
+}
+fn fzf_color_args(defaults: &str) -> Result<Vec<String>> {
+    let mut args = shell_words::split(defaults)?.into_iter();
+    let mut colors = Vec::new();
+    while let Some(arg) = args.next() {
+        if arg == "--color" {
+            colors.push(format!(
+                "--color={}",
+                args.next().context("fzf --color requires a value")?
+            ));
+        } else if arg.starts_with("--color=") || arg == "--no-color" {
+            colors.push(arg);
+        }
+    }
+    Ok(colors)
 }
 fn pipe_output(command: &mut Command, input: Vec<u8>) -> Result<Output> {
     let mut child = command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()
@@ -723,7 +752,7 @@ fn check_fzf() -> Result<()> {
 }
 fn finder(options: &PickerOptions, bridge: &Bridge, header: &str, query: &str) -> Result<Output> {
     let mut command = Command::new("fzf");
-    clean_fzf_env(&mut command);
+    clean_fzf_env(&mut command)?;
     command
         .env("REXUE_PICKER_EXE", std::env::current_exe()?)
         .env("REXUE_PICKER_SOCKET", &bridge.socket)
@@ -740,11 +769,6 @@ fn finder(options: &PickerOptions, bridge: &Bridge, header: &str, query: &str) -
             "--with-nth=3..",
             "--highlight-line",
         ])
-        .arg(if options.native_icons {
-            "--color=fg+:-1:regular,pointer:-1,gutter:-1"
-        } else {
-            "--color=fg+:-1:regular:reverse,bg+:-1,pointer:-1:reverse,gutter:-1"
-        })
         .arg(format!("--prompt={}", clean(&options.prompt)))
         .arg(format!("--ghost={}", clean(&options.placeholder)))
         .arg(format!("--pointer={}", clean(&options.pointer)))
@@ -984,7 +1008,7 @@ fn confirm(entry: &Entry, bindings: &Keybindings) -> Result<bool> {
         "Remove this worktree using Worktrunk? This also closes all associated Rex sessions, tabs, panes and agents."
     };
     let mut command = Command::new("fzf");
-    clean_fzf_env(&mut command);
+    clean_fzf_env(&mut command)?;
     command
         .args([
             "--read0",
@@ -1055,7 +1079,7 @@ fn text_prompt(
         .collect::<Vec<_>>()
         .join(" · ");
     let mut command = Command::new("fzf");
-    clean_fzf_env(&mut command);
+    clean_fzf_env(&mut command)?;
     command
         .args([
             "--read0",
@@ -1388,6 +1412,25 @@ fn display_tab(name: &str, is_agent: bool, options: &PickerOptions) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn personal_fzf_defaults_inherit_only_colors_in_order() {
+        assert_eq!(
+            fzf_color_args(
+                "# theme\n--multi --color 'light,fg+:#123456, bg+:#234567' \\\n                 --bind 'enter:abort' --print-query --color=pointer:red --no-color"
+            )
+            .unwrap(),
+            [
+                "--color=light,fg+:#123456, bg+:#234567",
+                "--color=pointer:red",
+                "--no-color"
+            ]
+        );
+        assert!(fzf_color_args("").unwrap().is_empty());
+        assert!(fzf_color_args("--color").is_err());
+        assert!(fzf_color_args("--color='unterminated").is_err());
+    }
+
     #[cfg(unix)]
     #[test]
     fn expected_actions_survive_fzf_no_match_exit_status() {
