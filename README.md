@@ -4,8 +4,6 @@ An **fzf picker for Rex sessions, coding agents and Git worktrees**. Connect to 
 
 ## Demo
 
-![Sessions, agents and directory history](assets/s1.png)
-
 ![Git worktree picker](assets/s.png)
 
 ## Install
@@ -23,23 +21,22 @@ Optional dependencies:
 
 ```sh
 brew install git worktrunk # Worktrees: wt 0.81.0+.
-brew install zoxide       # Directory history; also enable its shell integration.
 ```
 
-See [zoxide setup](https://github.com/ajeetdsouza/zoxide#installation). For a local checkout, use `cargo install --locked --path .`.
+For a local checkout, use `cargo install --locked --path .`.
 
 ## Use
 
 ```sh
 rexue                        # Open the picker.
-rexue list                   # List all sources.
+rexue list                   # List live sessions.
 rexue list --agents          # List running agents.
 rexue connect ~/Projects/app # Create or reuse a session.
 rexue connect app            # Resolve a session name or configured alias.
 rexue last                   # Return to the previous session.
 ```
 
-The picker combines live sessions, agents, configured projects, zoxide history and registered worktrees. Sessions expand into tabs and panes; Enter focuses the selected target. `picker --agents` shows a flat agent list. See [picker settings](docs/CONFIGURATION.md#picker-settings) for titles, icons and initial focus.
+The picker lists live Rex sessions. Sessions expand into tabs and panes; Enter focuses the selected target. `picker --agents` shows a flat agent list. See [picker settings](docs/CONFIGURATION.md#picker-settings) for titles, icons and initial focus.
 
 **Enter** connects, **Esc** cancels, **Ctrl+J/K** moves, **Ctrl+O** toggles preview, **Ctrl+R** renames a session and **Ctrl+X** requests removal. Customize these in [`[tui.keybindings]`](docs/CONFIGURATION.md#keybindings).
 
@@ -72,7 +69,7 @@ alias = "a"
 preview = true
 ```
 
-Run `rexue connect a`. Add `startup_command` to run a command on creation, or `[[worktree]]` with a repository `path` to include its checkouts. Override the file with `-C PATH`. See the [editable example](examples/rexue.toml) and [configuration reference](docs/CONFIGURATION.md).
+Run `rexue connect a`. Add `startup_command` to run a command on creation, or `[[worktree]]` with a repository `path` to register it for worktree commands. Configured projects remain available through `connect`; they appear in the session picker once running. Override the file with `-C PATH`. See the [editable example](examples/rexue.toml) and [configuration reference](docs/CONFIGURATION.md).
 
 For shortcuts, merge [Alt+S: floating picker](examples/rex-picker-floating.lua) or [Cmd+Shift+P: new tab](examples/rex-picker.lua) into [Rex's `init.lua`](https://www.superlogical.com/rex/docs/customize/config), then run `rex config check && rex config reload`.
 

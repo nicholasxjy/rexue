@@ -40,6 +40,12 @@ fn public_commands_cover_only_sessions_worktrees_and_completion() {
     }
     for args in [
         vec!["list", "--panes"],
+        vec!["list", "--zoxide"],
+        vec!["list", "--config"],
+        vec!["list", "--hide-duplicates"],
+        vec!["picker", "--zoxide"],
+        vec!["picker", "--config"],
+        vec!["picker", "--no-cache"],
         vec!["list", "--tmux"],
         vec!["connect", "project", "--switch"],
         vec!["rename", "project", "--enrich"],
@@ -72,6 +78,10 @@ fn removed_configuration_is_rejected_without_compatibility_mapping() {
         "[tui]\nwindow_name_format='{name}'",
         "[icons.tmux]\nicon='X'",
         "sort_order=['tmux']",
+        "sort_order=['zoxide']",
+        "[icons.zoxide]\nicon='X'",
+        "cache=true",
+        "[frecency]\nlist_command='true'",
         "[icons.rex-block]\nicon='X'",
         "[[worktree]]\npath='/project'\nbase_branch='main'",
     ] {

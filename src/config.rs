@@ -1,4 +1,4 @@
-//! Configuration for Rex sessions, directory history and Worktrunk repositories.
+//! Configuration for Rex sessions and Worktrunk repositories.
 use crate::keybindings::{DEFAULT_BINDINGS, Keybindings};
 use crate::model::{Entry, Source};
 use anyhow::{Context, Result, bail};
@@ -26,8 +26,6 @@ pub struct Config {
     pub git_namer_use_worktree_root: bool,
     pub separator_aware: bool,
     pub name_substitution: Vec<NameSubstitution>,
-    pub frecency: FrecencyConfig,
-    pub cache: bool,
     pub strict_mode: bool,
     #[serde(rename = "import")]
     pub import_paths: Vec<String>,
@@ -48,8 +46,6 @@ impl Default for Config {
             git_namer_use_worktree_root: false,
             separator_aware: false,
             name_substitution: Vec::new(),
-            frecency: FrecencyConfig::default(),
-            cache: false,
             strict_mode: false,
             import_paths: Vec::new(),
             icons: BTreeMap::new(),
@@ -85,16 +81,7 @@ impl NameSubstitution {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct FrecencyConfig {
-    pub list_command: Option<String>,
-    pub query_command: Option<String>,
-    pub add_command: Option<String>,
-    pub remove_command: Option<String>,
-}
-
-/// A source name, or sources interleaved by score in one group.
+/// A source name, or an ordered group of source names.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum SortGroup {
@@ -482,11 +469,9 @@ impl Config {
             }
         }
         for (source, icon) in &self.icons {
-            if !["agent", "rex", "config", "zoxide", "directory", "worktree"]
-                .contains(&source.as_str())
-            {
+            if !["agent", "rex", "config", "directory", "worktree"].contains(&source.as_str()) {
                 bail!(
-                    "unknown icons source {source:?}; use agent, rex, config, zoxide, directory, or worktree"
+                    "unknown icons source {source:?}; use agent, rex, config, directory, or worktree"
                 );
             }
             let color = icon.color.to_lowercase();
@@ -557,11 +542,9 @@ impl Config {
                 bail!("sort_order groups must not be empty");
             }
             for source in sources {
-                if !["agent", "rex", "config", "zoxide", "directory", "worktree"]
-                    .contains(&source.as_str())
-                {
+                if !["agent", "rex", "config", "directory", "worktree"].contains(&source.as_str()) {
                     bail!(
-                        "unknown sort_order source {source:?}; use agent, rex, config, zoxide, directory, or worktree"
+                        "unknown sort_order source {source:?}; use agent, rex, config, directory, or worktree"
                     );
                 }
             }
@@ -668,8 +651,6 @@ fn check_unknown_keys(value: &mut toml::Value, kind: &str, strict: bool) -> Resu
             "git_namer_use_worktree_root",
             "separator_aware",
             "name_substitution",
-            "frecency",
-            "cache",
             "strict_mode",
             "import",
             "icons",
@@ -712,12 +693,6 @@ fn check_unknown_keys(value: &mut toml::Value, kind: &str, strict: bool) -> Resu
             &binding_names
         }
         "name_substitution" => &["find", "replace", "regex"],
-        "frecency" => &[
-            "list_command",
-            "query_command",
-            "add_command",
-            "remove_command",
-        ],
         "source_icon" => &["icon", "color"],
         "icons" => {
             for (_, value) in table.iter_mut() {
@@ -1310,7 +1285,7 @@ mod tests {
     fn regex_substitution_and_source_icons() {
         let config = Config::parse(
             r#"
-sort_order = ["rex", ["config", "zoxide"]]
+sort_order = ["rex", ["agent", "config"]]
 [[name_substitution]]
 find = '^~/projects/(.*)$'
 replace = '$1'

@@ -1,10 +1,9 @@
 # Save as $XDG_CONFIG_HOME/rexue/rexue.toml (or ~/.config/rexue/rexue.toml).
 # Explicit --config-file paths must exist. Unknown fields are errors in strict mode.
 strict_mode = true
-cache = false
 import = [] # Exact filenames; append session, wildcard and worktree definitions.
 blacklist = ["scratch"]
-sort_order = ["rex", "agent", ["config", "zoxide"], "directory", "worktree"]
+sort_order = ["rex", "agent"]
 dir_length = 1
 git_dir_length = 1
 git_namer_use_worktree_root = false
@@ -23,10 +22,6 @@ color = "magenta"
 icon = ""
 color = "blue"
 
-[icons.config]
-icon = ""
-color = "bright-black"
-
 [default_session]
 preview_command = "ls -la {}"
 
@@ -44,13 +39,6 @@ alias_auto_connect = true
 startup_command = ""
 disable_startup_command = false
 icon = ""
-
-# zoxide is used by default. Optional nonempty commands replace each operation.
-# [frecency]
-# list_command = "zoxide query --list --score"
-# query_command = "zoxide query -- {}"
-# add_command = "zoxide add -- {}"
-# remove_command = "zoxide remove -- {}"
 
 # Worktrunk manages paths, branches, hooks and approvals.
 # Removing a worktree also closes its Rex sessions, tabs, panes and agents.

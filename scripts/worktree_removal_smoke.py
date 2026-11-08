@@ -76,16 +76,15 @@ else:
         run('git', 'init', '--quiet', '-b', 'main', str(seed))
         run('git', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false',
             'commit', '--quiet', '--allow-empty', '-m', 'fixture', cwd=seed)
-        for case, global_picker, empty_worktrees, other_sessions in [
-            ('noncurrent-worktree-closes-related-sessions', False, False, True),
-            ('current-worktree-first-row', False, False, True),
-            ('global-current-worktree-first-row', True, False, True),
-            ('current-worktree-creates-first-session', False, False, False),
-            ('current-worktree-switch-fails', False, False, True),
-            ('current-worktree-close-fails', False, False, True),
-            ('cli-current-worktree', False, False, True),
-            ('last-worktree-first-session', False, True, True),
-            ('last-worktree-no-other-sessions', False, True, False),
+        for case, empty_worktrees, other_sessions in [
+            ('noncurrent-worktree-closes-related-sessions', False, True),
+            ('current-worktree-first-row', False, True),
+            ('current-worktree-creates-first-session', False, False),
+            ('current-worktree-switch-fails', False, True),
+            ('current-worktree-close-fails', False, True),
+            ('cli-current-worktree', False, True),
+            ('last-worktree-first-session', True, True),
+            ('last-worktree-no-other-sessions', True, False),
         ]:
             print('PTY: ' + case, flush=True)
             repository = root/(case + '-repo')
@@ -125,11 +124,11 @@ else:
             (root/'sessions.json').write_text(json.dumps(sessions))
             (root/'current.json').write_text(json.dumps(current_id))
             (root/'calls.jsonl').write_text('')
-            config.write_text('strict_mode=true\n[frecency]\nlist_command="true"\nadd_command="true"\n[tui]\npreview=false\n[[worktree]]\npath=' + json.dumps(str(repository)) + '\n')
+            config.write_text('strict_mode=true\n[tui]\npreview=false\n[[worktree]]\npath=' + json.dumps(str(repository)) + '\n')
             if case == 'noncurrent-worktree-closes-related-sessions':
                 config.write_text('blacklist=["duplicate"]\n' + config.read_text())
             cli_remove = case == 'cli-current-worktree'
-            picker = ['picker'] if global_picker else ['worktree', 'picker', '--path', str(current_tree)]
+            picker = ['worktree', 'picker', '--path', str(current_tree)]
             arguments = ['worktree', 'remove', branch, '--path', str(current_tree), '--json'] if cli_remove else [*picker, '--query=' + branch]
             s = Session(binary, config, root, arguments=['--rex-bin', str(rex), '-C', str(config), *arguments], env_extra=env, cwd=nested)
             try:

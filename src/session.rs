@@ -20,12 +20,8 @@ use std::{
 pub struct ListOptions {
     pub agents: bool,
     pub rex: bool,
-    pub config: bool,
-    pub zoxide: bool,
     pub hide_attached: bool,
-    pub hide_duplicates: bool,
     pub blacklisted: bool,
-    pub no_cache: bool,
     pub picker_block: Option<String>,
 }
 #[derive(Debug, Clone, Default)]
@@ -60,12 +56,6 @@ struct State {
     paths: HashMap<String, PathBuf>,
     #[serde(default)]
     history: HashMap<String, Vec<String>>,
-}
-#[derive(Serialize, Deserialize)]
-struct Cache {
-    time: u64,
-    scope: String,
-    entries: Vec<Entry>,
 }
 impl Manager {
     pub fn new(rex: Rex, config: Config) -> Self {
@@ -113,9 +103,6 @@ impl Manager {
     fn save(&self, state: &State) -> Result<()> {
         atomic_json(&self.state_dir.join("state.json"), state)
     }
-    pub fn invalidate(&self) {
-        let _ = fs::remove_file(self.state_dir.join("list.json"));
-    }
     fn restore_paths(&self, entries: &mut [Entry], state: &State) {
         for entry in entries {
             if entry.path.as_os_str().is_empty()
@@ -125,104 +112,23 @@ impl Manager {
             }
         }
     }
-    fn frecency_override(&self, operation: &str) -> Result<Option<&str>> {
-        let script = match operation {
-            "list" => self.config.frecency.list_command.as_deref(),
-            "query" => self.config.frecency.query_command.as_deref(),
-            "add" => self.config.frecency.add_command.as_deref(),
-            "remove" => self.config.frecency.remove_command.as_deref(),
-            _ => bail!("unknown frecency operation {operation}"),
-        };
-        Ok(script.filter(|command| !command.is_empty()))
-    }
-    fn frecency(&self, operation: &str, value: &str) -> Result<String> {
-        if let Some(script) = self.frecency_override(operation)? {
-            return frecency_command(script, value);
-        }
-        let mut cmd = Command::new("zoxide");
-        match operation {
-            "list" => {
-                cmd.args(["query", "--list", "--score"]);
-            }
-            "query" => {
-                cmd.args(["query", "--", value]);
-            }
-            _ => {
-                cmd.args([operation, "--", value]);
-            }
-        }
-        process::text(&mut cmd)
-    }
-    fn frecency_entries(&self, no_cache: bool) -> Result<Vec<Entry>> {
-        // Only cache frecency. Rex sessions and resolved config must remain live.
-        let scope = fingerprint(&format!("{:?}", self.config));
-        if self.config.cache
-            && !no_cache
-            && let Ok(bytes) = fs::read(self.state_dir.join("list.json"))
-            && let Ok(cache) = serde_json::from_slice::<Cache>(&bytes)
-            && cache.scope == scope
-            && now().saturating_sub(cache.time) < 5
-        {
-            return Ok(cache.entries);
-        }
-        let entries = match self.frecency("list", "") {
-            Ok(output) => parse_frecency(&output),
-            Err(error)
-                if self.frecency_override("list")?.is_none()
-                    && format!("{error:#}").contains("could not start") =>
-            {
-                Vec::new()
-            }
-            Err(error) => return Err(error).context("could not list frecency directories"),
-        };
-        if self.config.cache {
-            atomic_json(
-                &self.state_dir.join("list.json"),
-                &Cache {
-                    time: now(),
-                    scope,
-                    entries: entries.clone(),
-                },
-            )?;
-        }
-        Ok(entries)
-    }
     fn collect(&self, opts: &ListOptions) -> Result<Vec<Entry>> {
-        let selected = opts.agents || opts.rex || opts.config || opts.zoxide;
-        let mut entries = Vec::new();
         let configs = self.config.entries()?;
-        if !selected || opts.rex || opts.agents {
-            let mut live = self.rex.list_sources_excluding_picker(
-                !selected || opts.rex,
-                !selected || opts.agents,
-                opts.picker_block.as_deref(),
-            )?;
-            self.restore_paths(&mut live, &self.state()?);
-            for entry in live.iter_mut().filter(|e| e.source == Source::Rex) {
-                if let Some(config) = configs.iter().find(|c| {
-                    c.name == entry.name
-                        || (!entry.path.as_os_str().is_empty() && same_path(&c.path, &entry.path))
-                }) {
-                    entry.icon = config.icon.clone();
-                    entry.alias = config.alias.clone();
-                    entry.alias_auto_connect = config.alias_auto_connect;
-                }
+        let mut entries = self.rex.list_sources_excluding_picker(
+            opts.rex || !opts.agents,
+            opts.agents,
+            opts.picker_block.as_deref(),
+        )?;
+        self.restore_paths(&mut entries, &self.state()?);
+        for entry in entries.iter_mut().filter(|entry| entry.is_session()) {
+            if let Some(config) = configs.iter().find(|config| {
+                config.name == entry.name
+                    || (!entry.path.as_os_str().is_empty() && same_path(&config.path, &entry.path))
+            }) {
+                entry.icon = config.icon.clone();
+                entry.alias = config.alias.clone();
+                entry.alias_auto_connect = config.alias_auto_connect;
             }
-            entries.extend(live);
-        }
-        if !selected || opts.config {
-            entries.extend(configs.iter().cloned());
-        }
-        if !selected || opts.zoxide {
-            entries.extend(self.frecency_entries(opts.no_cache)?);
-        }
-        if !selected {
-            entries.extend(
-                crate::worktree::Worktrees::new(&self.config)
-                    .list_all()?
-                    .iter()
-                    .map(|e| e.entry()),
-            );
         }
         for entry in &mut entries {
             entry.icon = self.entry_icon(entry)?;
@@ -232,7 +138,6 @@ impl Manager {
                 }
             }
         }
-        // TUI resolves source icons when no custom icon applies.
         Ok(entries)
     }
     fn entry_icon(&self, entry: &Entry) -> Result<Option<String>> {
@@ -284,13 +189,11 @@ impl Manager {
                 entries.retain(|e| e.session_id.as_deref() != Some(id));
             }
         }
-        if opts.hide_duplicates {
-            entries = dedup_entries(entries);
-        }
         Ok(entries)
     }
     pub fn resolve_entry(&self, target: &str) -> Result<Entry> {
-        let mut target = clean_target(target, &self.config.entries()?);
+        let configs = self.config.entries()?;
+        let mut target = clean_target(target, &configs);
         for icon in self
             .config
             .icons
@@ -313,12 +216,11 @@ impl Manager {
         }) {
             target = session.name.clone();
         }
-        let entries = self.collect(&ListOptions {
+        let mut entries = self.collect(&ListOptions {
             rex: true,
-            config: true,
-            no_cache: true,
             ..Default::default()
         })?;
+        entries.extend(configs);
         let exact: Vec<_> = entries
             .iter()
             .filter(|e| e.session_id.as_deref() == Some(&target))
@@ -373,23 +275,6 @@ impl Manager {
         if target.starts_with("session:") {
             bail!("session {target} no longer exists");
         }
-        match self.frecency("query", &target) {
-            Ok(output) => {
-                if let Some(entry) = parse_frecency(&output).into_iter().next()
-                    && entry.path.is_dir()
-                {
-                    return Ok(Entry::new(
-                        self.name(&entry.path)?,
-                        entry.path,
-                        Source::Directory,
-                    ));
-                }
-            }
-            Err(error) if self.frecency_override("query")?.is_some() => {
-                return Err(error).context("frecency query failed");
-            }
-            Err(_) => {}
-        }
         bail!("no session, configuration, or directory matches {target:?}")
     }
     fn resolve_agent(&self, block_id: &str) -> Result<Entry> {
@@ -426,23 +311,7 @@ impl Manager {
             )?;
             return self.connect_path(&prepared.path, opts);
         }
-        self.connect_resolved(opts, Some(&entry), || {
-            // Alias-only rows can be synthesized outside the fetched sources.
-            // Complete their typed config identity by exact key, never by the
-            // human-target parser that strips decoration or expands aliases.
-            if entry.source == Source::Config
-                && entry.session_id.is_none()
-                && entry.path.as_os_str().is_empty()
-            {
-                return self
-                    .config
-                    .entries()?
-                    .into_iter()
-                    .find(|configured| configured.name == entry.name)
-                    .context("configured picker target no longer exists");
-            }
-            Ok(entry.clone())
-        })
+        self.connect_resolved(opts, Some(&entry), || Ok(entry.clone()))
     }
     /// Connect a known directory without interpreting it as an alias or label.
     pub fn connect_path(&self, path: &Path, opts: &ConnectOptions) -> Result<Connection> {
@@ -691,7 +560,6 @@ impl Manager {
             // Keep a created session discoverable even if app selection fails.
             state.paths.insert(created.session_id.clone(), path.clone());
             self.save(&state)?;
-            self.invalidate();
             Connection {
                 session_id: created.session_id,
                 name: entry.name,
@@ -743,12 +611,6 @@ impl Manager {
             .paths
             .insert(result.session_id.clone(), result.path.clone());
         self.save(&state)?;
-        self.invalidate();
-        if !result.path.as_os_str().is_empty()
-            && let Err(error) = self.frecency("add", &result.path.to_string_lossy())
-        {
-            eprintln!("rexue: could not record directory: {error:#}");
-        }
         Ok(result)
     }
     pub fn name(&self, path: &Path) -> Result<String> {
@@ -815,7 +677,6 @@ impl Manager {
         }
         if name != entry.name {
             self.rex.rename(id, name)?;
-            self.invalidate();
         }
         Ok(())
     }
@@ -831,9 +692,7 @@ impl Manager {
             Source::Rex => self
                 .rex
                 .kill(entry.session_id.as_deref().context("session has no ID")?)?,
-            Source::Zoxide | Source::Directory => {
-                self.frecency("remove", &entry.path.to_string_lossy())?;
-            }
+            Source::Directory => bail!("directory entries cannot be removed"),
             Source::Worktree => {
                 (_, removal) = self.remove_worktree(
                     &crate::worktree::Selection {
@@ -845,7 +704,6 @@ impl Manager {
             }
             _ => bail!("configured sessions cannot be removed here; edit rexue.toml"),
         };
-        self.invalidate();
         Ok(removal)
     }
     pub fn remove_worktree(
@@ -897,7 +755,6 @@ impl Manager {
             None
         };
         let result = worktrees.remove(selection, &entry.path.to_string_lossy(), options)?;
-        self.invalidate();
         let pending = match repository {
             Some(repository) => Some(WorktreeRemoval {
                 session_ids,
@@ -938,7 +795,6 @@ impl Manager {
             None => self
                 .list(&ListOptions {
                     rex: true,
-                    no_cache: true,
                     ..Default::default()
                 })?
                 .into_iter()
@@ -955,7 +811,6 @@ impl Manager {
         // Picker teardown restores the terminal before closing its host session.
         // A failed connection leaves that session available for recovery.
         self.close_worktree_sessions(&removal.session_ids)?;
-        self.invalidate();
         Ok(connection)
     }
 }
@@ -1131,30 +986,6 @@ fn available_directory_name(base: &str, path: &Path, entries: &[Entry]) -> Strin
     candidate
 }
 
-fn dedup_entries(entries: Vec<Entry>) -> Vec<Entry> {
-    let live_names: HashSet<_> = entries
-        .iter()
-        .filter(|e| e.source == Source::Rex)
-        .map(|e| e.name.clone())
-        .collect();
-    let kept_config = |e: &Entry| e.source == Source::Config && !live_names.contains(&e.name);
-    let paths: HashSet<_> = entries
-        .iter()
-        .filter(|e| e.source == Source::Rex || kept_config(e))
-        .filter(|e| !e.path.as_os_str().is_empty())
-        .map(|e| normalize(&e.path))
-        .collect();
-    entries
-        .into_iter()
-        .filter(|e| match e.source {
-            Source::Config => !live_names.contains(&e.name),
-            Source::Zoxide | Source::Worktree => {
-                e.path.as_os_str().is_empty() || !paths.contains(&normalize(&e.path))
-            }
-            _ => true,
-        })
-        .collect()
-}
 // A naming query only; lifecycle and discovery for managed entries use wt.
 fn git_anchor(path: &Path) -> Result<PathBuf> {
     let output = process::text(Command::new("git").arg("-C").arg(path).args([
@@ -1262,41 +1093,6 @@ fn fingerprint(value: &impl Hash) -> String {
     value.hash(&mut hash);
     format!("{:016x}", hash.finish())
 }
-fn frecency_command(script: &str, value: &str) -> Result<String> {
-    // Parse first, substitute second: a query/path is always one argument,
-    // even when it contains whitespace, quotes, or shell metacharacters.
-    let mut args = shell_words::split(script)
-        .context("invalid frecency command quoting")?
-        .into_iter();
-    let executable = args.next().context("frecency command is empty")?;
-    let mut command = Command::new(executable);
-    command.args(args.map(|arg| arg.replace("{}", value)));
-    process::text(&mut command)
-}
-fn parse_frecency(output: &str) -> Vec<Entry> {
-    output
-        .lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            if line.is_empty() {
-                return None;
-            }
-            let (score, path) = match line.split_once(char::is_whitespace) {
-                Some((prefix, rest)) => match prefix.parse::<f64>() {
-                    Ok(score) if score.is_finite() => (score, rest.trim_start()),
-                    _ => (0., line),
-                },
-                None => (0., line),
-            };
-            if path.is_empty() {
-                return None;
-            }
-            let mut entry = Entry::new(abbreviate(Path::new(path)), path, Source::Zoxide);
-            entry.score = score;
-            Some(entry)
-        })
-        .collect()
-}
 fn is_blacklisted(config: &Config, entry: &Entry) -> bool {
     config
         .blacklist
@@ -1324,7 +1120,6 @@ fn order_entries(entries: Vec<Entry>, order: &[SortGroup]) -> Vec<Entry> {
                 "agent" => Some(Source::Agent),
                 "rex" => Some(Source::Rex),
                 "config" => Some(Source::Config),
-                "zoxide" => Some(Source::Zoxide),
                 "directory" => Some(Source::Directory),
                 "worktree" => Some(Source::Worktree),
                 _ => None,
@@ -1339,7 +1134,6 @@ fn order_entries(entries: Vec<Entry>, order: &[SortGroup]) -> Vec<Entry> {
         Source::Rex,
         Source::Agent,
         Source::Config,
-        Source::Zoxide,
         Source::Directory,
         Source::Worktree,
     ] {
@@ -1347,24 +1141,11 @@ fn order_entries(entries: Vec<Entry>, order: &[SortGroup]) -> Vec<Entry> {
             groups.push(vec![source]);
         }
     }
-    let scores: HashMap<_, _> = entries
-        .iter()
-        .filter(|e| e.source == Source::Zoxide)
-        .map(|e| (normalize(&e.path), e.score))
-        .collect();
     let mut result = Vec::new();
     for sources in &groups {
         let mut group = Vec::new();
         for source in sources {
             group.extend(entries.iter().filter(|e| e.source == *source).cloned());
-        }
-        if sources.len() > 1 {
-            for entry in &mut group {
-                if entry.score == 0. {
-                    entry.score = scores.get(&normalize(&entry.path)).copied().unwrap_or(0.);
-                }
-            }
-            group.sort_by(|a, b| b.score.total_cmp(&a.score));
         }
         result.extend(group);
     }
@@ -1412,71 +1193,16 @@ pub fn atomic_json(path: &Path, value: &impl Serialize) -> Result<()> {
     }
     Ok(())
 }
-fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn dedup_priority_is_independent_of_display_order_and_preserves_live_rows() {
-        let entries = vec![
-            Entry::new("live", "/live", Source::Rex),
-            Entry::new("live", "/live", Source::Rex),
-            Entry::new("live", "/dropped-config", Source::Config),
-            Entry::new("different", "/live", Source::Config),
-            Entry::new("kept", "/config", Source::Config),
-            Entry::new("free", "/dropped-config", Source::Zoxide),
-            Entry::new("live-path", "/live", Source::Zoxide),
-            Entry::new("config-path", "/config", Source::Zoxide),
-        ];
-        for order in [
-            vec![],
-            vec![
-                SortGroup::Source("zoxide".into()),
-                SortGroup::Source("config".into()),
-            ],
-            vec![SortGroup::Merged(vec![
-                "zoxide".into(),
-                "config".into(),
-                "rex".into(),
-            ])],
-        ] {
-            let kept = dedup_entries(order_entries(entries.clone(), &order));
-            assert_eq!(kept.len(), 5);
-            assert_eq!(kept.iter().filter(|e| e.source == Source::Rex).count(), 2);
-            assert!(kept.iter().any(|e| e.name == "free"));
-            assert!(kept.iter().any(|e| e.name == "different"));
-            assert!(
-                !kept
-                    .iter()
-                    .any(|e| e.name == "config-path" || e.name == "live-path")
-            );
-        }
-        // Once the attached live row is hidden, its config row is eligible.
-        let kept = dedup_entries(
-            entries
-                .into_iter()
-                .filter(|e| e.source != Source::Rex)
-                .collect(),
-        );
-        assert!(
-            kept.iter()
-                .any(|e| e.source == Source::Config && e.name == "live")
-        );
-        assert!(!kept.iter().any(|e| e.name == "free"));
-    }
     #[test]
     fn default_order_places_agents_after_sessions_and_before_other_sources() {
         let entries = vec![
             Entry::new("pi", "/live", Source::Agent),
             Entry::new("configured", "/config", Source::Config),
             Entry::new("first session", "/live", Source::Rex),
-            Entry::new("history", "/history", Source::Zoxide),
             Entry::new("codex", "/other", Source::Agent),
             Entry::new("second session", "/other", Source::Rex),
         ];
@@ -1491,8 +1217,7 @@ mod tests {
                 "second session",
                 "pi",
                 "codex",
-                "configured",
-                "history"
+                "configured"
             ]
         );
 
@@ -1601,132 +1326,19 @@ mod tests {
         }
     }
     #[test]
-    fn config_only_never_queries_rex_or_frecency() {
-        let d = tempfile::tempdir().unwrap();
-        let mut config = Config::default();
-        config.session.push(crate::config::SessionConfig {
-            name: "saved".into(),
-            path: d.path().display().to_string(),
-            ..Default::default()
-        });
-        config.frecency.list_command = Some("must-not-run".into());
-        let manager = isolated(config, d.path());
-        let entries = manager
-            .list(&ListOptions {
-                config: true,
-                hide_attached: true,
-                ..Default::default()
-            })
-            .unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].name, "saved");
-        assert!(!manager.state_dir.exists());
-    }
-    #[test]
-    fn blacklist_is_regex_and_flag_inverts_selection() {
-        let d = tempfile::tempdir().unwrap();
-        let mut config = Config {
+    fn blacklist_uses_regex_and_ignores_invalid_patterns() {
+        let config = Config {
             blacklist: vec!["[".into(), "^scratch".into()],
             ..Default::default()
         };
-        for name in ["scratch-one", "keep"] {
-            config.session.push(crate::config::SessionConfig {
-                name: name.into(),
-                path: d.path().display().to_string(),
-                ..Default::default()
-            });
-        }
-        let manager = isolated(config, d.path());
-        let normal = manager
-            .list(&ListOptions {
-                config: true,
-                ..Default::default()
-            })
-            .unwrap();
-        assert_eq!(normal[0].name, "keep");
-        assert_eq!(normal.len(), 1);
-        let blocked = manager
-            .list(&ListOptions {
-                config: true,
-                blacklisted: true,
-                ..Default::default()
-            })
-            .unwrap();
-        assert_eq!(blocked[0].name, "scratch-one");
-        assert_eq!(blocked.len(), 1);
-    }
-    #[test]
-    fn optional_scores_preserve_paths_with_spaces() {
-        let entries = parse_frecency("  42.5 /tmp/a b\n/tmp/plain name\n/tmp/single\n\n");
-        assert_eq!(entries.len(), 3);
-        assert_eq!(entries[0].score, 42.5);
-        assert_eq!(entries[0].path, Path::new("/tmp/a b"));
-        assert_eq!(entries[1].path, Path::new("/tmp/plain name"));
-        assert_eq!(entries[1].score, 0.);
-    }
-    #[test]
-    fn merged_groups_borrow_scores_and_keep_stable_ties() {
-        let mut hot = Entry::new("hot", "/hot", Source::Zoxide);
-        hot.score = 90.;
-        let cold = Entry::new("cold", "/cold", Source::Zoxide);
-        let entries = vec![
-            Entry::new("live", "/live", Source::Rex),
-            Entry::new("notes", "/hot", Source::Config),
-            Entry::new("unknown", "/unknown", Source::Config),
-            hot,
-            cold,
-        ];
-        let merged = order_entries(
-            entries.clone(),
-            &[SortGroup::Merged(vec!["config".into(), "zoxide".into()])],
-        );
-        assert_eq!(
-            merged.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
-            ["notes", "hot", "unknown", "cold", "live"]
-        );
-        let flat = order_entries(entries, &[SortGroup::Source("zoxide".into())]);
-        assert_eq!(flat[0].name, "hot");
-        assert_eq!(flat[2].name, "live");
-        assert_eq!(flat[3].name, "notes");
-    }
-    #[test]
-    fn command_arguments_are_data_even_for_non_directory_queries() {
-        let d = tempfile::tempdir().unwrap();
-        let marker = d.path().join("injected");
-        let query = format!("it's a query; $(touch {})", marker.display());
-        let output = frecency_command("printf '%s' '{}'", &query).unwrap();
-        assert_eq!(output, query);
-        assert!(!marker.exists());
-        assert!(frecency_command("", "").is_err());
-        assert!(frecency_command("printf '", "").is_err());
-    }
-    #[test]
-    fn cache_is_opt_in_and_scoped_to_config() {
-        let d = tempfile::tempdir().unwrap();
-        let mut manager = isolated(Config::default(), d.path());
-        manager.config.frecency.list_command = Some("printf '/first\\n'".into());
-        let opts = ListOptions {
-            zoxide: true,
-            ..Default::default()
-        };
-        assert_eq!(manager.list(&opts).unwrap()[0].path, Path::new("/first"));
-        assert!(!manager.state_dir.join("list.json").exists());
-        manager.config.cache = true;
-        manager.list(&opts).unwrap();
-        assert!(manager.state_dir.join("list.json").exists());
-        manager.config.frecency.list_command = Some("printf '/second\\n'".into());
-        assert_eq!(manager.list(&opts).unwrap()[0].path, Path::new("/second"));
-        manager.config.cache = false;
-        atomic_json(
-            &manager.state_dir.join("list.json"),
-            &Cache {
-                time: now(),
-                scope: fingerprint(&format!("{:?}", manager.config)),
-                entries: vec![Entry::new("stale", "/stale", Source::Zoxide)],
-            },
-        )
-        .unwrap();
-        assert_eq!(manager.list(&opts).unwrap()[0].path, Path::new("/second"));
+        assert!(is_blacklisted(
+            &config,
+            &Entry::new("scratch-one", "/scratch", Source::Rex)
+        ));
+        assert!(!is_blacklisted(
+            &config,
+            &Entry::new("keep", "/keep", Source::Rex)
+        ));
     }
     #[test]
     fn saved_paths_restore_unknown_cwd_and_canonicalize() {
@@ -1859,7 +1471,6 @@ exit 92
         fs::create_dir(&project).unwrap();
         let mut manager = isolated(Config::default(), d.path());
         manager.rex.bin = fake_rex(d.path());
-        manager.config.frecency.add_command = Some("printf ''".into());
         let mut state = State::default();
         state
             .paths

@@ -25,7 +25,7 @@ def main():
         env = dict(os.environ, REXUE_STATE_DIR=str(root/'state'), XDG_CONFIG_HOME=str(root/'xdg'),
                    XDG_CACHE_HOME=str(root/'cache'), GIT_CONFIG_GLOBAL='/dev/null', GIT_CONFIG_NOSYSTEM='1')
         config = root/'rexue.toml'
-        config.write_text('strict_mode=true\n[frecency]\nlist_command="true"\nadd_command="true"\n')
+        config.write_text('strict_mode=true\n')
         wt_config = root/'wt.toml'
         wt_config.write_text('')
         wrapper = root/'wt-wrapper'

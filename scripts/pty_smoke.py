@@ -45,7 +45,7 @@ class Session:
         env.update(env_extra or {})
         # These must be ignored by rexue; otherwise they corrupt the row protocol.
         env.update(FZF_DEFAULT_OPTS='--multi --print-query --bind enter:abort', FZF_DEFAULT_COMMAND='exit 93')
-        args = arguments if arguments is not None else ['--detach', '-C', str(cfg), 'picker', '--config']
+        args = arguments if arguments is not None else ['--detach', '-C', str(cfg), 'picker']
         def setup():
             os.setsid()
             fcntl.ioctl(0, termios.TIOCSCTTY, 0)
@@ -177,7 +177,7 @@ elif a[:2]==['client','ls']:print('{"clients":[]}')
 else:
     print('unexpected fixture command: '+repr(a),file=sys.stderr);sys.exit(91)
 ''')
-        config = 'strict_mode=true\n[frecency]\nlist_command="true"\nadd_command="true"\nquery_command="false"\n[tui]\npreview=true\npreview_min_width=50\n[[session]]\nname=' + json.dumps(name, ensure_ascii=False) + '\npath=' + json.dumps(str(root)) + '\nalias="Ä"\nalias_auto_connect=true\n'
+        config = 'strict_mode=true\n[tui]\npreview=true\npreview_min_width=50\n[[session]]\nname=' + json.dumps(name, ensure_ascii=False) + '\npath=' + json.dumps(str(root)) + '\nalias="Ä"\nalias_auto_connect=true\n'
         cfg.write_text(config)
         base = ['--rex-bin', str(rex), '--detach', '-C', str(cfg)]
 
@@ -335,17 +335,14 @@ else:
         assert not (root/'killed').exists()
         (root/'agents-mode').unlink()
 
-        cfg.write_text(config + 'preview_command="printf CONFIG_PREVIEW"\n')
-        def source_navigation(s):
-            s.expect('5/5')
+        cfg.write_text(config + '\n[[session]]\nname="not running"\npath=' + json.dumps(str(root/'not-running')) + '\nalias="absent"\n')
+        def session_navigation(s):
+            s.expect('4/4')
             s.expect('PREVIEW_session:first')
             s.send(b'\x1b[B' * 2)
             s.expect('PREVIEW_session:second')
-            s.send(b'\x1b[B' * 2)
-            s.expect('CONFIG_PREVIEW')
-            s.send(b'\x1b[A' * 2)
             s.send(b'\r')
-        text = run_case('source-rows-without-headings-preserve-selection', ['picker', '--rex', '--config'], source_navigation)
+        text = run_case('default-list-excludes-unconnected-configured-targets', ['picker'], session_navigation)
         assert 'session:second' in text
         cfg.write_text(config)
 
@@ -490,8 +487,8 @@ confirm_no = ['alt-n', 'alt-c']
             s.expect('session name cannot be empty')
             s.send(b'\x1b')
         run_case('rename-empty-name-rejected', ['picker', '--rex'], empty_rename)
-        run_case('rename-config-row-rejected', ['picker', '--config'],
-                 lambda s: (s.expect(name), s.send(b'\x12'), s.expect('Only live Rex sessions can be renamed'), s.send(b'\x1b')))
+        run_case('rename-tab-row-rejected', ['picker', '--rex'],
+                 lambda s: (s.expect(name), s.send(b'\x1b[B'), s.send(b'\x12'), s.expect('Only live Rex sessions can be renamed'), s.send(b'\x1b')))
         assert not rename_calls()
 
         (root/'rename-fail').touch()
@@ -677,12 +674,14 @@ os.execv('''+repr(real_wt)+''',['wt','--config','''+repr(str(wt_config))+''',*sy
             checks.append({'case': 'worktree-selected-path-connects-without-alias-hijack', **report})
         finally:
             s.close()
+        before_calls = len((root/'rex-calls.jsonl').read_text().splitlines())
         s = Session(binary, cfg, root, arguments=[*base, 'picker', '--query=feature/scoped'], env_extra=env)
         try:
-            s.expect('feature/scoped'); s.send(b'\r')
+            s.expect('0/0'); s.send(b'\x1b')
             report = s.finish()
-            assert 'session:second' in s.text(), s.text()[-2000:]
-            checks.append({'case':'global-worktree-source-connects-actual-checkout',**report})
+            calls = [json.loads(line) for line in (root/'rex-calls.jsonl').read_text().splitlines()[before_calls:]]
+            assert not any(call[0] in ['new', 'focus', 'kill'] for call in calls), calls
+            checks.append({'case':'main-picker-excludes-worktree-directory-rows',**report})
         finally:
             s.close()
         saved_worktree_config = cfg.read_text()
@@ -781,34 +780,37 @@ cancel = ['alt-q', 'alt-z']
             s.close()
 
         assert set((root/'killed').read_text().splitlines()) == {'session:first', 'session:second'}
-        # Restore a private live session for the independent literal-name probes.
+        # Verify literal labels resolve to live IDs and unconnected aliases stay absent.
         (root/'killed').write_text('session:first\n')
-        (root/'fixture.json').write_text(json.dumps({'name': name, 'path': str(root)}))
         saved_configuration = cfg.read_text()
         wanted, wrong = root/'wanted', root/'wrong'
         wanted.mkdir(); wrong.mkdir()
         for literal_name in ['📁 chosen', ' chosen']:
-            cfg.write_text('strict_mode=true\n[frecency]\nlist_command="true"\nadd_command="true"\n[tui]\npreview=false\n' +
+            (root/'fixture.json').write_text(json.dumps({'name': literal_name, 'path': str(wanted)}))
+            cfg.write_text('strict_mode=true\n[tui]\npreview=false\n' +
                            '\n'.join('[[session]]\nname='+json.dumps(n, ensure_ascii=False)+'\npath='+json.dumps(str(p)) for n,p in [(literal_name,wanted),('chosen',wrong)]))
             before_calls = len((root/'rex-calls.jsonl').read_text().splitlines())
-            text = run_case('literal-config-name-'+literal_name[0], ['picker', '--config', '--query='+literal_name[0]],
+            text = run_case('literal-session-name-'+literal_name[0], ['picker', '--query='+literal_name[0]],
                             lambda s: (s.expect(literal_name), s.send(b'\r')))
-            assert 'session:new' in text
+            assert 'session:second' in text
             new_calls = [json.loads(line) for line in (root/'rex-calls.jsonl').read_text().splitlines()[before_calls:]]
-            creations = [call for call in new_calls if call[0]=='new']
-            assert len(creations)==1 and creations[0][1]==literal_name, creations
-            cwd = creations[0].index('-c')
-            assert pathlib.Path(creations[0][cwd+1]).resolve()==wanted.resolve(), creations
+            assert not any(call[0]=='new' for call in new_calls), new_calls
             if literal_name[0]=='📁':
-                key = 'name='+json.dumps(literal_name, ensure_ascii=False)+'\n'
+                key = 'name="chosen"\n'
                 cfg.write_text(cfg.read_text().replace(key, key+'alias="hidden"\n', 1))
                 before_calls = len((root/'rex-calls.jsonl').read_text().splitlines())
-                text = run_case('hidden-config-alias-keeps-literal-name-and-path', ['picker', '--rex'],
-                                lambda s: (s.expect(name), s.send(b'/hidden')))
-                assert 'session:new' in text
-                creations = [call for call in (json.loads(line) for line in (root/'rex-calls.jsonl').read_text().splitlines()[before_calls:]) if call[0]=='new']
-                assert len(creations)==1 and creations[0][1]==literal_name, creations
-                assert pathlib.Path(creations[0][creations[0].index('-c')+1]).resolve()==wanted.resolve(), creations
+                def absent_alias(s):
+                    s.expect(literal_name)
+                    s.send(b'/hidden')
+                    s.expect('0/0')
+                    deadline = time.monotonic() + 0.5
+                    s.until(lambda: time.monotonic() >= deadline or s.proc.poll() is not None,
+                            'alias cancellation check timed out', timeout=2)
+                    assert s.proc.poll() is None, 'unconnected alias created a session'
+                    s.send(b'\x1b')
+                run_case('unconnected-config-alias-is-not-listed', ['picker'], absent_alias)
+                new_calls = [json.loads(line) for line in (root/'rex-calls.jsonl').read_text().splitlines()[before_calls:]]
+                assert not any(call[0]=='new' for call in new_calls), new_calls
 
         cfg.write_text(saved_configuration)
 
@@ -823,13 +825,14 @@ cancel = ['alt-q', 'alt-z']
         ]:
             if script is not None:
                 executable(isolated/'fzf', script)
-            for source in (['--config'] if label == 'fzf-error' else ['--config', '--rex']):
-                result = subprocess.run([*([binary]+base), 'picker', source], env=dict(os.environ, PATH=str(isolated)), capture_output=True, text=True, timeout=8)
+            for source in [[], ['--rex']]:
+                result = subprocess.run([*([binary]+base), 'picker', *source], env=dict(os.environ, PATH=str(isolated)), capture_output=True, text=True, timeout=8)
                 assert result.returncode == 1 and expected in result.stderr, (label, source, result)
-                checks.append({'case': label + ('-rex' if source == '--rex' else ''), 'exit': result.returncode})
-        # Missing/old fzf preflight made no Rex calls; failed interactive fzf only
-        # fetched config rows and performed no connection or removal.
-        assert (root/'rex-calls.jsonl').read_bytes() == before
+                checks.append({'case': label + ('-rex' if source else ''), 'exit': result.returncode})
+            if label != 'fzf-error':
+                assert (root/'rex-calls.jsonl').read_bytes() == before
+        calls = [json.loads(line) for line in (root/'rex-calls.jsonl').read_bytes()[len(before):].splitlines()]
+        assert not any(call[0] in ['new', 'kill', 'focus'] or call[:2] == ['session', 'rename'] for call in calls), calls
     receipt = json.dumps({'system_fzf': subprocess.check_output(['fzf','--version'], text=True).strip(), 'pty': checks}, ensure_ascii=False, indent=2)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)

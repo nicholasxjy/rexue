@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Rexue connects Rex sessions and agent panes through fzf, with zoxide history and Worktrunk worktrees.
+Rexue connects Rex sessions and agent panes through fzf, with Worktrunk worktrees.
 
 ## Boundaries
 

@@ -74,7 +74,7 @@ printf x > "$root/$kind-$$"
 exec ''' + shlex.quote(fzf) + ' "$@"\n')
             picker_env['PATH'] = str(shim_dir) + os.pathsep + os.environ['PATH']
         cfg = root / 'config.toml'
-        cfg.write_text('[frecency]\nlist_command="true"\nadd_command="true"\n[tui]\npreview=false\n')
+        cfg.write_text('[tui]\npreview=false\n')
         if args.legacy_rex:
             (root / "legacy").touch()
         sessions = []

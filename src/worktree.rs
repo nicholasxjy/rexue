@@ -8,7 +8,6 @@ use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
-    collections::HashSet,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -121,21 +120,6 @@ impl<'a> Worktrees<'a> {
             entry.icon = icon.clone();
         }
         Ok(entries)
-    }
-    pub fn list_all(&self) -> Result<Vec<WorktreeEntry>> {
-        let mut seen = HashSet::new();
-        let mut result = Vec::new();
-        for cfg in &self.config.worktree {
-            let selection = Selection {
-                path: Some(expand_path(&cfg.path)?),
-            };
-            for entry in self.list(&selection)? {
-                if seen.insert(canonical(&entry.path)) {
-                    result.push(entry);
-                }
-            }
-        }
-        Ok(result)
     }
     /// Resolve the current registered checkout without firing switch hooks.
     pub fn current(&self, selection: &Selection) -> Result<PreparedWorktree> {

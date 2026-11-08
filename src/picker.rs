@@ -48,7 +48,6 @@ pub struct PickerOptions {
     pub pointer: String,
     pub query: String,
     pub aliases: BTreeMap<String, Alias>,
-    pub alias_icons: BTreeMap<String, String>,
     pub alias_filter_prefix: String,
     pub alias_auto_connect_delay: Duration,
     pub disable_alias_auto_connect: bool,
@@ -74,7 +73,6 @@ impl Default for PickerOptions {
             pointer: "> ".into(),
             query: String::new(),
             aliases: BTreeMap::new(),
-            alias_icons: BTreeMap::new(),
             alias_filter_prefix: "/".into(),
             alias_auto_connect_delay: Duration::from_millis(150),
             disable_alias_auto_connect: false,
@@ -165,14 +163,14 @@ impl Catalog {
         } else {
             for entry in &entries {
                 if let Some(alias) = &entry.alias {
-                    self.options
-                        .aliases
-                        .entry(alias_key(alias))
-                        .or_insert(Alias {
+                    self.options.aliases.insert(
+                        alias_key(alias),
+                        Alias {
                             alias: alias.clone(),
                             target: entry.name.clone(),
                             auto_connect: entry.alias_auto_connect,
-                        });
+                        },
+                    );
                 }
             }
         }
@@ -226,33 +224,8 @@ impl Catalog {
                 }
             }
         }
-        // Alias-only mode can select configured targets excluded by source flags.
-        for alias in self.options.aliases.values().cloned().collect::<Vec<_>>() {
-            if !self
-                .entries
-                .iter()
-                .any(|id| self.targets[id].name == alias.target)
-            {
-                let mut entry = Entry::new(&alias.target, "", Source::Config);
-                entry.alias = Some(alias.alias);
-                entry.alias_auto_connect = alias.auto_connect;
-                entry.icon = self.options.alias_icons.get(&alias.target).cloned();
-                self.remember(entry);
-            }
-        }
-        // Keep IDs stable for current rows and hidden aliases without retaining
-        // every session, pane or worktree that disappeared during a refresh.
-        let reachable: BTreeSet<_> = self
-            .entries
-            .iter()
-            .copied()
-            .chain(
-                self.options
-                    .aliases
-                    .values()
-                    .filter_map(|alias| self.alias_id(alias)),
-            )
-            .collect();
+        // Keep current IDs stable and retire targets that disappeared during refresh.
+        let reachable: BTreeSet<_> = self.entries.iter().copied().collect();
         self.targets.retain(|id, _| reachable.contains(id));
     }
     fn removed(&mut self, entry: &Entry) {
@@ -261,9 +234,7 @@ impl Catalog {
         self.entries
             .retain(|id| !same_entry(&self.targets[id], entry));
         self.targets.retain(|_, target| !same_entry(target, entry));
-        // Preserve an alias while another current row has the same name, then
-        // retire it with the last row. Do not resurrect a removed live ID or a
-        // synthetic configured target through alias-only mode after deletion.
+        // Retire an alias when its last matching row disappears.
         if !self
             .entries
             .iter()
@@ -298,12 +269,6 @@ impl Catalog {
             .iter()
             .copied()
             .find(|id| self.targets[id].name == alias.target)
-            .or_else(|| {
-                self.targets.iter().find_map(|(id, e)| {
-                    (e.source == Source::Config && e.session_id.is_none() && e.name == alias.target)
-                        .then_some(*id)
-                })
-            })
     }
     fn candidates(&self, query: &str) -> (Vec<u64>, String, bool) {
         if let Some(q) = self.alias_query(query) {
@@ -496,7 +461,7 @@ impl Bridge {
                                     let s = state.lock().unwrap();
                                     let q = s.alias_query(&request.query).unwrap_or(&request.query);
                                     s.options.aliases.get(&alias_key(q)).filter(|a| {
-                                        s.auto_armed && !s.options.worktree && !s.options.disable_alias_auto_connect
+                                        s.auto_armed && s.alias_id(a).is_some() && !s.options.worktree && !s.options.disable_alias_auto_connect
                                             && (s.alias_query(&request.query).is_some() || a.auto_connect)
                                     }).map(|_| s.options.alias_auto_connect_delay)
                                 };
@@ -1015,10 +980,8 @@ fn wait_fzf(mut child: std::process::Child, mut keyboard: Option<Keyboard>) -> R
 fn confirm(entry: &Entry, bindings: &Keybindings) -> Result<bool> {
     let question = if entry.source == Source::Rex {
         "Kill this Rex session?"
-    } else if entry.source == Source::Worktree {
-        "Remove this worktree using Worktrunk? This also closes all associated Rex sessions, tabs, panes and agents."
     } else {
-        "Remove this directory from history?"
+        "Remove this worktree using Worktrunk? This also closes all associated Rex sessions, tabs, panes and agents."
     };
     let mut command = Command::new("fzf");
     clean_fzf_env(&mut command);
@@ -1262,10 +1225,7 @@ pub fn pick_with_create(
         }
         if chosen.action == ChoiceAction::Remove {
             if (entry.window_id().is_some() || entry.block_id().is_some())
-                || !matches!(
-                    entry.source,
-                    Source::Rex | Source::Zoxide | Source::Directory | Source::Worktree
-                )
+                || !matches!(entry.source, Source::Rex | Source::Worktree)
             {
                 state.lock().unwrap().status = if entry.source == Source::Agent {
                     "Agent rows cannot be removed; select their Rex session to close it"
@@ -1588,7 +1548,7 @@ mod tests {
         assert!(target(&state, Some("9999")).is_err());
     }
     #[test]
-    fn refresh_releases_retired_targets_and_preserves_current_ids_and_hidden_aliases() {
+    fn refresh_retires_targets_without_materializing_configured_aliases() {
         let mut options = PickerOptions::default();
         options.aliases.insert(
             "h".into(),
@@ -1598,29 +1558,23 @@ mod tests {
                 auto_connect: false,
             },
         );
-        let keep = Entry::new("keep", "/keep", Source::Directory);
+        let mut keep = Entry::new("keep", "/keep", Source::Rex);
+        keep.session_id = Some("session:keep-full".into());
+        keep.alias = Some("k".into());
         let state = Mutex::new(Catalog::new(options, vec![keep.clone()]));
         let keep_id = state.lock().unwrap().entries[0];
-        let hidden_id = state.lock().unwrap().candidates("/h").0[0];
         let mut retired = None;
         for refresh in 0..32 {
             let current = {
                 let mut catalog = state.lock().unwrap();
-                catalog.replace(vec![
-                    keep.clone(),
-                    Entry::new(
-                        format!("temporary-{refresh}"),
-                        "/temporary",
-                        Source::Directory,
-                    ),
-                ]);
+                let mut temporary =
+                    Entry::new(format!("temporary-{refresh}"), "/temporary", Source::Rex);
+                temporary.session_id = Some(format!("session:temporary-{refresh}"));
+                catalog.replace(vec![keep.clone(), temporary]);
                 assert_eq!(catalog.entries[0], keep_id);
-                assert_eq!(catalog.candidates("/h").0, [hidden_id]);
-                assert_eq!(
-                    catalog.targets.len(),
-                    3,
-                    "retain only current and alias targets"
-                );
+                assert!(catalog.candidates("/h").0.is_empty());
+                assert_eq!(catalog.candidates("/k").0, [keep_id]);
+                assert_eq!(catalog.targets.len(), 2);
                 catalog.entries[1]
             };
             if let Some(id) = retired {
@@ -1965,24 +1919,37 @@ mod tests {
     }
 
     #[test]
-    fn aliases_keep_unicode_folding_hidden_targets_and_prefix_precedence() {
-        let mut opts = PickerOptions::default();
-        opts.aliases.insert(
+    fn aliases_follow_live_sessions_and_retire_with_them() {
+        let mut options = PickerOptions {
+            alias_filter_prefix: "#".into(),
+            ..Default::default()
+        };
+        let mut entry = Entry::new("project", "/tmp", Source::Rex);
+        entry.session_id = Some("session:live-full".into());
+        entry.alias = Some("Ä".into());
+        entry.alias_auto_connect = true;
+        options.aliases.insert(
             "Ä".into(),
             Alias {
                 alias: "Ä".into(),
-                target: "hidden".into(),
+                target: "not running".into(),
                 auto_connect: true,
             },
         );
-        opts.alias_filter_prefix = "#".into();
-        let s = Catalog::new(opts, vec![Entry::new("other", "/tmp", Source::Directory)]);
-        assert!(s.index_query("#ä").is_none());
-        let (ids, _, fuzzy) = s.candidates("#ä");
+        let mut catalog = Catalog::new(options, vec![entry.clone()]);
+        assert!(catalog.index_query("#ä").is_none());
+        let (ids, _, fuzzy) = catalog.candidates("#ä");
         assert!(!fuzzy);
-        assert_eq!(s.targets[&ids[0]].name, "hidden");
-        assert_eq!(s.candidates("ä").0, ids);
-        assert!(!s.auto_armed);
+        assert_eq!(catalog.targets[&ids[0]].target(), "session:live-full");
+        assert_eq!(catalog.candidates("ä").0, ids);
+        assert!(!catalog.auto_armed);
+        entry.name = "renamed project".into();
+        catalog.replace(vec![entry]);
+        assert_eq!(catalog.candidates("#ä").0, ids);
+        catalog.replace(vec![]);
+        assert!(catalog.candidates("#ä").0.is_empty());
+        assert!(catalog.candidates("ä").0.is_empty());
+        assert!(catalog.targets.is_empty());
     }
     #[test]
     fn removing_duplicate_targets_retires_alias_only_after_last_row() {

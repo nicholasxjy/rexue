@@ -21,7 +21,7 @@ use std::{
     long_about = "Manage Rex sessions with the system fzf picker. With no command, opens the picker."
 )]
 pub struct Cli {
-    /// Config file (source filters use --config/-c on list and picker).
+    /// Config file.
     #[arg(short = 'C', long = "config-file", global = true)]
     pub config: Option<PathBuf>,
     /// Rex app client label or full ID; also reads REX_CLIENT.
@@ -46,7 +46,7 @@ pub enum Commands {
         action: String,
         id: Option<String>,
     },
-    /// List live sessions, configured projects and frequent directories.
+    /// List live Rex sessions or running agents.
     #[command(alias = "l")]
     List(ListArgs),
     /// Create or reuse a project session and display it in Rex.
@@ -92,32 +92,16 @@ pub struct Sources {
     #[arg(short = 't', long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
     #[arg(default_value_t = false)]
     pub rex: bool,
-    #[arg(short = 'c', long = "config", action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
-    #[arg(default_value_t = false)]
-    pub configs: bool,
-    #[arg(short = 'z', long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
-    #[arg(default_value_t = false)]
-    pub zoxide: bool,
     #[arg(short = 'H', long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
     #[arg(default_value_t = false)]
     pub hide_attached: bool,
-    #[arg(short = 'd', long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
-    #[arg(default_value_t = false)]
-    pub hide_duplicates: bool,
-    #[arg(long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_parser = parse_bool)]
-    #[arg(default_value_t = false)]
-    pub no_cache: bool,
 }
 impl Sources {
     fn options(&self) -> ListOptions {
         ListOptions {
             agents: self.agents,
             rex: self.rex,
-            config: self.configs,
-            zoxide: self.zoxide,
             hide_attached: self.hide_attached,
-            hide_duplicates: self.hide_duplicates,
-            no_cache: self.no_cache,
             ..Default::default()
         }
     }
@@ -380,15 +364,11 @@ fn pick_session(manager: Manager, args: PickerArgs, detach: bool) -> Result<()> 
     let rename = manager.clone();
     let chosen = picker::pick(
         move || {
-            let picker_block = if opts.rex || opts.agents || !(opts.config || opts.zoxide) {
-                fetch
-                    .rex
-                    .context()
-                    .ok()
-                    .and_then(|context| context["block_id"].as_str().map(str::to_owned))
-            } else {
-                None
-            };
+            let picker_block = fetch
+                .rex
+                .context()
+                .ok()
+                .and_then(|context| context["block_id"].as_str().map(str::to_owned));
             fetch.list(&ListOptions {
                 picker_block,
                 ..opts.clone()
@@ -477,27 +457,6 @@ fn picker_options_for(
     args: &PickerArgs,
     worktree: bool,
 ) -> Result<picker::PickerOptions> {
-    let entries = cfg.entries()?;
-    let aliases = entries
-        .iter()
-        .filter_map(|e| {
-            e.alias.as_ref().map(|a| {
-                (
-                    crate::model::alias_key(a),
-                    picker::Alias {
-                        alias: a.clone(),
-                        target: e.name.clone(),
-                        auto_connect: e.alias_auto_connect,
-                    },
-                )
-            })
-        })
-        .collect();
-    let alias_icons = entries
-        .iter()
-        .filter(|e| e.alias.is_some())
-        .filter_map(|e| e.icon.as_ref().map(|icon| (e.name.clone(), icon.clone())))
-        .collect();
     let glyphs = cfg
         .icons
         .iter()
@@ -545,8 +504,6 @@ fn picker_options_for(
         }),
         pointer: cfg.tui.pointer.clone(),
         query: args.query.clone().unwrap_or_default(),
-        aliases,
-        alias_icons,
         alias_filter_prefix: cfg.tui.alias_filter_prefix.clone(),
         glyph_colors: cfg
             .icons
@@ -659,7 +616,7 @@ fn source_color(source: Source) -> u8 {
         Source::Agent => 35,
         Source::Rex => 34,
         Source::Config => 90,
-        Source::Zoxide | Source::Directory => 36,
+        Source::Directory => 36,
         Source::Worktree => 36,
     }
 }
@@ -1176,8 +1133,7 @@ mod tests {
         };
         assert!(!list.json && !list.icons && !list.no_color && !list.blacklisted);
         for sources in [list.sources, parsed_picker(&[]).sources] {
-            assert!(!sources.rex && !sources.configs && !sources.zoxide);
-            assert!(!sources.hide_attached && !sources.hide_duplicates && !sources.no_cache);
+            assert!(!sources.rex && !sources.agents && !sources.hide_attached);
         }
         let args = parsed_picker(&[]);
         assert_eq!(args.icons, None);
@@ -1300,13 +1256,13 @@ mod tests {
             assert_eq!(args.validate().is_ok(), valid);
         }
         let Some(Commands::List(args)) =
-            Cli::try_parse_from(["rexue", "list", "--config", "--icons=false", "--json"])
+            Cli::try_parse_from(["rexue", "list", "--rex", "--icons=false", "--json"])
                 .unwrap()
                 .command
         else {
             panic!("expected list")
         };
-        assert!(args.sources.configs && args.json && !args.icons);
+        assert!(args.sources.rex && args.json && !args.icons);
         assert!(args.validate().is_ok());
         assert!(
             Cli::try_parse_from([
@@ -1378,7 +1334,7 @@ mod tests {
         let options = picker_options(&cfg, &PickerArgs::default()).unwrap();
         assert_eq!(options.icon_width, 6);
         assert_eq!(options.glyphs["rex"], "R   ");
-        assert_eq!(options.alias_icons["configured"], "日  ");
+        assert!(options.aliases.is_empty());
         let cfg = loaded_picker_config("[icons.rex]\nicon='x　'\n");
         assert_eq!(
             picker_options(&cfg, &PickerArgs::default())
@@ -1467,8 +1423,8 @@ mod tests {
         assert!(format_entry(&e, Some("{fg:unknown}"), false, false, &[]).is_err());
     }
     #[test]
-    fn config_file_does_not_shadow_source_filter() {
-        let cli = Cli::try_parse_from(["rexue", "-C", "custom.toml", "list", "--config"]).unwrap();
+    fn config_file_can_be_used_with_session_filter() {
+        let cli = Cli::try_parse_from(["rexue", "-C", "custom.toml", "list", "--rex"]).unwrap();
         assert_eq!(cli.config.unwrap(), PathBuf::from("custom.toml"));
     }
 }

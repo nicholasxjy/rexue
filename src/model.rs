@@ -36,7 +36,6 @@ pub enum Source {
     Agent,
     Rex,
     Config,
-    Zoxide,
     Directory,
     Worktree,
 }
@@ -46,7 +45,6 @@ impl Source {
             Self::Agent => "agent",
             Self::Rex => "rex",
             Self::Config => "config",
-            Self::Zoxide => "zoxide",
             Self::Directory => "directory",
             Self::Worktree => "worktree",
         }
@@ -56,7 +54,7 @@ impl Source {
             Self::Agent => "󰚩",
             Self::Rex => "",
             Self::Config => "",
-            Self::Zoxide | Self::Directory => "",
+            Self::Directory => "",
             Self::Worktree => "",
         }
     }
@@ -109,8 +107,6 @@ pub struct Entry {
     pub alias: Option<String>,
     #[serde(default)]
     pub alias_auto_connect: bool,
-    #[serde(default)]
-    pub score: f64,
 }
 impl Entry {
     pub fn new(name: impl Into<String>, path: impl Into<PathBuf>, source: Source) -> Self {
@@ -129,7 +125,6 @@ impl Entry {
             icon: None,
             alias: None,
             alias_auto_connect: false,
-            score: 0.0,
         }
     }
     pub fn target(&self) -> &str {

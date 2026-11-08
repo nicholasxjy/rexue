@@ -38,12 +38,24 @@ def main():
         root = pathlib.Path(directory)
         cfg = root / 'config.toml'
         rex = root / 'rex-fixture'
-        executable(rex, '#!' + sys.executable + '\nimport json,sys\n'
-                   'a=sys.argv[4:]\n'
-                   'print(json.dumps({"sessions":[]} if a[:1]==["ls"] else {"clients":[]} if a[:2]==["client","ls"] else {}))\n')
-        config = ['strict_mode=true', '[frecency]', 'list_command="true"',
-                  'add_command="true"', 'query_command="false"', '[tui]',
-                  'preview=true', 'preview_min_width=20']
+        executable(rex, '#!' + sys.executable + '\n' + '''import json,pathlib,sys
+root=pathlib.Path(__file__).parent
+a=sys.argv[4:]
+if a[:1]==['-S']:a=a[2:]
+if a[:2]==['do','--eval']:
+    print('Error: unknown flag: --eval',file=sys.stderr);sys.exit(2)
+if a[:1]==['ls']:
+    print(json.dumps({'sessions':[{'session_id':'session:'+name,'label':name} for name in ['ALPHA','BETA','GAMMA']]}))
+elif a[:2]==['session','inspect']:
+    print(json.dumps({'active_window_id':'window:fixture','windows':[{'window_id':'window:fixture','label':'Terminal','focused_block_id':'block:fixture'}]}))
+elif a[:2]==['block','call']:
+    print(json.dumps({'foreground':{'cwd':str(root)}}))
+elif a[:1]==['capture']:
+    print('PREVIEW_'+a[2].split(':',1)[1])
+else:
+    print('{}')
+''')
+        config = ['strict_mode=true', '[tui]', 'preview=true', 'preview_min_width=20']
         for name in ('ALPHA', 'BETA', 'GAMMA'):
             config.extend(['[[session]]', f'name="{name}"',
                            'path=' + json.dumps(directory),
@@ -52,7 +64,7 @@ def main():
         for label in args.case or CASES:
             down, up = CASES[label]
             session = Session(binary, cfg, root, arguments=[
-                '--rex-bin', str(rex), '--detach', '-C', str(cfg), 'picker', '--config'])
+                '--rex-bin', str(rex), '--detach', '-C', str(cfg), 'picker'])
             try:
                 session.expect('PREVIEW_ALPHA')
                 if label == 'suspend-resume':
@@ -68,10 +80,10 @@ def main():
                     session.until(lambda: not (termios.tcgetattr(session.slave)[3] & termios.ICANON),
                                   'resume did not restore raw keyboard input', timeout=2)
                 session.capture.clear()
-                session.send(down)
+                session.send(down * 2)
                 session.expect('PREVIEW_BETA', timeout=2)
                 session.capture.clear()
-                session.send(up)
+                session.send(up * 2)
                 session.expect('PREVIEW_ALPHA', timeout=2)
                 session.send(b'\x1b')
                 checks.append({'case': label, 'passed': True, **session.finish()})

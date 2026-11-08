@@ -28,7 +28,7 @@ def main():
         env = dict(os.environ, XDG_CONFIG_HOME=str(root / 'xdg'), XDG_CACHE_HOME=str(root / 'cache'),
                    REXUE_STATE_DIR=str(root / 'state'), GIT_CONFIG_GLOBAL='/dev/null', GIT_CONFIG_NOSYSTEM='1')
         config = root / 'rexue.toml'
-        config.write_text('strict_mode=true\n[frecency]\nlist_command="true"\nquery_command="false"\nadd_command="true"\nremove_command="true"\n[[worktree]]\npath=' + json.dumps(str(repo)) + '\nicon="W"\n')
+        config.write_text('strict_mode=true\n[[worktree]]\npath=' + json.dumps(str(repo)) + '\nicon="W"\n')
         wt_config = root / 'wt.toml'
         wt_config.write_text('worktree-path="../custom trees/{{ branch | sanitize }}"\n')
         wrapper = root / 'wt wrapper'
@@ -116,8 +116,9 @@ else: print('{}')
         assert pathlib.Path(creation[creation.index('-c')+1]) == tree
         checks.extend(['rex-actual-cwd', 'rex-session-reuse', 'no-create-hook-on-reuse'])
         global_rows = json.loads(cli('list', '--json').stdout)
-        assert any(r['source'] == 'worktree' and pathlib.Path(r['path']) == tree for r in global_rows)
-        checks.append('global-worktree-source')
+        assert any(r['source'] == 'rex' and pathlib.Path(r['path']) == tree for r in global_rows)
+        assert all(r['source'] == 'rex' for r in global_rows), global_rows
+        checks.append('main-list-only-live-sessions')
         wt_config.write_text(wt_config.read_text()+'\n[list]\njson-schema=1\n')
         schema1 = json.loads(cli('worktree', 'list', '--json').stdout)
         assert sorted(schema1, key=lambda row: row['path']) == sorted(rows, key=lambda row: row['path']), (schema1, rows)

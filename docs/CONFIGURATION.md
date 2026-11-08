@@ -11,8 +11,7 @@ Unknown keys warn and are ignored unless `strict_mode = true`; type errors alway
 | `strict_mode` | `false` | Reject unknown keys. |
 | `import` | `[]` | Append session, wildcard and worktree definitions from exact filenames, in order. No globs, nested imports or imported globals. |
 | `blacklist` | `[]` | Entry-name regexes; `list --blacklisted` shows matches instead. |
-| `sort_order` | `[]` | Source order; nested arrays interleave sources by history score. Default order: `rex`, `agent`, `config`, `zoxide`, `directory`, `worktree`. |
-| `cache` | `false` | Cache directory history for five seconds; `--no-cache` bypasses it. Sessions and agents stay live. |
+| `sort_order` | `[]` | Source order when sessions and agents are requested together; default: `rex`, `agent`. Nested arrays follow their listed order. |
 | `dir_length` | `1` | Trailing path components in directory names. |
 | `git_dir_length` | `1` | Trailing components of the Git naming anchor. |
 | `git_namer_use_worktree_root` | `false` | Use the checkout root as the Git naming anchor. |
@@ -22,7 +21,7 @@ Naming lengths ≤0 become 1. `[[name_substitution]]` applies nonempty `find` �
 
 ## Sessions and startup
 
-Each `[[session]]` requires a unique nonempty `name` and a nonempty `path`.
+Each `[[session]]` requires a unique nonempty `name` and a nonempty `path`. Definitions provide `connect` targets and metadata for matching live sessions; unconnected projects are excluded from the main picker.
 
 | Optional field | Behavior |
 | --- | --- |
@@ -40,12 +39,6 @@ Startup takes the first nonempty layer: `connect --command` → session → enab
 
 Preview takes the first nonempty session, wildcard or default command. Startup/preview scripts run through `sh`; `{}` passes the session path as data, preserving spaces and shell punctuation. Live previews capture the focused terminal of a session's active tab, a selected tab's focused terminal, or the exact selected pane.
 
-## Directory history
-
-`[frecency]` accepts `list_command`, `query_command`, `add_command` and `remove_command`. Absent or empty values use zoxide. Missing zoxide yields an empty history source; custom command failures are errors.
-
-Commands use shell-style quoting but execute directly. Use a wrapper for pipes or redirection. `{}` substitutes the query/path inside each argument as data. List output is one directory per line with an optional numeric score. Connecting records the directory; picker removal deletes its history entry. Scores rank merged `sort_order` groups, such as `["config", "zoxide"]`.
-
 ## Worktrees
 
 `[[worktree]]` registers a repository with a required `path` and optional `icon`. Paths must be unique after normalization. Worktree commands use the current checkout or `--path` without registration.
@@ -60,7 +53,7 @@ An empty or failed worktree list keeps the picker open with `Not a Git repositor
 
 ## Picker settings
 
-Session rows form a session → tab → pane tree; Enter selects that exact target. `picker --agents` stays flat. Rename and session removal apply only to roots. Agent panes show session, app, pane number and state.
+The main picker and `list` show live sessions only. Session rows form a session → tab → pane tree; Enter selects that exact target. `picker --agents` stays flat. Rename and session removal apply only to roots. Agent panes show session, app, pane number and state.
 
 Tabs use a custom name, otherwise the focused terminal's title, then its pane label. Live agent titles are appended once per tab; an unnamed agent tab without a title uses its app name. Ordinary titles replace `|` separators with spaces and collapse adjacent spaces. Session rows default to the terminal icon (``); tabs share the Rex icon (``), regardless of the program or agents inside. Custom session/source icons still take precedence. In Rex, pane rows use Rex’s bundled artwork for their actual foreground program or agent (for example zsh, Pi, Claude and Codex). Unknown programs, `NO_COLOR`, and other terminals use the existing character fallback for panes. `show_icons = false` disables both image and character icons. List rows follow Rex's built-in picker: spaced icons, plain tab titles and a theme-aware highlight across the current row. Image rows use fzf’s selection colors so inverse-video attributes do not tint program artwork. Tree connectors, aliases, worktree paths and agent states are subdued; configured icon colors remain in use for character fallbacks. Pane rows put the app and pane number before the title, with agent state first and session context last so narrow windows retain the identifying information. Search still uses the complete original name. Terminal fonts and cell geometry determine the exact appearance.
 
@@ -83,9 +76,9 @@ Requires fzf **0.63+**. `[tui]` applies to both pickers:
 
 CLI overrides: `--focus-pane`, `--icons`, `--separator-aware`, `--prompt`, `--placeholder`, `--query`, `--preview`, `--no-preview`, `--no-alias-auto`. Boolean values use `=`, e.g. `--icons=false`; `--no-preview` wins. CLI prompt/placeholder values may be empty. Worktree picker supports icons, prompt, placeholder and query overrides.
 
-In the session picker, `/` filters aliases and auto-connects an exact alias after typing. Outside this mode, auto-connect requires `alias_auto_connect = true`. Prefilled queries never auto-connect. `#` starts numbered selection unless it is the alias prefix. These modes do not apply to worktree pickers.
+In the session picker, `/` filters aliases of live sessions and auto-connects an exact alias after typing. Outside this mode, auto-connect requires `alias_auto_connect = true`. Prefilled queries never auto-connect. `#` starts numbered selection unless it is the alias prefix. These modes do not apply to worktree pickers.
 
-`[icons.SOURCE]` accepts `icon` and `color` for `agent`, `rex`, `config`, `zoxide`, `directory`, `worktree`. Colors: black, red, green, yellow, blue, magenta, cyan, white, optional `bright-`, or gray/grey. For session/source rows and character fallbacks, custom icons take priority: session → repository → wildcard → source. Native program artwork keeps its original colors.
+`[icons.SOURCE]` accepts `icon` and `color` for `agent`, `rex`, `config`, `directory`, `worktree`. Colors: black, red, green, yellow, blue, magenta, cyan, white, optional `bright-`, or gray/grey. For session/source rows and character fallbacks, custom icons take priority: session → repository → wildcard → source. Native program artwork keeps its original colors.
 
 ### Keybindings
 
@@ -106,7 +99,7 @@ select_2 = ["2", "alt-2"]
 | `half_page_up` / `half_page_down` | `ctrl-u` / `ctrl-d` | Both pickers. |
 | `toggle_preview` | `ctrl-o` | Both pickers. |
 | `rename` | `ctrl-r` | Live session roots. |
-| `remove` | `ctrl-x` | Confirm session, history or worktree removal; agent/config rows are ineligible. |
+| `remove` | `ctrl-x` | Confirm session or worktree removal; agent, tab and pane rows are ineligible. |
 | `refresh` | `ctrl-r` | Worktree picker. |
 | `create_worktree` | `ctrl-w` | Worktree picker, including empty results. |
 | `select_1` … `select_9` | `1` … `9` | Select a numbered row in `#` mode; otherwise insert the digit. |
