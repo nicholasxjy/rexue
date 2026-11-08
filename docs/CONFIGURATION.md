@@ -62,7 +62,7 @@ An empty or failed worktree list keeps the picker open with `Not a Git repositor
 
 Session rows form a session → tab → pane tree; Enter selects that exact target. `picker --agents` stays flat. Rename and session removal apply only to roots. Agent panes show session, app, pane number and state.
 
-Tabs use a custom name, otherwise the focused terminal's title, then its pane label. Live agent titles are appended once per tab; an unnamed agent tab without a title uses its app name. Ordinary titles replace `|` separators with spaces and collapse adjacent spaces. Nerd Font icons distinguish ordinary (``) and agent (`󰚩`) tabs.
+Tabs use a custom name, otherwise the focused terminal's title, then its pane label. Live agent titles are appended once per tab; an unnamed agent tab without a title uses its app name. Ordinary titles replace `|` separators with spaces and collapse adjacent spaces. Session rows default to the terminal icon (``); tabs share the Rex icon (``), regardless of the program or agents inside. Custom session/source icons still take precedence. In Rex, pane rows use Rex’s bundled artwork for their actual foreground program or agent (for example zsh, Pi, Claude and Codex). Unknown programs, `NO_COLOR`, and other terminals use the existing character fallback for panes. `show_icons = false` disables both image and character icons. List rows follow Rex's built-in picker: spaced icons, plain tab titles and a theme-aware highlight across the current row. Image rows use fzf’s selection colors so inverse-video attributes do not tint program artwork. Tree connectors, aliases, worktree paths and agent states are subdued; configured icon colors remain in use for character fallbacks. Pane rows put the app and pane number before the title, with agent state first and session context last so narrow windows retain the identifying information. Search still uses the complete original name. Terminal fonts and cell geometry determine the exact appearance.
 
 With an empty query, initial focus selects the current pane, then its tab or session. `--focus-pane BLOCK_ID` preserves a shortcut's invoking pane; legacy floating shortcuts select their current tab. A floating picker excludes its own temporary pane. Worktree pickers select the checkout containing the current directory or `--path`, including subdirectories and symlinks, otherwise the first row. Initial focus applies once; a prefilled query keeps normal search ordering.
 
@@ -85,7 +85,7 @@ CLI overrides: `--focus-pane`, `--icons`, `--separator-aware`, `--prompt`, `--pl
 
 In the session picker, `/` filters aliases and auto-connects an exact alias after typing. Outside this mode, auto-connect requires `alias_auto_connect = true`. Prefilled queries never auto-connect. `#` starts numbered selection unless it is the alias prefix. These modes do not apply to worktree pickers.
 
-`[icons.SOURCE]` accepts `icon` and `color` for `agent`, `rex`, `config`, `zoxide`, `directory`, `worktree`. Colors: black, red, green, yellow, blue, magenta, cyan, white, optional `bright-`, or gray/grey. Custom icons take priority: session → repository → wildcard → source.
+`[icons.SOURCE]` accepts `icon` and `color` for `agent`, `rex`, `config`, `zoxide`, `directory`, `worktree`. Colors: black, red, green, yellow, blue, magenta, cyan, white, optional `bright-`, or gray/grey. For session/source rows and character fallbacks, custom icons take priority: session → repository → wildcard → source. Native program artwork keeps its original colors.
 
 ### Keybindings
 

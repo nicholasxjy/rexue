@@ -83,6 +83,8 @@ pub struct Tab {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Entry {
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program: Option<String>,
     #[serde(default)]
     pub path: PathBuf,
     pub source: Source,
@@ -114,6 +116,7 @@ impl Entry {
     pub fn new(name: impl Into<String>, path: impl Into<PathBuf>, source: Source) -> Self {
         Self {
             name: name.into(),
+            program: None,
             path: path.into(),
             source,
             session_id: None,

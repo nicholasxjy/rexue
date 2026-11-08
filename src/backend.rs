@@ -446,6 +446,7 @@ impl Rex {
                         process.as_ref().and_then(process_path).unwrap_or_default(),
                         Source::Rex,
                     );
+                    entry.program = Some(label.into());
                     entry.session_id = Some(id.into());
                     entry.window_id = Some(window_id.into());
                     entry.block_id = Some(block_id.into());
@@ -457,6 +458,7 @@ impl Rex {
                     running.path,
                     Source::Agent,
                 );
+                agent.program = Some(running.app.into());
                 agent.session_id = Some(id.into());
                 agent.agent = Some(Agent {
                     app: running.app.into(),

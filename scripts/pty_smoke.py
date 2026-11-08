@@ -41,7 +41,7 @@ class Session:
     def __init__(self, binary, cfg, root, arguments=None, env_extra=None, cwd=None, **_):
         self.master, self.slave = pty.openpty()
         fcntl.ioctl(self.slave, termios.TIOCSWINSZ, struct.pack('HHHH', 30, 120, 0, 0))
-        env = dict(os.environ, TERM='xterm-256color', REXUE_STATE_DIR=str(root / 'state'), XDG_CACHE_HOME=str(root / 'cache'))
+        env = dict(os.environ, TERM='xterm-256color', TERM_PROGRAM='rexue-pty-test', REXUE_STATE_DIR=str(root / 'state'), XDG_CACHE_HOME=str(root / 'cache'))
         env.update(env_extra or {})
         # These must be ignored by rexue; otherwise they corrupt the row protocol.
         env.update(FZF_DEFAULT_OPTS='--multi --print-query --bind enter:abort', FZF_DEFAULT_COMMAND='exit 93')
@@ -283,11 +283,11 @@ else:
 
         def agent_navigation(s):
             s.resize(240, 30)
-            s.expect('├── [ Shell title]')
-            s.expect('└── [󰚩 Agents · Agent title · Other pane title]')
+            s.expect('├──   Shell title')
+            s.expect('└──   Agents · Agent title · Other pane title')
             s.expect('6/6')
-            s.expect('agent-project / pi · pane 1 · Agents')
-            s.expect('agent-project / pi · pane 2 · Agents')
+            s.expect('[working] pi · pane 1 · Agents')
+            s.expect('[blocked] pi · pane 2 · Agents')
             s.expect('AGENT_PREVIEW_block:shell')
             s.send(b'\x1b[B' * 4)
             s.expect('AGENT_PREVIEW_block:first')
@@ -309,12 +309,12 @@ else:
         def session_agent_titles(s, icons):
             s.resize(240, 30)
             if icons:
-                s.expect('├── [ Shell title]')
-                s.expect('└── [󰚩 Agents · Agent title · Other pane title]')
+                s.expect('├──   Shell title')
+                s.expect('└──   Agents · Agent title · Other pane title')
             else:
-                s.expect('├── [Shell title]')
-                s.expect('└── [Agents · Agent title · Other pane title]')
-                assert '' not in s.text() and '󰚩' not in s.text(), s.text()
+                s.expect('├── Shell title')
+                s.expect('└── Agents · Agent title · Other pane title')
+                assert all(icon not in s.text() for icon in ('', '', '󰚩')), s.text()
             s.expect('6/6')
             s.send(b'\x1b')
         run_case('session-only-agent-tab-titles-and-icons', ['picker', '--rex'],

@@ -2,6 +2,7 @@ mod agent;
 pub mod backend;
 pub mod cli;
 pub mod config;
+mod icons;
 pub mod keybindings;
 mod keyboard;
 pub mod model;

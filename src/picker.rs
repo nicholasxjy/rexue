@@ -41,6 +41,7 @@ pub enum InitialFocus {
 #[derive(Debug, Clone)]
 pub struct PickerOptions {
     pub show_icons: bool,
+    pub native_icons: bool,
     pub separator_aware: bool,
     pub prompt: String,
     pub placeholder: String,
@@ -66,6 +67,7 @@ impl Default for PickerOptions {
     fn default() -> Self {
         Self {
             show_icons: true,
+            native_icons: false,
             separator_aware: false,
             prompt: "> ".into(),
             placeholder: "Filter sessions...".into(),
@@ -109,6 +111,7 @@ struct Catalog {
     auto_armed: bool,
     status: String,
     initial_focus: Option<InitialFocus>,
+    loaded_icons: BTreeSet<&'static str>,
 }
 fn same_entry(a: &Entry, b: &Entry) -> bool {
     if a.session_id.is_some() && b.session_id.is_some() {
@@ -135,6 +138,7 @@ impl Catalog {
             auto_armed: false,
             status: String::new(),
             initial_focus: None,
+            loaded_icons: BTreeSet::new(),
         };
         state.replace(entries);
         state
@@ -458,6 +462,20 @@ impl Bridge {
                         let request: Request = serde_json::from_reader((&mut stream).take(1024 * 1024))?;
                         match request.action.as_str() {
                             "rows" => rows(&state, &request.query),
+                            "icons" | "icons-reset" => {
+                                let mut s = state.lock().unwrap();
+                                if !s.options.native_icons { return Ok(Vec::new()); }
+                                if request.action == "icons-reset" { s.loaded_icons.clear(); }
+                                let icons: Vec<_> = s.targets.values().filter_map(|entry| {
+                                    entry.program.as_deref().or_else(|| entry.agent.as_ref().map(|a| a.app.as_str()))
+                                        .and_then(crate::icons::icon)
+                                }).collect();
+                                let mut bytes = Vec::new();
+                                for icon in icons {
+                                    if s.loaded_icons.insert(icon.name) { icon.transmit(&mut bytes); }
+                                }
+                                Ok(bytes)
+                            }
                             "status" => Ok(state.lock().unwrap().header().into_bytes()),
                             "initial" => {
                                 let mut s = state.lock().unwrap();
@@ -579,8 +597,12 @@ fn rows(state: &Mutex<Catalog>, query: &str) -> Result<Vec<u8>> {
         let (ids, pattern, fuzzy) = s.candidates(query);
         let options = &s.options;
         let mut input = Vec::new();
+        let mut session: Option<&Entry> = None;
         for id in ids {
             let entry = &s.targets[&id];
+            if entry.is_session() {
+                session = Some(entry);
+            }
             let search = if options.worktree || entry.source == Source::Agent {
                 format!(
                     "{} {}",
@@ -596,8 +618,15 @@ fn rows(state: &Mutex<Catalog>, query: &str) -> Result<Vec<u8>> {
                 search
             };
             let branch = s.branches.get(&id).map(String::as_str).unwrap_or("");
-            let display = display(entry, options);
-            write!(input, "{id}\t{search}\t{branch}{display}\0")?;
+            let session_name = session
+                .filter(|root| root.session_id == entry.session_id)
+                .map(|root| root.name.as_str());
+            let display = display(entry, options, session_name);
+            if branch.is_empty() {
+                write!(input, "{id}\t{search}\t{display}\0")?;
+            } else {
+                write!(input, "{id}\t{search}\t\x1b[2m{branch}\x1b[22m{display}\0")?;
+            }
         }
         (
             input,
@@ -623,7 +652,8 @@ fn rows(state: &Mutex<Catalog>, query: &str) -> Result<Vec<u8>> {
             command.args([
                 "--read0",
                 "--print0",
-                "--ansi",
+                // Only the cleaned search column is matched; preserve display ANSI.
+                "--no-ansi",
                 "--delimiter=\t",
                 "--nth=2",
                 "--ignore-case",
@@ -743,16 +773,34 @@ fn finder(options: &PickerOptions, bridge: &Bridge, header: &str, query: &str) -
             "--layout=reverse",
             "--delimiter=\t",
             "--with-nth=3..",
+            "--highlight-line",
         ])
+        .arg(if options.native_icons {
+            "--color=fg+:-1:regular,pointer:-1,gutter:-1"
+        } else {
+            "--color=fg+:-1:regular:reverse,bg+:-1,pointer:-1:reverse,gutter:-1"
+        })
         .arg(format!("--prompt={}", clean(&options.prompt)))
         .arg(format!("--ghost={}", clean(&options.placeholder)))
         .arg(format!("--pointer={}", clean(&options.pointer)))
         .arg(format!("--query={query}"))
         .arg(format!("--header={header}"))
-        .arg(format!("--bind=start:reload({HELPER} rows)"))
+        .arg(format!(
+            "--bind=start:{}reload({HELPER} rows)",
+            if options.native_icons {
+                format!("execute-silent({HELPER} icons-reset > /dev/tty)+")
+            } else {
+                String::new()
+            }
+        ))
         .arg(format!("--bind=change:bg-cancel+reload({HELPER} rows)"))
         .arg(format!(
-            "--bind=load:transform({HELPER} initial)+bg-transform({HELPER} loaded)"
+            "--bind=load:{}transform({HELPER} initial)+bg-transform({HELPER} loaded)",
+            if options.native_icons {
+                format!("execute-silent({HELPER} icons > /dev/tty)+")
+            } else {
+                String::new()
+            }
         ));
     let bindings = &options.keybindings;
     bindings.reset(&mut command, &Keybindings::picker_actions(options.worktree));
@@ -810,7 +858,11 @@ fn finder(options: &PickerOptions, bridge: &Bridge, header: &str, query: &str) -
         .stderr(Stdio::inherit())
         .spawn()
         .context("could not start system fzf; is fzf installed and on PATH?")?;
-    wait_fzf(child, keyboard)
+    let result = wait_fzf(child, keyboard);
+    if options.native_icons {
+        crate::icons::clear();
+    }
+    result
 }
 #[derive(Debug, PartialEq, Eq)]
 enum ChoiceAction {
@@ -1131,6 +1183,8 @@ pub fn pick_with_create(
         None
     };
     let fetch: Fetch = Arc::new(Mutex::new(Box::new(fetch)));
+    let mut options = options;
+    options.native_icons = options.show_icons && !options.worktree && crate::icons::available();
     let mut query = options.query.clone();
     let mut catalog = Catalog::new(options.clone(), entries);
     catalog.status = status;
@@ -1256,7 +1310,34 @@ fn normalize(text: &str) -> String {
         })
         .collect()
 }
-fn display(entry: &Entry, options: &PickerOptions) -> String {
+fn display_icon(
+    icon: &str,
+    source: Source,
+    program: Option<&str>,
+    options: &PickerOptions,
+) -> String {
+    if options.native_icons
+        && let Some(icon) = program.and_then(crate::icons::icon)
+    {
+        return icon.placeholder();
+    }
+    let icon = clean(icon);
+    let padding = options
+        .icon_width
+        .saturating_sub(icon.trim_end_matches(' ').width())
+        .min(16);
+    let color = options
+        .glyph_colors
+        .get(source.as_str())
+        .and_then(|s| crate::cli::ansi_color(&s.to_ascii_lowercase()));
+    let icon = match color {
+        Some(color) => format!("\x1b[{color}m{icon}\x1b[39m"),
+        None => format!("\x1b[2m{icon}\x1b[22m"),
+    };
+    format!("{icon}{}", " ".repeat(padding + 2))
+}
+
+fn display(entry: &Entry, options: &PickerOptions, session_name: Option<&str>) -> String {
     if entry.window_id().is_some() && entry.block_id().is_none() {
         return display_tab(&entry.name, !entry.agent_tab_indices.is_empty(), options);
     }
@@ -1272,39 +1353,54 @@ fn display(entry: &Entry, options: &PickerOptions) -> String {
                     .get(entry.source.as_str())
                     .map(String::as_str)
             })
-            .unwrap_or(entry.source.glyph());
-        let icon = clean(icon);
-        let padding = options
-            .icon_width
-            .saturating_sub(icon.trim_end_matches(' ').width())
-            .min(16);
-        let color = options
-            .glyph_colors
-            .get(entry.source.as_str())
-            .and_then(|s| crate::cli::ansi_color(&s.to_ascii_lowercase()));
-        if let Some(color) = color {
-            text.push_str(&format!("\x1b[{color}m{icon}\x1b[0m"));
-        } else {
-            text.push_str(&icon);
-        }
-        text.push_str(&" ".repeat(padding + 1));
+            .unwrap_or(if entry.is_session() {
+                ""
+            } else {
+                entry.source.glyph()
+            });
+        text.push_str(&display_icon(
+            icon,
+            entry.source,
+            entry
+                .program
+                .as_deref()
+                .or_else(|| entry.agent.as_ref().map(|a| a.app.as_str())),
+            options,
+        ));
     }
     if options.worktree {
         text.push_str(&format!(
-            "{}  {}",
+            "{}  \x1b[2m{}\x1b[22m",
             clean(&entry.name),
             clean(&entry.path.display().to_string())
         ));
     } else {
         if let Some(alias) = options.aliases.values().find(|a| a.target == entry.name) {
-            text.push_str(&format!("[{}] ", clean(&alias.alias)));
+            text.push_str(&format!("\x1b[2m[{}]\x1b[22m ", clean(&alias.alias)));
         }
-        text.push_str(&clean(&entry.display_name()));
+        let session_name = entry
+            .agent
+            .as_ref()
+            .map(|a| a.session_name.as_str())
+            .or(session_name);
+        let pane_name = entry
+            .block_id()
+            .and(session_name)
+            .and_then(|session| entry.name.strip_prefix(&format!("{session} / ")));
+        if let Some(agent) = &entry.agent {
+            text.push_str(&format!("\x1b[2m[{}]\x1b[22m ", clean(&agent.state)));
+        }
+        text.push_str(&clean(pane_name.unwrap_or(&entry.name)));
+        if pane_name.is_some() {
+            text.push_str(&format!(
+                "\x1b[2m · {}\x1b[22m",
+                clean(session_name.unwrap())
+            ));
+        }
         if entry.is_session() && entry.tabs.is_empty() {
             for (index, name) in entry.tab_names.iter().enumerate() {
                 let is_agent = entry.agent_tab_indices.contains(&index);
-                text.push(' ');
-                text.push_str(&display_tab(name, is_agent, options));
+                text.push_str(&format!(" [{}]", display_tab(name, is_agent, options)));
             }
         }
     }
@@ -1322,15 +1418,11 @@ fn display_tab(name: &str, is_agent: bool, options: &PickerOptions) -> String {
     };
     if options.show_icons {
         format!(
-            "[{} {name}]",
-            if is_agent {
-                Source::Agent.glyph()
-            } else {
-                ""
-            }
+            "{}{name}",
+            display_icon(Source::Rex.glyph(), Source::Rex, None, options)
         )
     } else {
-        format!("[{name}]")
+        name
     }
 }
 #[cfg(test)]
@@ -1564,7 +1656,7 @@ mod tests {
         let text = String::from_utf8(rows(&state, "").unwrap()).unwrap();
         assert_eq!(
             text,
-            format!("{id}\tproject\t[p] project [Shell] [编辑器] [Shell] [Logs]\0")
+            format!("{id}\tproject\t\x1b[2m[p]\x1b[22m project [Shell] [编辑器] [Shell] [Logs]\0")
         );
         assert_eq!(
             target(&state, Some(&id.to_string())).unwrap().target(),
@@ -1582,11 +1674,14 @@ mod tests {
         state.lock().unwrap().replace(vec![entry]);
         assert_eq!(state.lock().unwrap().entries, vec![id]);
         let text = String::from_utf8(rows(&state, "").unwrap()).unwrap();
-        assert_eq!(text, format!("{id}\tproject\t[p] project [Renamed]\0"));
+        assert_eq!(
+            text,
+            format!("{id}\tproject\t\x1b[2m[p]\x1b[22m project [Renamed]\0")
+        );
     }
 
     #[test]
-    fn session_tab_icons_distinguish_agents_and_follow_icon_toggle() {
+    fn session_tab_icons_are_uniform_and_follow_icon_toggle() {
         let mut entry: Entry = serde_json::from_value(serde_json::json!({
             "name": "project",
             "source": "rex",
@@ -1597,12 +1692,12 @@ mod tests {
         .unwrap();
         let mut options = PickerOptions::default();
         assert_eq!(
-            display(&entry, &options),
-            " project [ zsh ~/Projects/rexue] [󰚩 Shell | Agent] [󰚩 Fix picker]"
+            strip_ansi_escapes::strip_str(display(&entry, &options, None)),
+            "  project [  zsh ~/Projects/rexue] [  Shell | Agent] [  Fix picker]"
         );
         options.show_icons = false;
         assert_eq!(
-            display(&entry, &options),
+            display(&entry, &options, None),
             "project [zsh ~/Projects/rexue] [Shell | Agent] [Fix picker]"
         );
 
@@ -1619,11 +1714,116 @@ mod tests {
         state.lock().unwrap().replace(vec![entry]);
         assert_eq!(state.lock().unwrap().entries, vec![id]);
         let text = String::from_utf8(rows(&state, "").unwrap()).unwrap();
-        assert!(text.contains("project [ Shell] [ Shell Agent] [ Fix picker]"));
+        assert!(
+            strip_ansi_escapes::strip_str(&text)
+                .contains("project [  Shell] [  Shell Agent] [  Fix picker]")
+        );
         assert_eq!(
             target(&state, Some(&id.to_string())).unwrap().target(),
             "session:project-full"
         );
+    }
+
+    #[test]
+    fn row_icons_align_wide_glyphs_and_tabs_without_leaking_controls_or_color() {
+        let mut options = PickerOptions {
+            icon_width: 2,
+            ..Default::default()
+        };
+        options.glyph_colors.insert("rex".into(), "blue".into());
+        let mut entry = Entry::new("中文项目", "/project", Source::Rex);
+        entry.icon = Some("\x1b[31m界\x1b[0m\t\n".into());
+        assert_eq!(
+            display(&entry, &options, None),
+            "\x1b[34m界\x1b[39m  中文项目"
+        );
+        assert_eq!(
+            display_tab("终端 | ~/项目", false, &options),
+            "\x1b[34m\x1b[39m   终端 ~/项目"
+        );
+        options.show_icons = false;
+        assert_eq!(display(&entry, &options, None), "中文项目");
+        assert_eq!(display_tab("终端 | ~/项目", false, &options), "终端 ~/项目");
+    }
+
+    #[test]
+    fn fuzzy_filter_keeps_native_image_placeholder_colors() {
+        let mut entry = Entry::new("needle", "/project", Source::Rex);
+        entry.program = Some("pi".into());
+        let state = Mutex::new(Catalog::new(
+            PickerOptions {
+                native_icons: true,
+                ..Default::default()
+            },
+            vec![entry],
+        ));
+        let text = String::from_utf8(rows(&state, "needle").unwrap()).unwrap();
+        assert!(text.contains(&crate::icons::icon("pi").unwrap().placeholder()));
+        assert!(text.starts_with("0\tneedle\t"));
+    }
+
+    #[test]
+    fn native_program_icons_use_metadata_and_follow_icon_toggle() {
+        let mut options = PickerOptions {
+            native_icons: true,
+            ..Default::default()
+        };
+        let mut entry = Entry::new("Claude in a custom tab title", "/project", Source::Rex);
+        entry.program = Some("zsh".into());
+        entry.window_id = Some("window:tab".into());
+        let tab = display(&entry, &options, None);
+        assert_eq!(
+            strip_ansi_escapes::strip_str(&tab),
+            "  Claude in a custom tab title"
+        );
+        entry.program = Some("codex".into());
+        entry.agent_tab_indices.push(0);
+        assert_eq!(display(&entry, &options, None), tab);
+        entry.block_id = Some("block:pane".into());
+        entry.program = Some("zsh".into());
+        assert!(
+            display(&entry, &options, None)
+                .starts_with(&crate::icons::icon("zsh").unwrap().placeholder())
+        );
+        entry.program = Some("codex".into());
+        assert!(
+            display(&entry, &options, None)
+                .starts_with(&crate::icons::icon("codex").unwrap().placeholder())
+        );
+        entry.program = Some("unknown-program".into());
+        assert!(!display(&entry, &options, None).contains('\u{10eeee}'));
+        options.show_icons = false;
+        assert_eq!(
+            display(&entry, &options, None),
+            "Claude in a custom tab title"
+        );
+    }
+
+    #[test]
+    fn long_pane_names_keep_state_and_number_visible_before_context() {
+        let session = "中文会话名称".repeat(20);
+        let mut entry = Entry::new(
+            format!("{session} / pi · pane 2 · 相同的长标题"),
+            "/project",
+            Source::Agent,
+        );
+        entry.session_id = Some("session:full".into());
+        entry.agent = Some(crate::model::Agent {
+            app: "pi".into(),
+            state: "blocked".into(),
+            session_name: session.clone(),
+            window_id: "window:full".into(),
+            block_id: "block:second".into(),
+        });
+        let options = PickerOptions {
+            show_icons: false,
+            ..Default::default()
+        };
+        let text = strip_ansi_escapes::strip_str(display(&entry, &options, None));
+        assert!(text.starts_with("[blocked] pi · pane 2 · 相同的长标题 · "));
+        assert!(text.ends_with(&session));
+        assert_eq!(entry.target(), "block:second");
+        assert!(entry.display_name().starts_with(&session));
     }
 
     #[test]
@@ -1686,7 +1886,7 @@ mod tests {
         assert_eq!(catalog.entries, vec![ids[0], ids[2], ids[1]]);
         let state = Mutex::new(catalog);
         let text = String::from_utf8(rows(&state, "").unwrap()).unwrap();
-        assert!(text.contains("\tproject / pi · Agents [working]\0"));
+        assert!(text.contains("\t\x1b[2m[working]\x1b[22m pi · Agents\x1b[2m · project\x1b[22m\0"));
         assert!(!text.contains('\n'));
         assert!(text.starts_with(&format!("{}\tproject\tproject\0", ids[0])));
         let filtered = String::from_utf8(rows(&state, "blocked").unwrap()).unwrap();
@@ -1726,11 +1926,19 @@ mod tests {
             .map(|s| s.splitn(3, '\t').collect::<Vec<_>>())
             .collect();
         assert_eq!(fields.len(), 5, "{text:?}");
-        assert_eq!(fields[0][2], " project");
-        assert_eq!(fields[1][2], "├── [ Shell cwd]");
-        assert!(fields[2][2].starts_with("│   └── "));
-        assert_eq!(fields[3][2], "└── [󰚩 Agents | task]");
-        assert!(fields[4][2].starts_with("    └── 󰚩 project / pi"));
+        let visible: Vec<_> = fields
+            .iter()
+            .map(|row| strip_ansi_escapes::strip_str(row[2]))
+            .collect();
+        assert_eq!(visible[0], "  project");
+        assert_eq!(visible[1], "├──   Shell cwd");
+        assert!(visible[2].starts_with("│   └── "));
+        assert_eq!(visible[3], "└──   Agents | task");
+        assert_eq!(
+            visible[4],
+            "    └── 󰚩  [working] pi · pane 1 · Agents · project"
+        );
+        assert_eq!(visible[2], "│   └──   zsh · pane 1 · Shell · project");
         for (row, expected) in fields.iter().zip([
             "session:full",
             "window:first",
@@ -1753,7 +1961,7 @@ mod tests {
         assert!(!filtered.contains("block:agent")); // IDs stay behind the row protocol.
         assert!(filtered.contains("[working]"));
         let numbered = String::from_utf8(rows(&state, "#").unwrap()).unwrap();
-        assert!(numbered.contains("#4 └── [󰚩 Agents | task]"));
+        assert!(strip_ansi_escapes::strip_str(numbered).contains("#4 └──   Agents | task"));
     }
 
     #[test]
