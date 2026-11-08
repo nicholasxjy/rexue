@@ -343,8 +343,8 @@ else:
             s.expect('├──   Shell title')
             s.expect('└──   Agents · Agent title · Other pane title')
             s.expect('6/6')
-            s.expect('[working] pi · pane 1 · Agents')
-            s.expect('[blocked] pi · pane 2 · Agents')
+            s.expect('Agent title  •••')
+            s.expect('Other pane title  Blocked')
             s.expect('AGENT_PREVIEW_block:shell')
             s.send(b'\x1b[B' * 4)
             s.expect('AGENT_PREVIEW_block:first')
@@ -355,7 +355,7 @@ else:
         calls=[json.loads(line) for line in (root/'rex-calls.jsonl').read_text().splitlines()]
         assert ['focus','-s','session:agents','block:second'] in calls,calls
 
-        run_case('tree-select-tab-with-current-format', ['picker', '--rex', '--query=Agents · Agent title · Other pane title'],
+        run_case('tree-select-tab-with-current-format', ['picker', '--rex', '--query=^Agents · Agent title · Other pane title$'],
                  lambda s: (s.expect('1/1'), s.expect('AGENT_PREVIEW_block:first'), s.send(b'\r')))
         run_case('tree-select-ordinary-pane', ['picker', '--rex', '--query=pane 1 · Shell'],
                  lambda s: (s.expect('1/1'), s.expect('AGENT_PREVIEW_block:shell'), s.send(b'\r')))
@@ -389,6 +389,18 @@ else:
         run_case('agents-reject-session-delete-and-rename-actions', ['picker', '--agents'], agent_guards)
         run_case('agents-filter-by-state-and-connect-pane', ['picker', '--agents'],
                  lambda s: (s.expect('AGENT_PREVIEW_block:first'), s.send(b'blocked'), s.expect('1/1'), s.expect('AGENT_PREVIEW_block:second'), s.send(b'\r')))
+        def pane_title_search(s, tree):
+            s.expect('Other pane title  Blocked')
+            if tree:
+                s.expect('2/2')
+                s.send(b'\x1b[B')
+            s.expect('AGENT_PREVIEW_block:second')
+            s.send(b'\r')
+        for flags in [['--rex'], ['--agents']]:
+            run_case('pane-own-title-search-' + flags[0], ['picker', *flags, '--icons=false', '--query=Other pane title'],
+                     lambda s: pane_title_search(s, flags == ['--rex']))
+            calls=[json.loads(line) for line in (root/'rex-calls.jsonl').read_text().splitlines()]
+            assert ['focus','-s','session:agents','block:second'] in calls,calls
         assert not (root/'killed').exists()
         (root/'agents-mode').unlink()
 

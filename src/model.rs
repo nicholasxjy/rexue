@@ -16,6 +16,13 @@ pub fn alias_key(value: &str) -> String {
         .collect()
 }
 
+pub(crate) fn clean(text: &str) -> String {
+    strip_ansi_escapes::strip_str(text)
+        .chars()
+        .filter(|c| !c.is_control())
+        .collect()
+}
+
 #[cfg(test)]
 mod folding_tests {
     use super::alias_key;
@@ -82,6 +89,8 @@ pub struct Tab {
 pub struct Entry {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub program: Option<String>,
     #[serde(default)]
     pub path: PathBuf,
@@ -112,6 +121,7 @@ impl Entry {
     pub fn new(name: impl Into<String>, path: impl Into<PathBuf>, source: Source) -> Self {
         Self {
             name: name.into(),
+            pane_title: None,
             program: None,
             path: path.into(),
             source,

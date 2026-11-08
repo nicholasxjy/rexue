@@ -153,7 +153,7 @@ esac
                 'picker', '--agents' if args.agents else '--rex', '--query', args.query],
                 env_extra=picker_env)
             try:
-                session.expect('project-0')
+                session.expect('Task 0-0' if args.agents else 'project-0')
                 open_ms = (time.perf_counter() - started) * 1000
                 # Drain the initial fzf callbacks before observing idle work.
                 until = time.monotonic() + 0.15

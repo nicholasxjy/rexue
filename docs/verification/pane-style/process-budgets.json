@@ -1,0 +1,65 @@
+{
+  "build": "debug",
+  "runs_per_case": 1,
+  "purpose": "Rex process budgets and terminal restoration; not release timing benchmarks",
+  "reports": {
+    "modern_agents": {
+      "method": "Four sessions, one unnamed tab and four panes per session (three agents and one shell); each Rex CLI process sleeps 15ms to model process/connection setup (individual RPC latency within Lua is not simulated). Real fzf in a PTY; preview disabled. switch_ms measures Enter until the fixture receives the validated switch request; selection_ms measures Enter until process exit, including target validation, focus/switch and state updates. The first run has empty history; later runs reuse it. RSS sums the picker and its descendants; CPU is the idle CPU-time delta, excluding the Python wrapper. This does not measure live app rendering or peak startup memory.",
+      "runs": 1,
+      "legacy_rex": false,
+      "agents": true,
+      "query": "",
+      "median": {
+        "open_ms": 1089.82,
+        "open_rex_calls": 3,
+        "selection_ms": 36.88,
+        "switch_ms": 30.22,
+        "selection_rex_calls": 1,
+        "idle_rss_kib": 18032,
+        "idle_cpu_percent": 0.0
+      },
+      "samples": [
+        {
+          "open_ms": 1089.82,
+          "open_rex_calls": 3,
+          "selection_ms": 36.88,
+          "switch_ms": 30.22,
+          "selection_rex_calls": 1,
+          "idle_rss_kib": 18032,
+          "idle_cpu_percent": 0.0,
+          "idle_rex_calls": 0,
+          "terminal_restored": true
+        }
+      ]
+    },
+    "legacy": {
+      "method": "Four sessions, one unnamed tab and four panes per session (three agents and one shell); each Rex CLI process sleeps 15ms to model process/connection setup (individual RPC latency within Lua is not simulated). Real fzf in a PTY; preview disabled. switch_ms measures Enter until the fixture receives the validated switch request; selection_ms measures Enter until process exit, including target validation, focus/switch and state updates. The first run has empty history; later runs reuse it. RSS sums the picker and its descendants; CPU is the idle CPU-time delta, excluding the Python wrapper. This does not measure live app rendering or peak startup memory.",
+      "runs": 1,
+      "legacy_rex": true,
+      "agents": false,
+      "query": "",
+      "median": {
+        "open_ms": 1732.44,
+        "open_rex_calls": 56,
+        "selection_ms": 441.14,
+        "switch_ms": 431.01,
+        "selection_rex_calls": 20,
+        "idle_rss_kib": 18624,
+        "idle_cpu_percent": 0.0
+      },
+      "samples": [
+        {
+          "open_ms": 1732.44,
+          "open_rex_calls": 56,
+          "selection_ms": 441.14,
+          "switch_ms": 431.01,
+          "selection_rex_calls": 20,
+          "idle_rss_kib": 18624,
+          "idle_cpu_percent": 0.0,
+          "idle_rex_calls": 0,
+          "terminal_restored": true
+        }
+      ]
+    }
+  }
+}

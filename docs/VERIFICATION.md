@@ -68,7 +68,7 @@ python3 scripts/wildcard_smoke.py --binary target/debug/rexue
 cargo build --release
 python3 scripts/performance_smoke.py --binary target/release/rexue --max-rex-calls 3 --max-selection-rex-calls 1
 python3 scripts/performance_smoke.py --binary target/release/rexue --agents --max-rex-calls 3 --max-selection-rex-calls 1
-python3 scripts/performance_smoke.py --binary target/release/rexue --legacy-rex --max-rex-calls 52
+python3 scripts/performance_smoke.py --binary target/release/rexue --legacy-rex --max-rex-calls 56
 python3 scripts/performance_smoke.py --binary target/release/rexue --query project-0 --max-selection-rex-calls 1 --max-selection-fzf-calls 0
 python3 scripts/performance_smoke.py --binary target/release/rexue --agents --query project-0 --max-selection-rex-calls 1 --max-selection-fzf-calls 0
 ```
@@ -81,7 +81,7 @@ cargo test --test backend lua_snapshot_only_reads_needed_connection_metadata -- 
 
 This separate test checks the discovery and connection RPC budgets without requiring the CLI in ordinary Rust test runs.
 
-Uses real fzf with four fixture sessions, each with one unnamed tab, three agents and one shell. Each Rex process waits 15ms to model startup/connection cost. Reports five-run medians for visible-list time, Enter-to-switch submission time (`switch_ms`), Enter-to-exit selection time, Rex process counts, idle RSS and CPU; checks idle requests and terminal restoration. The fixture timestamps switch submission after the CLI's modeled connection delay and after it receives the validated target. Exit time also includes session-switch history recording. The first run starts with empty history; later runs reuse it.
+Uses real fzf with four fixture sessions, each with one unnamed tab, three agents and one shell. Legacy discovery also reads each ordinary shell's own title, bringing its opening budget to 56 Rex processes; the Lua snapshot already includes these titles and keeps its existing budget. Each Rex process waits 15ms to model startup/connection cost. Reports five-run medians for visible-list time, Enter-to-switch submission time (`switch_ms`), Enter-to-exit selection time, Rex process counts, idle RSS and CPU; checks idle requests and terminal restoration. The fixture timestamps switch submission after the CLI's modeled connection delay and after it receives the validated target. Exit time also includes session-switch history recording. The first run starts with empty history; later runs reuse it.
 
 Native discovery uses a fresh Lua snapshot. Selecting a resolved live session, tab or pane uses one Rex CLI process for client preflight, a fresh target snapshot, focus and `session.select`. Connection snapshots omit display titles; agent selection fetches only the target's process and program status, while keeping its current tab from the fresh session view. A JSON line handshake on stdin/stdout lets Rust validate the snapshot with the existing agent and target rules before the same CLI connection commits the switch. The state lock precedes the snapshot; history is saved after the switch succeeds. Cancellation, malformed data and preflight errors close the child without submitting focus. The exchange retains bounded output, deadlines and process-group cleanup. `--legacy-rex` checks the fallback for CLIs without Lua. Backend tests cover snapshot equivalence, target freshness, exact IDs, process budgets, failed-switch history and protocol cleanup. Use `--runs N`, `--idle-seconds N` or `--output PATH` to customize measurements.
 
@@ -119,4 +119,5 @@ Receipts describe recorded runs, not the current checkout. Update only after exe
 | --- | --- |
 | Automated | [Picker](verification/fzf.json), [keyboard](verification/keyboard.json), [Worktrunk](verification/worktree.json), [removal](verification/worktree-removal.json), [CLI](verification/public-cli.json), [session/agent fixtures](verification/session-agents.json) |
 | Live navigation | [Session tree](verification/session-tree.json), [initial focus](verification/initial-focus.json), [agents](verification/agent-picker.json) |
+| Pane style | [Pane rendering, accepted differences and live navigation](verification/pane-style.md) |
 | Performance | [Selection](verification/performance-selection.json), [startup](verification/performance-startup.json), [earlier samples](verification/performance.json) |

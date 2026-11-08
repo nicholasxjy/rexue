@@ -1,12 +1,13 @@
 //! Documented Rex CLI adapter. Labels are for display; mutations use full IDs.
 use crate::{
-    model::{Agent, Entry, Source, Tab},
+    model::{Agent, Entry, Source, Tab, clean},
     process,
 };
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::BTreeMap, path::PathBuf, process::Command, time::Duration};
+use unicode_width::UnicodeWidthStr;
 
 #[derive(Debug, Clone)]
 pub struct Rex {
@@ -435,6 +436,22 @@ impl Rex {
                         .unwrap_or(Value::Null);
                     crate::agent::running(process, &status)
                 });
+                let title = terminal
+                    .then(|| {
+                        titles
+                            .get(block_id)
+                            .cloned()
+                            .unwrap_or_else(|| self.block_title(id, block_id, snapshot))
+                    })
+                    .flatten();
+                let pane_title = title.clone().unwrap_or_else(|| {
+                    process
+                        .as_ref()
+                        .and_then(process_name)
+                        .or_else(|| block["label"].as_str().filter(|label| !label.is_empty()))
+                        .unwrap_or(if terminal { "terminal" } else { "pane" })
+                        .into()
+                });
                 let Some(running) = running else {
                     let label = process
                         .as_ref()
@@ -446,7 +463,14 @@ impl Rex {
                         process.as_ref().and_then(process_path).unwrap_or_default(),
                         Source::Rex,
                     );
-                    entry.program = Some(label.into());
+                    entry.program = Some(
+                        process
+                            .as_ref()
+                            .and_then(process_name)
+                            .unwrap_or(label)
+                            .into(),
+                    );
+                    entry.pane_title = Some(pane_title);
                     entry.session_id = Some(id.into());
                     entry.window_id = Some(window_id.into());
                     entry.block_id = Some(block_id.into());
@@ -459,6 +483,7 @@ impl Rex {
                     Source::Agent,
                 );
                 agent.program = Some(running.app.into());
+                agent.pane_title = Some(pane_title);
                 agent.session_id = Some(id.into());
                 agent.agent = Some(Agent {
                     app: running.app.into(),
@@ -467,17 +492,6 @@ impl Rex {
                     window_id: window_id.into(),
                     block_id: block_id.into(),
                 });
-                // Reuse the focused title fetched for an unnamed tab, including an
-                // empty/failed result. Fetch other agent titles in the bounded pane
-                // workers instead of serially after all process queries complete.
-                let title = if sessions {
-                    titles
-                        .get(block_id)
-                        .cloned()
-                        .unwrap_or_else(|| self.block_title(id, block_id, snapshot))
-                } else {
-                    None
-                };
                 Ok(vec![(agent, title)])
             },
         )?;
@@ -625,7 +639,7 @@ impl Rex {
         self.block_metadata(session, block, "title", snapshot)
             .ok()?["title"]
             .as_str()
-            .filter(|title| !title.is_empty())
+            .filter(|title| clean(title).split_whitespace().any(|word| word.width() > 0))
             .map(str::to_owned)
     }
     pub fn block_process(&self, session: &str, block: &str) -> Result<Value> {
@@ -737,6 +751,20 @@ fn parallel_entries<T: Sync, U: Send>(
                 Ok(entries)
             })
     })
+}
+
+fn process_name(value: &Value) -> Option<&str> {
+    let process = &value["foreground"];
+    ["script", "argv0", "name"]
+        .iter()
+        .filter_map(|key| process[key].as_str())
+        .find_map(|name| {
+            std::path::Path::new(name)
+                .file_name()?
+                .to_str()
+                .map(|name| name.trim_start_matches('-'))
+                .filter(|name| !name.is_empty())
+        })
 }
 
 fn process_path(value: &Value) -> Option<PathBuf> {

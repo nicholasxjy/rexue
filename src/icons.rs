@@ -191,6 +191,7 @@ const ASSETS: &[(&str, &[u8])] = &[
     ("rust", include_bytes!("../assets/programs/rust.png")),
     ("sail", include_bytes!("../assets/programs/sail.png")),
     ("sanity", include_bytes!("../assets/programs/sanity.png")),
+    ("shell", include_bytes!("../assets/programs/shell.png")),
     (
         "shell-container",
         include_bytes!("../assets/programs/shell-container.png"),
@@ -271,6 +272,7 @@ pub(crate) fn icon(program: &str) -> Option<Icon> {
         .to_ascii_lowercase();
     let name = name.trim_end_matches(".exe");
     let name = match name {
+        "zsh" => "shell",
         "claude-code" => "claude",
         "pi-coding-agent" => "pi",
         "gemini-cli" => "gemini",
@@ -363,7 +365,7 @@ mod tests {
             let text = strip_ansi_escapes::strip_str(icon(name).unwrap().placeholder());
             assert_eq!(unicode_width::UnicodeWidthStr::width(text.as_str()), 3);
         }
-        assert_eq!(icon("/usr/bin/zsh").unwrap().name, "zsh");
+        assert_eq!(icon("/usr/bin/zsh").unwrap().name, "shell");
         assert_eq!(icon("/usr/bin/Python3.exe").unwrap().name, "python");
         assert_eq!(icon("Python").unwrap().name, "python");
         assert_eq!(icon("claude-code").unwrap().name, "claude");

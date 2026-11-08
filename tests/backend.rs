@@ -233,6 +233,122 @@ fn agents_fixture(fake: &FakeRex) {
 }
 
 #[test]
+fn pane_titles_match_native_rows_in_tree_and_agent_catalogs() {
+    let fake = FakeRex::new();
+    agents_fixture(&fake);
+    fake.json(
+        "title-block:shell-full.json",
+        json!({"title": "zsh |  | ~/project"}),
+    );
+    fake.json(
+        "title-block:pi-full.json",
+        json!({"title": "Own | Pi task 中文"}),
+    );
+    fake.json(
+        "title-block:codex-full.json",
+        json!({"title": "Own Codex task"}),
+    );
+    for native_snapshot in [false, true] {
+        if native_snapshot {
+            fake.json("snapshot.json", snapshot_fixture(&fake));
+        }
+        let tree = fake.rex.list_sources(true, false).unwrap();
+        let flat = fake.rex.list_sources(false, true).unwrap();
+        let panes: Vec<_> = tree[0].tabs.iter().flat_map(|tab| &tab.panes).collect();
+        assert_eq!(panes[0].pane_title.as_deref(), Some("zsh |  | ~/project"));
+        assert_eq!(tree[0].tabs[0].name, "Shell");
+        for agent in &flat {
+            let pane = panes
+                .iter()
+                .find(|pane| pane.target() == agent.target())
+                .unwrap();
+            assert_eq!(pane.pane_title, agent.pane_title);
+            assert_eq!(pane.program, agent.program);
+            assert_eq!(pane.window_id(), agent.window_id());
+            assert!(agent.pane_title.as_deref().unwrap().starts_with("Own"));
+            assert!(agent.name.starts_with("project / "));
+        }
+        assert_eq!(flat[0].target(), "block:pi-full");
+        assert_eq!(flat[1].target(), "block:codex-full");
+    }
+}
+
+#[test]
+fn invisible_pane_titles_fall_back_in_both_catalogs_and_valid_spacing_survives() {
+    for (title, valid) in [
+        ("  \t\n\u{a0}", false),
+        ("\x1b[31m\x1b[0m", false),
+        ("\t\n\0", false),
+        ("\u{200b}\u{200d}", false),
+        ("\u{200b} \u{200d}", false),
+        ("  Own |  spaced title 中文  ", true),
+    ] {
+        let fake = FakeRex::new();
+        agents_fixture(&fake);
+        for block in ["block:shell-full", "block:pi-full"] {
+            fake.json(&format!("title-{block}.json"), json!({"title": title}));
+        }
+        for native_snapshot in [false, true] {
+            if native_snapshot {
+                fake.json("snapshot.json", snapshot_fixture(&fake));
+            }
+            let tree = fake.rex.list_sources(true, false).unwrap();
+            let flat = fake.rex.list_sources(false, true).unwrap();
+            let panes: Vec<_> = tree[0].tabs.iter().flat_map(|tab| &tab.panes).collect();
+            for (block, fallback) in [("block:shell-full", "zsh"), ("block:pi-full", "pi")] {
+                let pane = panes.iter().find(|pane| pane.target() == block).unwrap();
+                assert_eq!(
+                    pane.pane_title.as_deref(),
+                    Some(if valid { title } else { fallback }),
+                    "{title:?}, snapshot={native_snapshot}"
+                );
+            }
+            let agent = flat
+                .iter()
+                .find(|entry| entry.target() == "block:pi-full")
+                .unwrap();
+            assert_eq!(
+                agent.pane_title.as_deref(),
+                Some(if valid { title } else { "pi" })
+            );
+            assert_eq!(agent.window_id(), Some("window:agents-full"));
+        }
+    }
+}
+
+#[test]
+fn empty_or_unavailable_pane_titles_fall_back_to_program_identity() {
+    let fake = FakeRex::new();
+    agents_fixture(&fake);
+    for (identity, expected) in [
+        (json!({"name": "zsh", "argv0": "-zsh"}), "zsh"),
+        (
+            json!({"name": "node", "argv0": "node", "script": "/tools/task.js"}),
+            "task.js",
+        ),
+        (json!({"name": "unknown-tool"}), "unknown-tool"),
+    ] {
+        fake.json(
+            "process-block:shell-full.json",
+            json!({"foreground": identity}),
+        );
+        for title in [json!({"title": ""}), json!({})] {
+            fake.json("title-block:shell-full.json", title);
+            let entries = fake.rex.list_sources(true, false).unwrap();
+            let pane = &entries[0].tabs[0].panes[0];
+            assert_eq!(pane.pane_title.as_deref(), Some(expected));
+            assert_eq!(pane.target(), "block:shell-full");
+        }
+    }
+    fs::write(fake.dir.path().join("title-block:shell-full.exit"), "").unwrap();
+    let entries = fake.rex.list_sources(true, false).unwrap();
+    assert_eq!(
+        entries[0].tabs[0].panes[0].pane_title.as_deref(),
+        Some("unknown-tool")
+    );
+}
+
+#[test]
 fn session_tab_names_resolve_titles_for_generated_window_labels() {
     let fake = FakeRex::new();
     let session = fake.session("session:titles-full", "project", fake.dir.path());

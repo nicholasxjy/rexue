@@ -47,4 +47,14 @@ for name in names {
     precondition(png.starts(with: [137, 80, 78, 71, 13, 10, 26, 10]))
     try png.write(to: destination.appendingPathComponent(String(name.dropFirst("block-glyph-".count)) + ".png"))
 }
-print("Exported \(names.count) Rex program icons at 48×48")
+let appURL = bundleURL.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+guard let app = Bundle(url: appURL), let shell = app.image(forResource: "SettingsIconTerminal") else {
+    fatalError("Cannot read Rex's default terminal icon")
+}
+let shellBitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 48, pixelsHigh: 48, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+NSGraphicsContext.saveGraphicsState()
+NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: shellBitmap)
+shell.draw(in: NSRect(x: 0, y: 0, width: 48, height: 48), from: .zero, operation: .copy, fraction: 1)
+NSGraphicsContext.restoreGraphicsState()
+try shellBitmap.representation(using: .png, properties: [:])!.write(to: destination.appendingPathComponent("shell.png"))
+print("Exported \(names.count) program icons and Rex's default terminal icon at 48×48")

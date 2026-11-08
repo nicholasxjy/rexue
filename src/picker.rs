@@ -1,7 +1,7 @@
 //! System-fzf picker. Display strings never serve as connection identities.
 use crate::keybindings::Keybindings;
 use crate::keyboard::{Keyboard, copy_size, set_raw};
-use crate::model::{Entry, Source, alias_key};
+use crate::model::{Entry, Source, alias_key, clean};
 use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -433,7 +433,7 @@ impl Bridge {
                                 if request.action == "icons-reset" { s.loaded_icons.clear(); }
                                 let icons: Vec<_> = s.targets.values().filter_map(|entry| {
                                     entry.program.as_deref().or_else(|| entry.agent.as_ref().map(|a| a.app.as_str()))
-                                        .and_then(crate::icons::icon)
+                                        .and_then(|program| crate::icons::icon(program).or_else(|| crate::icons::icon("shell")))
                                 }).collect();
                                 let mut bytes = Vec::new();
                                 for icon in icons {
@@ -562,12 +562,8 @@ fn rows(state: &Mutex<Catalog>, query: &str) -> Result<Vec<u8>> {
         let (ids, pattern, fuzzy) = s.candidates(query);
         let options = &s.options;
         let mut input = Vec::new();
-        let mut session: Option<&Entry> = None;
         for id in ids {
             let entry = &s.targets[&id];
-            if entry.is_session() {
-                session = Some(entry);
-            }
             let search = if options.worktree || entry.source == Source::Agent {
                 format!(
                     "{} {}",
@@ -577,16 +573,17 @@ fn rows(state: &Mutex<Catalog>, query: &str) -> Result<Vec<u8>> {
             } else {
                 clean(&entry.name)
             };
+            let search = match &entry.pane_title {
+                Some(title) => format!("{search} {}", clean(title)),
+                None => search,
+            };
             let search = if options.separator_aware {
                 normalize(&search)
             } else {
                 search
             };
             let branch = s.branches.get(&id).map(String::as_str).unwrap_or("");
-            let session_name = session
-                .filter(|root| root.session_id == entry.session_id)
-                .map(|root| root.name.as_str());
-            let display = display(entry, options, session_name);
+            let display = display(entry, options);
             if branch.is_empty() {
                 write!(input, "{id}\t{search}\t{display}\0")?;
             } else {
@@ -768,6 +765,8 @@ fn finder(options: &PickerOptions, bridge: &Bridge, header: &str, query: &str) -
             "--delimiter=\t",
             "--with-nth=3..",
             "--highlight-line",
+            "--no-hscroll",
+            "--ellipsis=…",
         ])
         .arg(format!("--prompt={}", clean(&options.prompt)))
         .arg(format!("--ghost={}", clean(&options.placeholder)))
@@ -1277,12 +1276,6 @@ pub fn pick_with_create(
     }
 }
 
-fn clean(text: &str) -> String {
-    strip_ansi_escapes::strip_str(text)
-        .chars()
-        .filter(|c| !c.is_control())
-        .collect()
-}
 fn normalize(text: &str) -> String {
     text.chars()
         .map(|c| {
@@ -1301,7 +1294,8 @@ fn display_icon(
     options: &PickerOptions,
 ) -> String {
     if options.native_icons
-        && let Some(icon) = program.and_then(crate::icons::icon)
+        && let Some(icon) = program
+            .and_then(|program| crate::icons::icon(program).or_else(|| crate::icons::icon("shell")))
     {
         return icon.placeholder();
     }
@@ -1321,7 +1315,7 @@ fn display_icon(
     format!("{icon}{}", " ".repeat(padding + 2))
 }
 
-fn display(entry: &Entry, options: &PickerOptions, session_name: Option<&str>) -> String {
+fn display(entry: &Entry, options: &PickerOptions) -> String {
     if entry.window_id().is_some() && entry.block_id().is_none() {
         return display_tab(&entry.name, !entry.agent_tab_indices.is_empty(), options);
     }
@@ -1362,24 +1356,18 @@ fn display(entry: &Entry, options: &PickerOptions, session_name: Option<&str>) -
         if let Some(alias) = options.aliases.values().find(|a| a.target == entry.name) {
             text.push_str(&format!("\x1b[2m[{}]\x1b[22m ", clean(&alias.alias)));
         }
-        let session_name = entry
-            .agent
-            .as_ref()
-            .map(|a| a.session_name.as_str())
-            .or(session_name);
-        let pane_name = entry
-            .block_id()
-            .and(session_name)
-            .and_then(|session| entry.name.strip_prefix(&format!("{session} / ")));
+        text.push_str(&clean(entry.pane_title.as_deref().unwrap_or(&entry.name)));
         if let Some(agent) = &entry.agent {
-            text.push_str(&format!("\x1b[2m[{}]\x1b[22m ", clean(&agent.state)));
-        }
-        text.push_str(&clean(pane_name.unwrap_or(&entry.name)));
-        if pane_name.is_some() {
-            text.push_str(&format!(
-                "\x1b[2m · {}\x1b[22m",
-                clean(session_name.unwrap())
-            ));
+            let status = match agent.state.as_str() {
+                "working" => "•••",
+                "blocked" => "Blocked",
+                "done" => "Done",
+                "error" => "Failed",
+                _ => "",
+            };
+            if !status.is_empty() {
+                text.push_str(&format!("  \x1b[2m{status}\x1b[22m"));
+            }
         }
         if entry.is_session() && entry.tabs.is_empty() {
             for (index, name) in entry.tab_names.iter().enumerate() {
@@ -1689,12 +1677,12 @@ mod tests {
         .unwrap();
         let mut options = PickerOptions::default();
         assert_eq!(
-            strip_ansi_escapes::strip_str(display(&entry, &options, None)),
+            strip_ansi_escapes::strip_str(display(&entry, &options)),
             "  project [  zsh ~/Projects/rexue] [  Shell | Agent] [  Fix picker]"
         );
         options.show_icons = false;
         assert_eq!(
-            display(&entry, &options, None),
+            display(&entry, &options),
             "project [zsh ~/Projects/rexue] [Shell | Agent] [Fix picker]"
         );
 
@@ -1730,16 +1718,13 @@ mod tests {
         options.glyph_colors.insert("rex".into(), "blue".into());
         let mut entry = Entry::new("中文项目", "/project", Source::Rex);
         entry.icon = Some("\x1b[31m界\x1b[0m\t\n".into());
-        assert_eq!(
-            display(&entry, &options, None),
-            "\x1b[34m界\x1b[39m  中文项目"
-        );
+        assert_eq!(display(&entry, &options), "\x1b[34m界\x1b[39m  中文项目");
         assert_eq!(
             display_tab("终端 | ~/项目", false, &options),
             "\x1b[34m\x1b[39m   终端 ~/项目"
         );
         options.show_icons = false;
-        assert_eq!(display(&entry, &options, None), "中文项目");
+        assert_eq!(display(&entry, &options), "中文项目");
         assert_eq!(display_tab("终端 | ~/项目", false, &options), "终端 ~/项目");
     }
 
@@ -1768,36 +1753,36 @@ mod tests {
         let mut entry = Entry::new("Claude in a custom tab title", "/project", Source::Rex);
         entry.program = Some("zsh".into());
         entry.window_id = Some("window:tab".into());
-        let tab = display(&entry, &options, None);
+        let tab = display(&entry, &options);
         assert_eq!(
             strip_ansi_escapes::strip_str(&tab),
             "  Claude in a custom tab title"
         );
         entry.program = Some("codex".into());
         entry.agent_tab_indices.push(0);
-        assert_eq!(display(&entry, &options, None), tab);
+        assert_eq!(display(&entry, &options), tab);
         entry.block_id = Some("block:pane".into());
         entry.program = Some("zsh".into());
         assert!(
-            display(&entry, &options, None)
+            display(&entry, &options)
                 .starts_with(&crate::icons::icon("zsh").unwrap().placeholder())
         );
         entry.program = Some("codex".into());
         assert!(
-            display(&entry, &options, None)
+            display(&entry, &options)
                 .starts_with(&crate::icons::icon("codex").unwrap().placeholder())
         );
         entry.program = Some("unknown-program".into());
-        assert!(!display(&entry, &options, None).contains('\u{10eeee}'));
-        options.show_icons = false;
-        assert_eq!(
-            display(&entry, &options, None),
-            "Claude in a custom tab title"
+        assert!(
+            display(&entry, &options)
+                .starts_with(&crate::icons::icon("shell").unwrap().placeholder())
         );
+        options.show_icons = false;
+        assert_eq!(display(&entry, &options), "Claude in a custom tab title");
     }
 
     #[test]
-    fn long_pane_names_keep_state_and_number_visible_before_context() {
+    fn pane_rows_show_their_own_title_and_trailing_status_without_search_context() {
         let session = "中文会话名称".repeat(20);
         let mut entry = Entry::new(
             format!("{session} / pi · pane 2 · 相同的长标题"),
@@ -1805,6 +1790,7 @@ mod tests {
             Source::Agent,
         );
         entry.session_id = Some("session:full".into());
+        entry.pane_title = Some("相同的 | pane 标题".into());
         entry.agent = Some(crate::model::Agent {
             app: "pi".into(),
             state: "blocked".into(),
@@ -1816,9 +1802,8 @@ mod tests {
             show_icons: false,
             ..Default::default()
         };
-        let text = strip_ansi_escapes::strip_str(display(&entry, &options, None));
-        assert!(text.starts_with("[blocked] pi · pane 2 · 相同的长标题 · "));
-        assert!(text.ends_with(&session));
+        let text = strip_ansi_escapes::strip_str(display(&entry, &options));
+        assert_eq!(text, "相同的 | pane 标题  Blocked");
         assert_eq!(entry.target(), "block:second");
         assert!(entry.display_name().starts_with(&session));
     }
@@ -1859,6 +1844,7 @@ mod tests {
         use crate::model::Agent;
         let mut first = Entry::new("project / pi · Agents", "/project", Source::Agent);
         first.session_id = Some("session:project".into());
+        first.pane_title = Some("Same | title".into());
         first.agent = Some(Agent {
             app: "pi".into(),
             state: "working".into(),
@@ -1883,7 +1869,7 @@ mod tests {
         assert_eq!(catalog.entries, vec![ids[0], ids[2], ids[1]]);
         let state = Mutex::new(catalog);
         let text = String::from_utf8(rows(&state, "").unwrap()).unwrap();
-        assert!(text.contains("\t\x1b[2m[working]\x1b[22m pi · Agents\x1b[2m · project\x1b[22m\0"));
+        assert!(text.contains("\tSame | title  \x1b[2m•••\x1b[22m\0"));
         assert!(!text.contains('\n'));
         assert!(text.starts_with(&format!("{}\tproject\tproject\0", ids[0])));
         let filtered = String::from_utf8(rows(&state, "blocked").unwrap()).unwrap();
@@ -1901,10 +1887,10 @@ mod tests {
             "name": "project", "source": "rex", "session_id": "session:full",
             "tabs": [
                 {"name": "Shell | cwd", "window_id": "window:first", "is_agent": false, "panes": [
-                    {"name": "project / zsh · pane 1 · Shell", "source": "rex", "session_id": "session:full", "window_id": "window:first", "block_id": "block:shell"}
+                    {"name": "project / zsh · pane 1 · Shell", "pane_title": "zsh | cwd", "source": "rex", "session_id": "session:full", "window_id": "window:first", "block_id": "block:shell"}
                 ]},
                 {"name": "Agents | task", "window_id": "window:second", "is_agent": true, "panes": [
-                    {"name": "project / pi · pane 1 · Agents", "source": "agent", "session_id": "session:full", "agent": {"app": "pi", "state": "working", "session_name": "project", "window_id": "window:second", "block_id": "block:agent"}}
+                    {"name": "project / pi · pane 1 · Agents", "pane_title": "Own | task", "source": "agent", "session_id": "session:full", "agent": {"app": "pi", "state": "working", "session_name": "project", "window_id": "window:second", "block_id": "block:agent"}}
                 ]}
             ]
         })).unwrap();
@@ -1931,11 +1917,8 @@ mod tests {
         assert_eq!(visible[1], "├──   Shell cwd");
         assert!(visible[2].starts_with("│   └── "));
         assert_eq!(visible[3], "└──   Agents | task");
-        assert_eq!(
-            visible[4],
-            "    └── 󰚩  [working] pi · pane 1 · Agents · project"
-        );
-        assert_eq!(visible[2], "│   └──   zsh · pane 1 · Shell · project");
+        assert_eq!(visible[4], "    └── 󰚩  Own | task  •••");
+        assert_eq!(visible[2], "│   └──   zsh | cwd");
         for (row, expected) in fields.iter().zip([
             "session:full",
             "window:first",
@@ -1957,6 +1940,7 @@ mod tests {
         assert_eq!(filtered.split('\0').filter(|s| !s.is_empty()).count(), 1);
         assert!(!filtered.contains("block:agent")); // IDs stay behind the row protocol.
         assert!(filtered.contains("[working]"));
+        assert!(filtered.contains("Own | task"));
         let numbered = String::from_utf8(rows(&state, "#").unwrap()).unwrap();
         assert!(strip_ansi_escapes::strip_str(numbered).contains("#4 └──   Agents | task"));
     }

@@ -1,0 +1,109 @@
+{
+  "checks": [
+    {
+      "case": "tree-ordinary-pane",
+      "session_id": "session:01a1bb7b-52ff-7520-aa19-b644738794bd",
+      "picker_id": "block:01a1bb7b-53f6-75c8-9ead-0b0e9a23a11c",
+      "visible_title": "Origin pane",
+      "expected_window": "window:01a1bb7b-530e-7a50-9b2b-9c0c358bbc72",
+      "expected_block": "block:01a1bb7b-52ff-75bc-81b9-160023e8474a",
+      "observations": [
+        {
+          "window_id": "window:01a1bb7b-530e-7a50-9b2b-9c0c358bbc72",
+          "block_id": "block:01a1bb7b-52ff-75bc-81b9-160023e8474a"
+        },
+        {
+          "window_id": "window:01a1bb7b-530e-7a50-9b2b-9c0c358bbc72",
+          "block_id": "block:01a1bb7b-52ff-75bc-81b9-160023e8474a"
+        },
+        {
+          "window_id": "window:01a1bb7b-530e-7a50-9b2b-9c0c358bbc72",
+          "block_id": "block:01a1bb7b-52ff-75bc-81b9-160023e8474a"
+        }
+      ],
+      "wait_exit": 0,
+      "wait_output": "{\"exit_code\":0}",
+      "passed": true
+    },
+    {
+      "case": "tree-agent-whitespace-title",
+      "session_id": "session:01a1bb7b-52ff-7520-aa19-b644738794bd",
+      "picker_id": "block:01a1bb7b-5728-7392-9adb-e3c56b875a33",
+      "visible_title": "zsh",
+      "expected_window": "window:01a1bb7b-530e-7a50-9b2b-9c0c358bbc72",
+      "expected_block": "block:01a1bb7b-5328-760a-874e-8084cd33cfb6",
+      "observations": [
+        {
+          "window_id": "window:01a1bb7b-530e-7a50-9b2b-9c0c358bbc72",
+          "block_id": "block:01a1bb7b-5328-760a-874e-8084cd33cfb6"
+        },
+        {
+          "window_id": "window:01a1bb7b-530e-7a50-9b2b-9c0c358bbc72",
+          "block_id": "block:01a1bb7b-5328-760a-874e-8084cd33cfb6"
+        },
+        {
+          "window_id": "window:01a1bb7b-530e-7a50-9b2b-9c0c358bbc72",
+          "block_id": "block:01a1bb7b-5328-760a-874e-8084cd33cfb6"
+        }
+      ],
+      "wait_exit": 0,
+      "wait_output": "{\"exit_code\":0}",
+      "passed": true
+    },
+    {
+      "case": "agents-whitespace-title",
+      "session_id": "session:01a1bb7b-52ff-7520-aa19-b644738794bd",
+      "picker_id": "block:01a1bb7b-5a89-743a-8620-98d3a772ab62",
+      "visible_title": "zsh",
+      "expected_window": "window:01a1bb7b-530e-7a50-9b2b-9c0c358bbc72",
+      "expected_block": "block:01a1bb7b-5328-760a-874e-8084cd33cfb6",
+      "observations": [
+        {
+          "window_id": "window:01a1bb7b-530e-7a50-9b2b-9c0c358bbc72",
+          "block_id": "block:01a1bb7b-5328-760a-874e-8084cd33cfb6"
+        },
+        {
+          "window_id": "window:01a1bb7b-530e-7a50-9b2b-9c0c358bbc72",
+          "block_id": "block:01a1bb7b-5328-760a-874e-8084cd33cfb6"
+        },
+        {
+          "window_id": "window:01a1bb7b-530e-7a50-9b2b-9c0c358bbc72",
+          "block_id": "block:01a1bb7b-5328-760a-874e-8084cd33cfb6"
+        }
+      ],
+      "wait_exit": 0,
+      "wait_output": "{\"exit_code\":0}",
+      "passed": true
+    },
+    {
+      "case": "agents-other-tab",
+      "session_id": "session:01a1bb7b-52ff-7520-aa19-b644738794bd",
+      "picker_id": "block:01a1bb7b-5ddb-7318-ae1e-cfe4c5766d8a",
+      "visible_title": "Other tab agent",
+      "expected_window": "window:01a1bb7b-535f-72fd-84d9-03f2a4924ec4",
+      "expected_block": "block:01a1bb7b-534f-7747-8eda-41785aef7d9a",
+      "observations": [
+        {
+          "window_id": "window:01a1bb7b-535f-72fd-84d9-03f2a4924ec4",
+          "block_id": "block:01a1bb7b-534f-7747-8eda-41785aef7d9a"
+        },
+        {
+          "window_id": "window:01a1bb7b-535f-72fd-84d9-03f2a4924ec4",
+          "block_id": "block:01a1bb7b-534f-7747-8eda-41785aef7d9a"
+        },
+        {
+          "window_id": "window:01a1bb7b-535f-72fd-84d9-03f2a4924ec4",
+          "block_id": "block:01a1bb7b-534f-7747-8eda-41785aef7d9a"
+        }
+      ],
+      "wait_exit": 0,
+      "wait_output": "{\"exit_code\":0}",
+      "passed": true
+    }
+  ],
+  "cleaned_up": true,
+  "rex_app": "Rex Beta 0.1.0 (1880), macOS",
+  "binary": "target/debug/rexue",
+  "binary_sha256": "8882d704d4d1e75f749c54c31c886f288e33a9592533339f4f3b5ae7f327f068",
+  "method": "Wait for picker child exit, then require three consecutive matching full window/block IDs; whitespace-only agent title must visibly fall back to zsh in both entrances."
+}
