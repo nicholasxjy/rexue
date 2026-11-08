@@ -98,12 +98,15 @@ The [floating shortcut](../examples/rex-picker-floating.lua) must resolve `ctx.b
 For focus or shortcut changes, check live Rex:
 
 1. Connect to an agent; verify its session, tab and exact pane.
-2. Invoke the floating shortcut twice from that pane. Test empty and prefilled queries; verify the list appears in that tab, excludes only its temporary pane and retains other floating panes. Cancel each picker.
+2. Invoke the floating shortcut twice from that pane without closing it; verify that the second invocation focuses the same full picker block ID and leaves one picker layer. Cancel it and reopen, testing empty and prefilled queries; verify the list appears in that tab, excludes only its temporary pane and retains other floating panes.
 3. Restore the initial session/tab; close only test-created panes.
 
 Validate examples without installing them:
 
+The Lua regression reloads the shortcut for each command and uses mocked Rex APIs to check concurrent opens, focus, independent tabs, reopening and failure recovery. It makes no live session changes.
+
 ```sh
+rex do scripts/shortcut_smoke.lua
 rex config check examples/rex-picker.lua
 rex config check examples/rex-picker-floating.lua
 ```
