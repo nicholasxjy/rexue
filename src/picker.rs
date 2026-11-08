@@ -675,6 +675,10 @@ fn clean_fzf_env(command: &mut Command) {
         .env_remove("FZF_API_KEY")
         .env_remove("FZF_FILTER")
         .env("SHELL", "/bin/sh");
+    // Terminal palette entries follow live theme changes; 256-color grays do not.
+    if std::env::var_os("NO_COLOR").is_none_or(|value| value.is_empty()) {
+        command.arg("--color=16");
+    }
 }
 fn pipe_output(command: &mut Command, input: Vec<u8>) -> Result<Output> {
     let mut child = command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()
@@ -740,11 +744,13 @@ fn finder(options: &PickerOptions, bridge: &Bridge, header: &str, query: &str) -
             "--with-nth=3..",
             "--highlight-line",
         ])
-        .arg(if options.native_icons {
-            "--color=fg+:-1:regular,pointer:-1,gutter:-1"
-        } else {
-            "--color=fg+:-1:regular:reverse,bg+:-1,pointer:-1:reverse,gutter:-1"
-        })
+        .arg(
+            if std::env::var_os("NO_COLOR").is_some_and(|value| !value.is_empty()) {
+                "--color=fg+:-1:regular:reverse,bg+:-1,pointer:-1:reverse,gutter:-1"
+            } else {
+                "--color=fg+:-1:regular,pointer:-1,gutter:-1"
+            },
+        )
         .arg(format!("--prompt={}", clean(&options.prompt)))
         .arg(format!("--ghost={}", clean(&options.placeholder)))
         .arg(format!("--pointer={}", clean(&options.pointer)))

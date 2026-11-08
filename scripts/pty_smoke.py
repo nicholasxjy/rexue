@@ -107,6 +107,21 @@ def executable(path, text):
     path.chmod(0o755)
 
 
+def assert_terminal_palette(capture, allow_reverse=False):
+    for sequence in re.findall(rb'\x1b\[([0-9;]*)m', capture):
+        params = [int(value or 0) for value in sequence.split(b';')]
+        index = 0
+        while index < len(params):
+            value = params[index]
+            if value in (38, 48, 58):
+                assert params[index + 1] == 5, ('fixed RGB color', sequence)
+                assert params[index + 2] < 16, ('fixed 256-color theme', sequence)
+                index += 3
+            else:
+                assert allow_reverse or value != 7, ('reverse tints dim row backgrounds', sequence)
+                index += 1
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--binary', default='target/debug/rexue')
@@ -187,6 +202,7 @@ else:
             try:
                 interact(s)
                 report = s.finish(expected)
+                assert_terminal_palette(s.capture, allow_reverse=bool(os.environ.get('NO_COLOR')))
                 checks.append({'case': label, **report})
                 return s.text()
             finally:
@@ -607,7 +623,9 @@ os.execv('''+repr(real_wt)+''',['wt','--config','''+repr(str(wt_config))+''',*sy
             try:
                 s.expect('CHECKOUT_PREVIEW_' + branch)
                 s.send(b'\x1b')
-                checks.append({'case': 'initial-focus-worktree-' + label, **s.finish()})
+                report = s.finish()
+                assert_terminal_palette(s.capture, allow_reverse=bool(os.environ.get('NO_COLOR')))
+                checks.append({'case': 'initial-focus-worktree-' + label, **report})
             finally:
                 s.close()
         cfg.write_text(worktree_config)
