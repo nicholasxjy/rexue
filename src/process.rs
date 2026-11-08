@@ -1,8 +1,8 @@
 //! Process boundary: separate arguments, bounded output/deadlines, explicit shell scripts.
 use anyhow::{Context, Result, bail};
 use std::{
-    io::Read,
-    process::{Command, Output, Stdio},
+    io::{BufRead, BufReader, Read, Write},
+    process::{Child, Command, Output, Stdio},
     sync::mpsc,
     thread,
     time::{Duration, Instant},
@@ -11,82 +11,173 @@ use wait_timeout::ChildExt;
 const MAX_OUTPUT: usize = 16 * 1024 * 1024;
 
 pub fn output(command: &mut Command, timeout: Duration) -> Result<Output> {
-    let label = format!("{:?}", command.get_program());
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    let mut child = command
-        .spawn()
-        .with_context(|| format!("could not start {label}; is it installed and on PATH?"))?;
-    let pid = child.id();
-    let start = Instant::now();
-    let stdout = child.stdout.take().context("missing stdout")?;
-    let stderr = child.stderr.take().context("missing stderr")?;
-    let (tx, rx) = mpsc::channel();
-    for (is_stdout, reader) in [
-        (true, Box::new(stdout) as Box<dyn Read + Send>),
-        (false, Box::new(stderr) as Box<dyn Read + Send>),
-    ] {
-        let tx = tx.clone();
-        thread::spawn(move || {
-            let mut data = Vec::new();
-            let result = reader
-                .take((MAX_OUTPUT + 1) as u64)
-                .read_to_end(&mut data)
-                .map(|_| data);
-            let _ = tx.send((is_stdout, result));
-        });
-    }
-    drop(tx);
-    let status = match child.wait_timeout(timeout)? {
-        Some(status) => status,
-        None => {
-            kill_group(pid, &mut child);
-            bail!("{label} timed out after {}ms", timeout.as_millis());
+    Capture::start(command, timeout, false)?.finish(None)
+}
+
+struct Capture {
+    child: Option<Child>,
+    label: String,
+    deadline: Instant,
+    output: mpsc::Receiver<(bool, std::io::Result<Vec<u8>>)>,
+    prelude: mpsc::Receiver<std::io::Result<Vec<u8>>>,
+}
+
+impl Capture {
+    fn start(command: &mut Command, timeout: Duration, exchange: bool) -> Result<Self> {
+        let label = format!("{:?}", command.get_program());
+        command
+            .stdin(if exchange {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
         }
-    };
-    let mut stdout = Vec::new();
-    let mut stderr = Vec::new();
-    for _ in 0..2 {
-        let left = timeout.saturating_sub(start.elapsed());
-        let (is_stdout, data) = match rx.recv_timeout(left) {
-            Ok(v) => v,
-            Err(_) => {
-                kill_group(pid, &mut child);
-                bail!("{label} output timed out after {}ms", timeout.as_millis());
-            }
+        let mut child = command
+            .spawn()
+            .with_context(|| format!("could not start {label}; is it installed and on PATH?"))?;
+        let deadline = Instant::now() + timeout;
+        let stdout = child.stdout.take().context("missing stdout")?;
+        let stderr = child.stderr.take().context("missing stderr")?;
+        let (tx, rx) = mpsc::channel();
+        let (prelude_tx, prelude_rx) = mpsc::channel();
+        for (is_stdout, reader) in [
+            (true, Box::new(stdout) as Box<dyn Read + Send>),
+            (false, Box::new(stderr) as Box<dyn Read + Send>),
+        ] {
+            let tx = tx.clone();
+            let prelude_tx = prelude_tx.clone();
+            thread::spawn(move || {
+                let mut reader = BufReader::new(reader.take((MAX_OUTPUT + 1) as u64));
+                let mut consumed = 0;
+                if exchange && is_stdout {
+                    let mut line = Vec::new();
+                    let result = reader.read_until(b'\n', &mut line);
+                    consumed = line.len();
+                    let _ = prelude_tx.send(result.map(|_| line));
+                }
+                let mut data = Vec::new();
+                let result = reader.read_to_end(&mut data).and_then(|_| {
+                    if consumed + data.len() > MAX_OUTPUT {
+                        Err(std::io::Error::other("process output exceeded 16 MiB"))
+                    } else {
+                        Ok(data)
+                    }
+                });
+                let _ = tx.send((is_stdout, result));
+            });
+        }
+        drop(tx);
+        Ok(Self {
+            child: Some(child),
+            label,
+            deadline,
+            output: rx,
+            prelude: prelude_rx,
+        })
+    }
+
+    fn left(&self) -> Duration {
+        self.deadline.saturating_duration_since(Instant::now())
+    }
+
+    fn finish(mut self, reply: Option<Vec<u8>>) -> Result<Output> {
+        if let Some(reply) = reply {
+            let mut stdin = self
+                .child
+                .as_mut()
+                .unwrap()
+                .stdin
+                .take()
+                .context("missing stdin")?;
+            let (tx, rx) = mpsc::channel();
+            thread::spawn(move || {
+                let result = stdin.write_all(&reply).and_then(|_| stdin.write_all(b"\n"));
+                let _ = tx.send(result);
+            });
+            rx.recv_timeout(self.left())
+                .with_context(|| format!("{} input timed out", self.label))??;
+        }
+        let left = self.left();
+        let status = match self.child.as_mut().unwrap().wait_timeout(left)? {
+            Some(status) => status,
+            None => bail!("{} timed out", self.label),
         };
-        let data = data?;
-        if data.len() > MAX_OUTPUT {
-            kill_group(pid, &mut child);
-            bail!("{label} output exceeded {} MiB", MAX_OUTPUT / 1024 / 1024);
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        for _ in 0..2 {
+            let (is_stdout, data) = match self.output.recv_timeout(self.left()) {
+                Ok(v) => v,
+                Err(_) => bail!("{} output timed out", self.label),
+            };
+            let data = data?;
+            if data.len() > MAX_OUTPUT {
+                bail!(
+                    "{} output exceeded {} MiB",
+                    self.label,
+                    MAX_OUTPUT / 1024 / 1024
+                );
+            }
+            if is_stdout {
+                stdout = data
+            } else {
+                stderr = data
+            }
         }
-        if is_stdout {
-            stdout = data
-        } else {
-            stderr = data
+        let result = Output {
+            status,
+            stdout,
+            stderr,
+        };
+        self.child.take();
+        if !result.status.success() {
+            let message = String::from_utf8_lossy(&result.stderr);
+            bail!(
+                "{} failed (exit {}): {}",
+                self.label,
+                result.status.code().unwrap_or(130),
+                message.trim()
+            );
+        }
+        Ok(result)
+    }
+}
+
+impl Drop for Capture {
+    fn drop(&mut self) {
+        if let Some(child) = &mut self.child {
+            kill_group(child.id(), child);
         }
     }
-    let result = Output {
-        status,
-        stdout,
-        stderr,
-    };
-    if !result.status.success() {
-        let message = String::from_utf8_lossy(&result.stderr);
-        bail!(
-            "{label} failed (exit {}): {}",
-            result.status.code().unwrap_or(130),
-            message.trim()
-        );
+}
+
+/// One bounded JSON handshake and reply on the same child connection.
+pub(crate) struct Exchange(Capture);
+impl Exchange {
+    pub fn start(command: &mut Command, timeout: Duration) -> Result<(Self, Vec<u8>)> {
+        let capture = Capture::start(command, timeout, true)?;
+        let prelude = capture
+            .prelude
+            .recv_timeout(capture.left())
+            .with_context(|| format!("{} handshake timed out", capture.label))??;
+        if prelude.is_empty() {
+            capture.finish(None)?;
+            bail!("process exited without a handshake");
+        }
+        if prelude.len() > MAX_OUTPUT {
+            bail!("process handshake exceeded 16 MiB");
+        }
+        Ok((Self(capture), prelude))
     }
-    Ok(result)
+
+    pub fn finish(self, reply: Vec<u8>) -> Result<Output> {
+        self.0.finish(Some(reply))
+    }
 }
 /// Run a Worktrunk mutation with its native hook/approval UI on the terminal.
 /// stdout stays machine-readable; a file avoids blocking hooks on a full pipe.
@@ -1064,6 +1155,64 @@ EOF
             format!("{arg}\0other\0other\0")
         );
         assert_eq!(shell_argument(r#"__REXUE_PATH_VALUE=original; set -- other; printf '%s\000' "$__REXUE_PATH_VALUE" '{}'"#,arg.as_ref(),d.path()).unwrap(),format!("original\0{arg}\0"));
+    }
+
+    #[test]
+    fn exchange_replies_on_the_same_child_and_aborts_without_committing() {
+        let (exchange, prelude) = Exchange::start(
+            Command::new("sh").args([
+                "-c",
+                "printf 'ready\\n'; IFS= read -r reply; printf '%s' \"$reply\"",
+            ]),
+            Duration::from_secs(1),
+        )
+        .unwrap();
+        assert_eq!(prelude, b"ready\n");
+        assert_eq!(
+            exchange.finish(b"validated".to_vec()).unwrap().stdout,
+            b"validated"
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("committed");
+        let (exchange, _) = Exchange::start(
+            Command::new("sh")
+                .args([
+                    "-c",
+                    "printf 'ready\\n'; IFS= read -r reply && touch \"$1\"",
+                    "exchange",
+                ])
+                .arg(&marker),
+            Duration::from_secs(1),
+        )
+        .unwrap();
+        drop(exchange);
+        assert!(!marker.exists());
+    }
+
+    #[test]
+    fn exchange_deadline_and_early_exit_keep_errors_and_reap_children() {
+        let started = Instant::now();
+        let (exchange, _) = Exchange::start(
+            Command::new("sh").args(["-c", "printf 'ready\\n'; sleep 3"]),
+            Duration::from_millis(100),
+        )
+        .unwrap();
+        assert!(
+            exchange
+                .finish(b"commit".to_vec())
+                .unwrap_err()
+                .to_string()
+                .contains("timed out")
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
+        let error = Exchange::start(
+            Command::new("sh").args(["-c", "printf broken >&2; exit 4"]),
+            Duration::from_secs(1),
+        )
+        .err()
+        .unwrap();
+        assert!(error.to_string().contains("exit 4") && error.to_string().contains("broken"));
     }
 
     #[test]

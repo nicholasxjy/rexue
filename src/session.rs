@@ -400,7 +400,7 @@ impl Manager {
             .with_context(|| format!("agent in {block_id} is no longer running"))
     }
     pub fn connect(&self, target: &str, opts: &ConnectOptions) -> Result<Connection> {
-        self.connect_resolved(opts, || {
+        self.connect_resolved(opts, None, || {
             let rooted = if opts.root {
                 connect_root_target(target)
             } else {
@@ -426,7 +426,7 @@ impl Manager {
             )?;
             return self.connect_path(&prepared.path, opts);
         }
-        self.connect_resolved(opts, || {
+        self.connect_resolved(opts, Some(&entry), || {
             // Alias-only rows can be synthesized outside the fetched sources.
             // Complete their typed config identity by exact key, never by the
             // human-target parser that strips decoration or expands aliases.
@@ -441,12 +441,12 @@ impl Manager {
                     .find(|configured| configured.name == entry.name)
                     .context("configured picker target no longer exists");
             }
-            Ok(entry)
+            Ok(entry.clone())
         })
     }
     /// Connect a known directory without interpreting it as an alias or label.
     pub fn connect_path(&self, path: &Path, opts: &ConnectOptions) -> Result<Connection> {
-        self.connect_resolved(opts, || {
+        self.connect_resolved(opts, None, || {
             if let Some(entry) = self
                 .config
                 .entries()?
@@ -469,17 +469,35 @@ impl Manager {
     fn connect_resolved(
         &self,
         opts: &ConnectOptions,
+        selected: Option<&Entry>,
         resolve: impl FnOnce() -> Result<Entry>,
     ) -> Result<Connection> {
-        // Preflight and lock both text and resolved-entry workflows identically.
-        let client = if opts.detach {
+        let live = selected.filter(|entry| {
+            opts.name.is_none()
+                && entry
+                    .session_id
+                    .as_deref()
+                    .is_some_and(|id| id.starts_with("session:"))
+        });
+        // Keep the live snapshot fresh even when another connection holds the state lock.
+        let early_lock = live.map(|_| self.lock()).transpose()?;
+        let mut prepared = live
+            .map(|entry| self.rex.prepare_connection(entry, opts.detach))
+            .transpose()?
+            .flatten();
+        let client = if let Some(prepared) = &prepared {
+            prepared.client.clone()
+        } else if opts.detach {
             None
         } else {
             let c = self.rex.selected_client()?;
             self.rex.check_switch(&c)?;
             Some(c)
         };
-        let _lock = self.lock()?;
+        let _lock = match early_lock {
+            Some(lock) => lock,
+            None => self.lock()?,
+        };
         let mut entry = resolve()?;
         let agent = entry.agent.clone();
         let mut window_id = entry.window_id().map(str::to_owned);
@@ -495,7 +513,9 @@ impl Manager {
         }
         let mut path = normalize(&entry.path);
         let mut state = self.state()?;
-        let mut existing = if opts.name.is_none()
+        let mut existing = if let Some(prepared) = &mut prepared {
+            std::mem::take(&mut prepared.entries)
+        } else if opts.name.is_none()
             && let Some(id) = entry
                 .session_id
                 .as_deref()
@@ -679,24 +699,37 @@ impl Manager {
                 created: true,
             }
         };
-        if let Some(target) = block_id.as_deref().or(window_id.as_deref()) {
-            self.rex.focus(&result.session_id, target)?;
-        }
-        if let Some(client) = &client {
-            // whoami describes the launcher process, whose inherited session
-            // can remain stale after switching the selected app client. Once
-            // recorded, successful switches are the authority for that client.
-            let initial_history = state.history.get(&client.id).is_none_or(Vec::is_empty);
-            let previous = if initial_history {
-                self.rex
+        // Inherited context seeds history only once; later successful switches are authoritative.
+        let previous = if let Some(client) = &client
+            && state.history.get(&client.id).is_none_or(Vec::is_empty)
+        {
+            match &prepared {
+                Some(prepared) => prepared.previous.clone(),
+                None => self
+                    .rex
                     .context()
                     .ok()
-                    .and_then(|v| v["session_id"].as_str().map(str::to_owned))
-            } else {
-                None
-            };
-            self.rex
-                .switch_window(client, &result.session_id, window_id.as_deref())?;
+                    .and_then(|v| v["session_id"].as_str().map(str::to_owned)),
+            }
+        } else {
+            None
+        };
+        if let Some(prepared) = prepared {
+            prepared.finish(
+                &result.session_id,
+                window_id.as_deref(),
+                block_id.as_deref(),
+            )?;
+        } else {
+            if let Some(target) = block_id.as_deref().or(window_id.as_deref()) {
+                self.rex.focus(&result.session_id, target)?;
+            }
+            if let Some(client) = &client {
+                self.rex
+                    .switch_window(client, &result.session_id, window_id.as_deref())?;
+            }
+        }
+        if let Some(client) = &client {
             let history = state.history.entry(client.id.clone()).or_default();
             if let Some(previous) = previous.filter(|id| id != &result.session_id) {
                 history.retain(|id| id != &previous);

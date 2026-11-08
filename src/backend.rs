@@ -22,11 +22,15 @@ pub struct AppClient {
 }
 #[derive(Deserialize)]
 struct Snapshot {
+    #[serde(default)]
+    connection: Value,
     sessions: Vec<Value>,
     snapshots: BTreeMap<String, SessionSnapshot>,
 }
 #[derive(Deserialize)]
 struct SessionSnapshot {
+    #[serde(default)]
+    target_only: bool,
     #[serde(default)]
     missing: bool,
     #[serde(default)]
@@ -39,6 +43,24 @@ pub struct Created {
     pub session_id: String,
     pub block_id: String,
 }
+pub(crate) struct ConnectionPreparation {
+    pub client: Option<AppClient>,
+    pub previous: Option<String>,
+    pub entries: Vec<Entry>,
+    exchange: process::Exchange,
+}
+impl ConnectionPreparation {
+    pub fn finish(self, session: &str, window: Option<&str>, block: Option<&str>) -> Result<()> {
+        let reply = serde_json::json!({
+            "session_id": session, "window_id": window, "block_id": block,
+            "client_id": self.client.as_ref().map(|client| client.id.as_str()),
+        });
+        let output = self.exchange.finish(serde_json::to_vec(&reply)?)?;
+        serde_json::from_slice::<Value>(&output.stdout).context("invalid Rex connection result")?;
+        Ok(())
+    }
+}
+
 impl Default for Rex {
     fn default() -> Self {
         Self {
@@ -75,6 +97,15 @@ impl Rex {
     }
     pub fn clients(&self) -> Result<Vec<AppClient>> {
         let value = self.json(&["client", "ls", "--json"])?;
+        Self::app_clients(&value)
+    }
+    fn app_clients(value: &Value) -> Result<Vec<AppClient>> {
+        if value["clients"]
+            .as_object()
+            .is_some_and(|rows| rows.is_empty())
+        {
+            return Ok(Vec::new());
+        }
         let rows = value["clients"]
             .as_array()
             .context("Rex response missing clients")?;
@@ -95,6 +126,12 @@ impl Rex {
     }
     pub fn check_switch(&self, client: &AppClient) -> Result<()> {
         let value = self.json(&["-C", &client.id, "actions", "--json"])?;
+        Self::check_switch_response(client, &value)
+    }
+    fn check_switch_response(client: &AppClient, value: &Value) -> Result<()> {
+        if let Some(error) = value["error"].as_str() {
+            bail!("{error}");
+        }
         if !value["actions"]
             .as_array()
             .is_some_and(|a| a.iter().any(|a| a["name"] == "session.select"))
@@ -137,19 +174,20 @@ impl Rex {
         agents: bool,
         picker_block: Option<&str>,
     ) -> Result<Vec<Entry>> {
-        let (rows, snapshots) = match self.snapshot(picker_block)? {
-            Some(snapshot) => (snapshot.sessions, Some(snapshot.snapshots)),
-            None => {
-                let response = self.json(&["ls", "--json"])?;
-                (
-                    response["sessions"]
-                        .as_array()
-                        .context("Rex response missing sessions")?
-                        .clone(),
-                    None,
-                )
-            }
-        };
+        let (rows, snapshots) =
+            match self.snapshot(serde_json::json!({"picker_block": picker_block}))? {
+                Some(snapshot) => (snapshot.sessions, Some(snapshot.snapshots)),
+                None => {
+                    let response = self.json(&["ls", "--json"])?;
+                    (
+                        response["sessions"]
+                            .as_array()
+                            .context("Rex response missing sessions")?
+                            .clone(),
+                        None,
+                    )
+                }
+            };
         parallel_entries(&rows, snapshots.is_none(), |row| {
             let snapshot = snapshots
                 .as_ref()
@@ -157,9 +195,9 @@ impl Rex {
             self.inspect_entries(row, sessions, agents, None, picker_block, snapshot)
         })
     }
-    fn snapshot(&self, picker_block: Option<&str>) -> Result<Option<Snapshot>> {
-        let args = serde_json::json!({"picker_block": picker_block}).to_string();
-        let mut response = match self.json(&[
+    fn snapshot(&self, args: Value) -> Result<Option<Snapshot>> {
+        let args = args.to_string();
+        let response = match self.json(&[
             "do",
             "--eval",
             include_str!("rex_snapshot.lua"),
@@ -180,6 +218,9 @@ impl Rex {
                 return Err(error);
             }
         };
+        Ok(Some(Self::decode_snapshot(response)?))
+    }
+    fn decode_snapshot(mut response: Value) -> Result<Snapshot> {
         // Lua encodes an empty table as an object, including an empty session list.
         if response["sessions"]
             .as_object()
@@ -201,10 +242,87 @@ impl Rex {
                 bail!("Rex snapshot missing session view");
             }
         }
-        Ok(Some(snapshot))
+        Ok(snapshot)
+    }
+    fn snapshot_session(
+        &self,
+        snapshot: &Snapshot,
+        id: &str,
+        block: Option<&str>,
+    ) -> Result<Vec<Entry>> {
+        match snapshot.sessions.iter().find(|row| row["session_id"] == id) {
+            Some(row) => self.inspect_entries(
+                row,
+                true,
+                block.is_some(),
+                block,
+                None,
+                Some(&snapshot.snapshots[id]),
+            ),
+            None => Ok(Vec::new()),
+        }
+    }
+    pub(crate) fn prepare_connection(
+        &self,
+        entry: &Entry,
+        detach: bool,
+    ) -> Result<Option<ConnectionPreparation>> {
+        let id = entry
+            .session_id
+            .as_deref()
+            .context("live target has no session ID")?;
+        let block = entry.agent.as_ref().map(|agent| agent.block_id.as_str());
+        let args =
+            serde_json::json!({"session_id": id, "block_id": block, "detach": detach, "connect": true}).to_string();
+        let script = concat!(
+            "local function snapshot()\n",
+            include_str!("rex_snapshot.lua"),
+            "\nend\n",
+            include_str!("rex_connect.lua")
+        );
+        let (exchange, prelude) = match process::Exchange::start(
+            self.command()
+                .args(["do", "--eval", script, "--args", &args, "--json"]),
+            Duration::from_secs(30),
+        ) {
+            Ok(result) => result,
+            Err(error) => {
+                let message = format!("{error:#}");
+                if message.contains("unknown flag: --eval")
+                    || message.contains("unknown command \"do\"")
+                {
+                    return Ok(None);
+                }
+                return Err(error);
+            }
+        };
+        let snapshot = Self::decode_snapshot(
+            serde_json::from_slice(&prelude).context("invalid Rex connection handshake")?,
+        )?;
+        let client = if detach {
+            None
+        } else {
+            let client = select_client(
+                &Self::app_clients(&snapshot.connection)?,
+                self.client.as_deref(),
+            )?;
+            Self::check_switch_response(&client, &snapshot.connection["inspections"][&client.id])?;
+            Some(client)
+        };
+        Ok(Some(ConnectionPreparation {
+            client,
+            previous: snapshot.connection["previous"].as_str().map(str::to_owned),
+            entries: self.snapshot_session(&snapshot, id, block)?,
+            exchange,
+        }))
     }
     /// Refresh a selected session and, optionally, only its selected agent pane.
     pub fn list_session(&self, id: &str, block: Option<&str>) -> Result<Vec<Entry>> {
+        if let Some(snapshot) =
+            self.snapshot(serde_json::json!({"session_id": id, "block_id": block}))?
+        {
+            return self.snapshot_session(&snapshot, id, block);
+        }
         let response = self.json(&["ls", "--json"])?;
         let rows = response["sessions"]
             .as_array()
@@ -419,13 +537,20 @@ impl Rex {
                     entry.tab_names.push(titles.join(" · "));
                 }
             }
-            if let Some(process) = &focused_process {
-                entry.path = process_path(process).unwrap_or_default();
-            }
-            if entry.path.as_os_str().is_empty()
-                && let Some(block) = focused
-            {
-                entry.path = self.reported_path(id, block).unwrap_or_default();
+            if target_block.is_some() && snapshot.is_some_and(|snapshot| snapshot.target_only) {
+                entry.path = entries
+                    .first()
+                    .map(|entry| entry.path.clone())
+                    .unwrap_or_default();
+            } else {
+                if let Some(process) = &focused_process {
+                    entry.path = process_path(process).unwrap_or_default();
+                }
+                if entry.path.as_os_str().is_empty()
+                    && let Some(block) = focused
+                {
+                    entry.path = self.reported_path(id, block).unwrap_or_default();
+                }
             }
             session = Some(entry);
         }

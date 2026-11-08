@@ -757,7 +757,8 @@ cancel = ['alt-q', 'alt-z']
             checks.append({'case':'worktree-create-from-empty-results-configured-path-hooks-once-and-connect',**report})
         finally:
             s.close()
-        s = Session(binary, cfg, root, arguments=[*base, 'wt', 'pk', '--path', str(repo), '--query=feature/scoped'], env_extra=env)
+        # Exact matching keeps random checkout paths from matching the removed branch.
+        s = Session(binary, cfg, root, arguments=[*base, 'wt', 'pk', '--path', str(repo), "--query='feature/scoped"], env_extra=env)
         try:
             s.expect('feature/scoped'); s.send(b'\x18')
             s.expect('Remove this worktree using Worktrunk?')

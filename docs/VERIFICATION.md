@@ -66,15 +66,28 @@ python3 scripts/wildcard_smoke.py --binary target/debug/rexue
 
 ```sh
 cargo build --release
-python3 scripts/performance_smoke.py --binary target/release/rexue --max-rex-calls 3
+python3 scripts/performance_smoke.py --binary target/release/rexue --max-rex-calls 3 --max-selection-rex-calls 1
+python3 scripts/performance_smoke.py --binary target/release/rexue --agents --max-rex-calls 3 --max-selection-rex-calls 1
 python3 scripts/performance_smoke.py --binary target/release/rexue --legacy-rex --max-rex-calls 52
+python3 scripts/performance_smoke.py --binary target/release/rexue --query project-0 --max-selection-rex-calls 1 --max-selection-fzf-calls 0
+python3 scripts/performance_smoke.py --binary target/release/rexue --agents --query project-0 --max-selection-rex-calls 1 --max-selection-fzf-calls 0
 ```
 
-Uses real fzf with four fixture sessions, each with one unnamed tab, three agents and one shell. Each Rex process waits 15ms to model startup/connection cost. Reports five-run medians for visible-list time, Rex process count, idle RSS and CPU; checks idle requests and terminal restoration.
+With an installed Rex CLI, execute the actual snapshot Lua against mocked RPCs:
 
-Native discovery uses one fresh Lua snapshot; `--legacy-rex` checks the fallback for CLIs without Lua. Backend tests cover snapshot equivalence, freshness and errors. Use `--runs N`, `--idle-seconds N` or `--output PATH` to customize measurements.
+```sh
+cargo test --test backend lua_snapshot_only_reads_needed_connection_metadata -- --ignored
+```
 
-Compare identical build settings without concurrent acceptance suites. Picker timing includes Python PTY startup; RSS sums the picker and descendants; idle CPU excludes the wrapper. Per-RPC network latency, live app rendering and peak memory are outside this fixture. Omit the call limit for older binaries. [Recorded samples](verification/performance-startup.json) also include read-only live listing.
+This separate test checks the discovery and connection RPC budgets without requiring the CLI in ordinary Rust test runs.
+
+Uses real fzf with four fixture sessions, each with one unnamed tab, three agents and one shell. Each Rex process waits 15ms to model startup/connection cost. Reports five-run medians for visible-list time, Enter-to-switch submission time (`switch_ms`), Enter-to-exit selection time, Rex process counts, idle RSS and CPU; checks idle requests and terminal restoration. The fixture timestamps switch submission after the CLI's modeled connection delay and after it receives the validated target. Exit time also includes history and directory recording. The first run starts with empty history; later runs reuse it.
+
+Native discovery uses a fresh Lua snapshot. Selecting a resolved live session, tab or pane uses one Rex CLI process for client preflight, a fresh target snapshot, focus and `session.select`. Connection snapshots omit display titles; agent selection fetches only the target's process and program status, while keeping its current tab from the fresh session view. A JSON line handshake on stdin/stdout lets Rust validate the snapshot with the existing agent and target rules before the same CLI connection commits the switch. The state lock precedes the snapshot; history is saved after the switch succeeds. Cancellation, malformed data and preflight errors close the child without submitting focus. The exchange retains bounded output, deadlines and process-group cleanup. `--legacy-rex` checks the fallback for CLIs without Lua. Backend tests cover snapshot equivalence, target freshness, exact IDs, process budgets, failed-switch history and protocol cleanup. Use `--runs N`, `--idle-seconds N` or `--output PATH` to customize measurements.
+
+Rendered rows are reused for the same query and catalog revision. Refresh/removal invalidates them, and late results from an old revision or query cannot replace the current result. Selection still checks the returned row ID against the query and refreshes the target's process metadata before focus. The fzf budget uses a transparent wrapper to count filter processes after Enter; a settled query should need none. Default directory recording remains synchronous, with its existing error reporting.
+
+Compare identical build settings without concurrent acceptance suites. Picker timing includes Python PTY startup; RSS sums the picker and descendants; idle CPU excludes the wrapper. Per-RPC network latency, live app rendering and peak memory are outside this fixture. Omit the call limit for older binaries. [Startup samples](verification/performance-startup.json) also include read-only live listing. [Selection samples](verification/performance-selection.json) record the optimization rounds. The `single_connection_optimization` record compares isolated and user configurations against one native CLI connection performing the same focus/select actions; it also records real floating-picker acceptance and cross-session history. The `default_path_optimization` record adds stage diagnosis, post-selection fzf budgets and a new comparison using the user configuration.
 
 ## Agent picker navigation
 
@@ -103,4 +116,4 @@ Receipts describe recorded runs, not the current checkout. Update only after exe
 | --- | --- |
 | Automated | [Picker](verification/fzf.json), [keyboard](verification/keyboard.json), [Worktrunk](verification/worktree.json), [removal](verification/worktree-removal.json), [CLI](verification/public-cli.json), [session/agent fixtures](verification/session-agents.json) |
 | Live navigation | [Session tree](verification/session-tree.json), [initial focus](verification/initial-focus.json), [agents](verification/agent-picker.json) |
-| Performance | [Startup](verification/performance-startup.json), [earlier samples](verification/performance.json) |
+| Performance | [Selection](verification/performance-selection.json), [startup](verification/performance-startup.json), [earlier samples](verification/performance.json) |

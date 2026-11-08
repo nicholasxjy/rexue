@@ -1,0 +1,2454 @@
+{
+  "baseline_revision": "f5dbe495a022fbdd6e95f949f5a4a6d62a7722bf",
+  "candidate": "uncommitted working tree based on the baseline revision",
+  "build": "Both binaries built with cargo build --release; release profile unchanged.",
+  "environment": {
+    "os": "macOS 27.2",
+    "arch": "arm64",
+    "rust": "1.99.1",
+    "fzf": "0.75.0 (Homebrew)",
+    "worktrunk": "0.81.0",
+    "rex": "0.0.1794069975-g6c6689",
+    "rex_app": "0.1.0 (1873)"
+  },
+  "method": "Five sequential real-fzf PTY runs per native fixture comparison, with four sessions and 15ms per Rex process. Enter-to-exit includes preflight, fresh target validation, focus/switch and state recording. Each fixture starts with empty history, then reuses it. Native timing runs did not overlap acceptance suites. Live timing uses a local Rex connection and the same active agent pane; preview is disabled and exact tab/pane IDs are checked. Native session.select is a CLI reference, not UI input-to-frame latency.",
+  "validation": [
+    {
+      "command": "cargo fmt --check",
+      "status": "passed"
+    },
+    {
+      "command": "cargo test",
+      "status": "passed",
+      "tests": 156
+    },
+    {
+      "command": "cargo clippy --all-targets -- -D warnings",
+      "status": "passed"
+    },
+    {
+      "command": "python3 scripts/pty_smoke.py --binary target/debug/rexue",
+      "status": "passed",
+      "cases": 83
+    },
+    {
+      "command": "python3 scripts/worktree_removal_smoke.py --binary target/debug/rexue",
+      "status": "passed",
+      "cases": 9
+    },
+    {
+      "command": "python3 scripts/worktree_smoke.py --binary target/debug/rexue",
+      "status": "passed",
+      "cases": 21
+    },
+    {
+      "command": "rex config check examples/rex-picker.lua",
+      "status": "passed"
+    },
+    {
+      "command": "rex config check examples/rex-picker-floating.lua",
+      "status": "passed"
+    },
+    {
+      "command": "cargo build; cargo build --release",
+      "status": "passed"
+    },
+    {
+      "command": "cargo install --locked --path . --force",
+      "status": "passed",
+      "installed": "/Users/nick/.cargo/bin/rexue",
+      "version": "0.1.13"
+    },
+    {
+      "command": "git diff --check",
+      "status": "passed"
+    }
+  ],
+  "limits": [
+    "Native GUI frame latency and cross-host network latency are not measured.",
+    "Older Rex CLIs without Lua keep the per-command fallback and do not gain the batched-refresh speedup.",
+    "The live comparison selects the same current agent pane rather than cycling between sessions."
+  ],
+  "recorded_at": "2026-11-08T03:41:28.263962+00:00",
+  "binary_sha256": {
+    "before": "613b6416c55e1d3ca07c0fd21eec04766081f070e4c4ef24adecf1daae0e064f",
+    "after": "75fd5a65dd1398b7e3336e233d3d0dbce3bc6d198775f6bd651439e75307e6fa"
+  },
+  "fixtures": {
+    "session": {
+      "before": {
+        "method": "Four sessions, one unnamed tab and four panes per session (three agents and one shell); each Rex CLI process sleeps 15ms to model process/connection setup (individual RPC latency within Lua is not simulated). Real fzf in a PTY; preview disabled. RSS sums the picker and its descendants; CPU is the idle CPU-time delta, excluding the Python wrapper. This does not measure live app rendering or peak startup memory.",
+        "runs": 5,
+        "legacy_rex": false,
+        "agents": false,
+        "median": {
+          "open_ms": 668.94,
+          "open_rex_calls": 3,
+          "selection_ms": 308.17,
+          "selection_rex_calls": 16,
+          "idle_rss_kib": 14848,
+          "idle_cpu_percent": 0.0
+        },
+        "samples": [
+          {
+            "open_ms": 1203.99,
+            "open_rex_calls": 3,
+            "selection_ms": 339.85,
+            "selection_rex_calls": 17,
+            "idle_rss_kib": 14928,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true
+          },
+          {
+            "open_ms": 668.94,
+            "open_rex_calls": 3,
+            "selection_ms": 301.06,
+            "selection_rex_calls": 16,
+            "idle_rss_kib": 14688,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true
+          },
+          {
+            "open_ms": 678.23,
+            "open_rex_calls": 3,
+            "selection_ms": 290.79,
+            "selection_rex_calls": 16,
+            "idle_rss_kib": 14704,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true
+          },
+          {
+            "open_ms": 663.24,
+            "open_rex_calls": 3,
+            "selection_ms": 310.4,
+            "selection_rex_calls": 16,
+            "idle_rss_kib": 14848,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true
+          },
+          {
+            "open_ms": 657.17,
+            "open_rex_calls": 3,
+            "selection_ms": 308.17,
+            "selection_rex_calls": 16,
+            "idle_rss_kib": 14848,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true
+          }
+        ]
+      },
+      "after": {
+        "method": "Four sessions, one unnamed tab and four panes per session (three agents and one shell); each Rex CLI process sleeps 15ms to model process/connection setup (individual RPC latency within Lua is not simulated). Real fzf in a PTY; preview disabled. RSS sums the picker and its descendants; CPU is the idle CPU-time delta, excluding the Python wrapper. This does not measure live app rendering or peak startup memory.",
+        "runs": 5,
+        "legacy_rex": false,
+        "agents": false,
+        "median": {
+          "open_ms": 670.35,
+          "open_rex_calls": 3,
+          "selection_ms": 131.54,
+          "selection_rex_calls": 4,
+          "idle_rss_kib": 14720,
+          "idle_cpu_percent": 0.0
+        },
+        "samples": [
+          {
+            "open_ms": 1341.45,
+            "open_rex_calls": 3,
+            "selection_ms": 155.33,
+            "selection_rex_calls": 5,
+            "idle_rss_kib": 14880,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true
+          },
+          {
+            "open_ms": 665.25,
+            "open_rex_calls": 3,
+            "selection_ms": 119.34,
+            "selection_rex_calls": 4,
+            "idle_rss_kib": 14720,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true
+          },
+          {
+            "open_ms": 670.35,
+            "open_rex_calls": 3,
+            "selection_ms": 138.49,
+            "selection_rex_calls": 4,
+            "idle_rss_kib": 14560,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true
+          },
+          {
+            "open_ms": 674.63,
+            "open_rex_calls": 3,
+            "selection_ms": 118.16,
+            "selection_rex_calls": 4,
+            "idle_rss_kib": 14688,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true
+          },
+          {
+            "open_ms": 656.83,
+            "open_rex_calls": 3,
+            "selection_ms": 131.54,
+            "selection_rex_calls": 4,
+            "idle_rss_kib": 14800,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true
+          }
+        ]
+      }
+    },
+    "agent": {
+      "before": {
+        "method": "Four sessions, one unnamed tab and four panes per session (three agents and one shell); each Rex CLI process sleeps 15ms to model process/connection setup (individual RPC latency within Lua is not simulated). Real fzf in a PTY; preview disabled. RSS sums the picker and its descendants; CPU is the idle CPU-time delta, excluding the Python wrapper. This does not measure live app rendering or peak startup memory.",
+        "runs": 5,
+        "legacy_rex": false,
+        "agents": true,
+        "median": {
+          "open_ms": 689.35,
+          "open_rex_calls": 3,
+          "selection_ms": 276.68,
+          "selection_rex_calls": 9,
+          "idle_rss_kib": 14688,
+          "idle_cpu_percent": 0.0
+        },
+        "samples": [
+          {
+            "open_ms": 948.92,
+            "open_rex_calls": 3,
+            "selection_ms": 313.29,
+            "selection_rex_calls": 10,
+            "idle_rss_kib": 14896,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true
+          },
+          {
+            "open_ms": 690.08,
+            "open_rex_calls": 3,
+            "selection_ms": 262.65,
+            "selection_rex_calls": 9,
+            "idle_rss_kib": 14800,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true
+          },
+          {
+            "open_ms": 689.35,
+            "open_rex_calls": 3,
+            "selection_ms": 263.2,
+            "selection_rex_calls": 9,
+            "idle_rss_kib": 14656,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true
+          },
+          {
+            "open_ms": 655.5,
+            "open_rex_calls": 3,
+            "selection_ms": 276.68,
+            "selection_rex_calls": 9,
+            "idle_rss_kib": 14688,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true
+          },
+          {
+            "open_ms": 681.78,
+            "open_rex_calls": 3,
+            "selection_ms": 294.77,
+            "selection_rex_calls": 9,
+            "idle_rss_kib": 14624,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true
+          }
+        ]
+      },
+      "after": {
+        "method": "Four sessions, one unnamed tab and four panes per session (three agents and one shell); each Rex CLI process sleeps 15ms to model process/connection setup (individual RPC latency within Lua is not simulated). Real fzf in a PTY; preview disabled. RSS sums the picker and its descendants; CPU is the idle CPU-time delta, excluding the Python wrapper. This does not measure live app rendering or peak startup memory.",
+        "runs": 5,
+        "legacy_rex": false,
+        "agents": true,
+        "median": {
+          "open_ms": 674.68,
+          "open_rex_calls": 3,
+          "selection_ms": 149.42,
+          "selection_rex_calls": 5,
+          "idle_rss_kib": 14800,
+          "idle_cpu_percent": 0.0
+        },
+        "samples": [
+          {
+            "open_ms": 972.64,
+            "open_rex_calls": 3,
+            "selection_ms": 175.85,
+            "selection_rex_calls": 6,
+            "idle_rss_kib": 14592,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true
+          },
+          {
+            "open_ms": 660.63,
+            "open_rex_calls": 3,
+            "selection_ms": 149.85,
+            "selection_rex_calls": 5,
+            "idle_rss_kib": 14848,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true
+          },
+          {
+            "open_ms": 674.68,
+            "open_rex_calls": 3,
+            "selection_ms": 149.42,
+            "selection_rex_calls": 5,
+            "idle_rss_kib": 14928,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true
+          },
+          {
+            "open_ms": 678.29,
+            "open_rex_calls": 3,
+            "selection_ms": 147.7,
+            "selection_rex_calls": 5,
+            "idle_rss_kib": 14800,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true
+          },
+          {
+            "open_ms": 672.03,
+            "open_rex_calls": 3,
+            "selection_ms": 149.41,
+            "selection_rex_calls": 5,
+            "idle_rss_kib": 14640,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true
+          }
+        ]
+      }
+    }
+  },
+  "legacy_compatibility": {
+    "runs": 3,
+    "open_rex_calls": [
+      52,
+      52,
+      52
+    ],
+    "all_terminal_restored": true,
+    "note": "Compatibility-only run overlapped removal acceptance; timing is omitted."
+  },
+  "live": {
+    "native_session_select_cli_ms": [
+      48.39,
+      81.4,
+      44.72,
+      29.74,
+      27.97
+    ],
+    "native_median_ms": 44.72,
+    "picker": {
+      "before": {
+        "selection_ms": [
+          362.24,
+          324.24,
+          320.84,
+          338.19,
+          330.41
+        ],
+        "median_ms": 330.41,
+        "exact_pane_verified": true
+      },
+      "after": {
+        "selection_ms": [
+          198.7,
+          175.89,
+          176.1,
+          175.79,
+          171.48
+        ],
+        "median_ms": 175.89,
+        "exact_pane_verified": true
+      }
+    },
+    "method": "Live local Rex; same active agent pane. Five Enter-to-process-exit samples for each release binary, isolated state, preview disabled. Native reference invokes session.select via CLI on the same target; it is not a measurement of native UI input-to-frame latency.",
+    "floating_navigation": {
+      "installed_empty_query_shortcut": true,
+      "reopen_with_prefilled_query": true,
+      "correct_agent_tab": true,
+      "own_picker_excluded": true,
+      "other_floating_pane_retained": true,
+      "both_pickers_cancelled": true,
+      "test_panes_cleaned": true
+    },
+    "test_resources_cleaned": true,
+    "original_remote_session_and_tab_restored": true
+  },
+  "single_connection_optimization": {
+    "comparison_base": "Previous optimization's uncommitted release binary (same baseline Git revision as the first receipt)",
+    "build": "Both binaries built with cargo build --release; release profile unchanged.",
+    "environment": {
+      "os": "macOS 27.2",
+      "arch": "arm64",
+      "rust": "1.99.1",
+      "fzf": "0.75.0 (Homebrew)",
+      "worktrunk": "0.81.0",
+      "rex": "0.0.1794069975-g6c6689",
+      "rex_app": "0.1.0 (1874)"
+    },
+    "method": "Native fixture runs are sequential, five samples per target type and build, without concurrent acceptance suites. switch_ms timestamps the fixture receiving a validated target after modeled connection startup; selection_ms runs through process exit and recording. Live tests repeatedly transition from a temporary test-owned tab to the same existing agent pane, asserting full tab and pane IDs. The isolated-config live run disables preview and runs true for directory recording; the user-config live run uses the user's configuration and all default sources. Native reference is one CLI connection for attach, focus_block and client.perform(session.select), without target metadata validation. All live state is isolated and temporary tabs are cleaned.",
+    "protocol": "One bounded stdin/stdout JSON handshake on a single rex do process. Rust validates the fresh snapshot and client capabilities under the state lock, then replies with full target IDs. Lua focuses and performs session.select using the same connection. Success is acknowledged before Rust updates history. No metadata cache or idle process is added.",
+    "validation": [
+      {
+        "command": "cargo fmt --check",
+        "status": "passed"
+      },
+      {
+        "command": "cargo test",
+        "status": "passed",
+        "tests": 161
+      },
+      {
+        "command": "cargo clippy --all-targets -- -D warnings",
+        "status": "passed"
+      },
+      {
+        "command": "cargo build; cargo build --release",
+        "status": "passed"
+      },
+      {
+        "command": "python3 scripts/pty_smoke.py --binary target/debug/rexue",
+        "status": "passed",
+        "cases": 83
+      },
+      {
+        "command": "python3 scripts/worktree_smoke.py --binary target/debug/rexue",
+        "status": "passed",
+        "cases": 21
+      },
+      {
+        "command": "python3 scripts/worktree_removal_smoke.py --binary target/debug/rexue",
+        "status": "passed",
+        "cases": 9
+      },
+      {
+        "command": "python3 scripts/shell_smoke.py --binary target/debug/rexue",
+        "status": "passed"
+      },
+      {
+        "command": "python3 scripts/shell_scope_smoke.py --binary target/debug/rexue",
+        "status": "passed"
+      },
+      {
+        "command": "python3 scripts/wildcard_smoke.py --binary target/debug/rexue",
+        "status": "passed"
+      },
+      {
+        "command": "rex config check examples/rex-picker.lua; rex config check examples/rex-picker-floating.lua",
+        "status": "passed"
+      },
+      {
+        "command": "cargo install --locked --path . --force",
+        "status": "passed",
+        "installed": "/Users/nick/.cargo/bin/rexue",
+        "version": "0.1.13"
+      },
+      {
+        "command": "git diff --check",
+        "status": "passed"
+      }
+    ],
+    "limits": [
+      "Native GUI input-to-frame latency and cross-host network latency are not measured.",
+      "The native reference omits fzf, fresh metadata validation, history and directory recording.",
+      "Older CLIs without Lua use the fallback, including protocol capability probing; the single-process speedup applies to modern Rex.",
+      "Directory creation and explicit renames keep the existing connection workflow."
+    ],
+    "recorded_at": "2026-11-08T04:14:29.934000+00:00",
+    "binary_sha256": {
+      "before": "75fd5a65dd1398b7e3336e233d3d0dbce3bc6d198775f6bd651439e75307e6fa",
+      "after": "a2d8aa73dd850051c53292bbe78af8956cf90545d05468e61c51adb36a34f389"
+    },
+    "fixtures": {
+      "agent": {
+        "before": {
+          "method": "Four sessions, one unnamed tab and four panes per session (three agents and one shell); each Rex CLI process sleeps 15ms to model process/connection setup (individual RPC latency within Lua is not simulated). Real fzf in a PTY; preview disabled. Selection measures Enter until process exit, including target validation, focus/switch and state updates. The first run has empty history; later runs reuse it. RSS sums the picker and its descendants; CPU is the idle CPU-time delta, excluding the Python wrapper. This does not measure live app rendering or peak startup memory.",
+          "runs": 5,
+          "legacy_rex": false,
+          "agents": true,
+          "median": {
+            "open_ms": 662.01,
+            "open_rex_calls": 3,
+            "selection_ms": 149.68,
+            "switch_ms": 135.72,
+            "selection_rex_calls": 5,
+            "idle_rss_kib": 14704,
+            "idle_cpu_percent": 0.0
+          },
+          "samples": [
+            {
+              "open_ms": 1491.19,
+              "open_rex_calls": 3,
+              "selection_ms": 174.56,
+              "switch_ms": 162.98,
+              "selection_rex_calls": 6,
+              "idle_rss_kib": 14688,
+              "idle_cpu_percent": 0.0,
+              "idle_rex_calls": 0,
+              "terminal_restored": true
+            },
+            {
+              "open_ms": 665.48,
+              "open_rex_calls": 3,
+              "selection_ms": 149.68,
+              "switch_ms": 137.82,
+              "selection_rex_calls": 5,
+              "idle_rss_kib": 14784,
+              "idle_cpu_percent": 0.0,
+              "idle_rex_calls": 0,
+              "terminal_restored": true
+            },
+            {
+              "open_ms": 662.01,
+              "open_rex_calls": 3,
+              "selection_ms": 150.46,
+              "switch_ms": 135.72,
+              "selection_rex_calls": 5,
+              "idle_rss_kib": 14704,
+              "idle_cpu_percent": 0.0,
+              "idle_rex_calls": 0,
+              "terminal_restored": true
+            },
+            {
+              "open_ms": 656.13,
+              "open_rex_calls": 3,
+              "selection_ms": 143.75,
+              "switch_ms": 133.65,
+              "selection_rex_calls": 5,
+              "idle_rss_kib": 14768,
+              "idle_cpu_percent": 0.0,
+              "idle_rex_calls": 0,
+              "terminal_restored": true
+            },
+            {
+              "open_ms": 653.57,
+              "open_rex_calls": 3,
+              "selection_ms": 139.43,
+              "switch_ms": 128.91,
+              "selection_rex_calls": 5,
+              "idle_rss_kib": 14656,
+              "idle_cpu_percent": 0.0,
+              "idle_rex_calls": 0,
+              "terminal_restored": true
+            }
+          ]
+        },
+        "after": {
+          "method": "Four sessions, one unnamed tab and four panes per session (three agents and one shell); each Rex CLI process sleeps 15ms to model process/connection setup (individual RPC latency within Lua is not simulated). Real fzf in a PTY; preview disabled. Selection measures Enter until process exit, including target validation, focus/switch and state updates. The first run has empty history; later runs reuse it. RSS sums the picker and its descendants; CPU is the idle CPU-time delta, excluding the Python wrapper. This does not measure live app rendering or peak startup memory.",
+          "runs": 5,
+          "legacy_rex": false,
+          "agents": true,
+          "median": {
+            "open_ms": 662.14,
+            "open_rex_calls": 3,
+            "selection_ms": 42.08,
+            "switch_ms": 31.66,
+            "selection_rex_calls": 1,
+            "idle_rss_kib": 14688,
+            "idle_cpu_percent": 0.0
+          },
+          "samples": [
+            {
+              "open_ms": 1355.66,
+              "open_rex_calls": 3,
+              "selection_ms": 42.08,
+              "switch_ms": 32.65,
+              "selection_rex_calls": 1,
+              "idle_rss_kib": 14864,
+              "idle_cpu_percent": 0.0,
+              "idle_rex_calls": 0,
+              "terminal_restored": true
+            },
+            {
+              "open_ms": 677.55,
+              "open_rex_calls": 3,
+              "selection_ms": 40.55,
+              "switch_ms": 30.7,
+              "selection_rex_calls": 1,
+              "idle_rss_kib": 14640,
+              "idle_cpu_percent": 0.0,
+              "idle_rex_calls": 0,
+              "terminal_restored": true
+            },
+            {
+              "open_ms": 662.14,
+              "open_rex_calls": 3,
+              "selection_ms": 38.06,
+              "switch_ms": 26.94,
+              "selection_rex_calls": 1,
+              "idle_rss_kib": 14608,
+              "idle_cpu_percent": 0.0,
+              "idle_rex_calls": 0,
+              "terminal_restored": true
+            },
+            {
+              "open_ms": 658.35,
+              "open_rex_calls": 3,
+              "selection_ms": 43.62,
+              "switch_ms": 31.78,
+              "selection_rex_calls": 1,
+              "idle_rss_kib": 14832,
+              "idle_cpu_percent": 0.0,
+              "idle_rex_calls": 0,
+              "terminal_restored": true
+            },
+            {
+              "open_ms": 654.79,
+              "open_rex_calls": 3,
+              "selection_ms": 43.24,
+              "switch_ms": 31.66,
+              "selection_rex_calls": 1,
+              "idle_rss_kib": 14688,
+              "idle_cpu_percent": 0.0,
+              "idle_rex_calls": 0,
+              "terminal_restored": true
+            }
+          ]
+        }
+      },
+      "session": {
+        "before": {
+          "method": "Four sessions, one unnamed tab and four panes per session (three agents and one shell); each Rex CLI process sleeps 15ms to model process/connection setup (individual RPC latency within Lua is not simulated). Real fzf in a PTY; preview disabled. Selection measures Enter until process exit, including target validation, focus/switch and state updates. The first run has empty history; later runs reuse it. RSS sums the picker and its descendants; CPU is the idle CPU-time delta, excluding the Python wrapper. This does not measure live app rendering or peak startup memory.",
+          "runs": 5,
+          "legacy_rex": false,
+          "agents": false,
+          "median": {
+            "open_ms": 667.74,
+            "open_rex_calls": 3,
+            "selection_ms": 122.61,
+            "switch_ms": 109.93,
+            "selection_rex_calls": 4,
+            "idle_rss_kib": 14880,
+            "idle_cpu_percent": 0.0
+          },
+          "samples": [
+            {
+              "open_ms": 949.2,
+              "open_rex_calls": 3,
+              "selection_ms": 158.42,
+              "switch_ms": 146.72,
+              "selection_rex_calls": 5,
+              "idle_rss_kib": 14576,
+              "idle_cpu_percent": 0.0,
+              "idle_rex_calls": 0,
+              "terminal_restored": true
+            },
+            {
+              "open_ms": 682.04,
+              "open_rex_calls": 3,
+              "selection_ms": 118.32,
+              "switch_ms": 106.45,
+              "selection_rex_calls": 4,
+              "idle_rss_kib": 15088,
+              "idle_cpu_percent": 0.0,
+              "idle_rex_calls": 0,
+              "terminal_restored": true
+            },
+            {
+              "open_ms": 666.1,
+              "open_rex_calls": 3,
+              "selection_ms": 110.91,
+              "switch_ms": 99.89,
+              "selection_rex_calls": 4,
+              "idle_rss_kib": 14880,
+              "idle_cpu_percent": 0.0,
+              "idle_rex_calls": 0,
+              "terminal_restored": true
+            },
+            {
+              "open_ms": 667.74,
+              "open_rex_calls": 3,
+              "selection_ms": 122.61,
+              "switch_ms": 109.93,
+              "selection_rex_calls": 4,
+              "idle_rss_kib": 14960,
+              "idle_cpu_percent": 0.0,
+              "idle_rex_calls": 0,
+              "terminal_restored": true
+            },
+            {
+              "open_ms": 656.37,
+              "open_rex_calls": 3,
+              "selection_ms": 136.56,
+              "switch_ms": 124.95,
+              "selection_rex_calls": 4,
+              "idle_rss_kib": 14880,
+              "idle_cpu_percent": 0.0,
+              "idle_rex_calls": 0,
+              "terminal_restored": true
+            }
+          ]
+        },
+        "after": {
+          "method": "Four sessions, one unnamed tab and four panes per session (three agents and one shell); each Rex CLI process sleeps 15ms to model process/connection setup (individual RPC latency within Lua is not simulated). Real fzf in a PTY; preview disabled. Selection measures Enter until process exit, including target validation, focus/switch and state updates. The first run has empty history; later runs reuse it. RSS sums the picker and its descendants; CPU is the idle CPU-time delta, excluding the Python wrapper. This does not measure live app rendering or peak startup memory.",
+          "runs": 5,
+          "legacy_rex": false,
+          "agents": false,
+          "median": {
+            "open_ms": 671.68,
+            "open_rex_calls": 3,
+            "selection_ms": 46.68,
+            "switch_ms": 34.05,
+            "selection_rex_calls": 1,
+            "idle_rss_kib": 14816,
+            "idle_cpu_percent": 0.0
+          },
+          "samples": [
+            {
+              "open_ms": 914.12,
+              "open_rex_calls": 3,
+              "selection_ms": 44.01,
+              "switch_ms": 32.46,
+              "selection_rex_calls": 1,
+              "idle_rss_kib": 14832,
+              "idle_cpu_percent": 0.0,
+              "idle_rex_calls": 0,
+              "terminal_restored": true
+            },
+            {
+              "open_ms": 657.82,
+              "open_rex_calls": 3,
+              "selection_ms": 46.68,
+              "switch_ms": 34.05,
+              "selection_rex_calls": 1,
+              "idle_rss_kib": 15008,
+              "idle_cpu_percent": 0.0,
+              "idle_rex_calls": 0,
+              "terminal_restored": true
+            },
+            {
+              "open_ms": 671.68,
+              "open_rex_calls": 3,
+              "selection_ms": 47.17,
+              "switch_ms": 33.95,
+              "selection_rex_calls": 1,
+              "idle_rss_kib": 14816,
+              "idle_cpu_percent": 0.0,
+              "idle_rex_calls": 0,
+              "terminal_restored": true
+            },
+            {
+              "open_ms": 664.2,
+              "open_rex_calls": 3,
+              "selection_ms": 46.0,
+              "switch_ms": 34.45,
+              "selection_rex_calls": 1,
+              "idle_rss_kib": 14592,
+              "idle_cpu_percent": 0.0,
+              "idle_rex_calls": 0,
+              "terminal_restored": true
+            },
+            {
+              "open_ms": 673.34,
+              "open_rex_calls": 3,
+              "selection_ms": 48.22,
+              "switch_ms": 35.37,
+              "selection_rex_calls": 1,
+              "idle_rss_kib": 14800,
+              "idle_cpu_percent": 0.0,
+              "idle_rex_calls": 0,
+              "terminal_restored": true
+            }
+          ]
+        }
+      }
+    },
+    "live_isolated_config": {
+      "native_cli_ms": [
+        106.13,
+        60.62,
+        72.01,
+        79.27,
+        74.79
+      ],
+      "binaries": [
+        {
+          "binary": "/private/tmp/rexue-round2-before",
+          "selection_ms": [
+            211.91,
+            216.0,
+            200.85,
+            206.88,
+            187.68
+          ],
+          "median_ms": 206.88,
+          "exact_tab_and_pane_verified": true
+        },
+        {
+          "binary": "/Users/nick/Projects/rexue/target/release/rexue",
+          "selection_ms": [
+            95.25,
+            83.1,
+            83.06,
+            100.6,
+            85.75
+          ],
+          "median_ms": 85.75,
+          "exact_tab_and_pane_verified": true
+        }
+      ],
+      "cross_tab_transition": true,
+      "native_median_ms": 74.79,
+      "test_tab_cleaned": true,
+      "method": "Live local Rex, real fzf, five cross-tab transitions from a test-owned shell tab to the same existing agent pane. Native reference uses one Rex CLI connection for session.attach, session.focus_block and client.perform(session.select) to the same target, without metadata validation. Enter-to-process-exit includes state recording; GUI input-to-frame latency is not measured. Each binary uses isolated state with preview disabled."
+    },
+    "live_user_config": {
+      "native_cli_ms": [
+        133.75,
+        59.99,
+        69.13,
+        58.47,
+        68.36
+      ],
+      "binaries": [
+        {
+          "binary": "/private/tmp/rexue-round2-before",
+          "selection_ms": [
+            208.85,
+            198.66,
+            193.4,
+            200.13,
+            222.62
+          ],
+          "median_ms": 200.13,
+          "exact_tab_and_pane_verified": true
+        },
+        {
+          "binary": "/Users/nick/.cargo/bin/rexue",
+          "selection_ms": [
+            156.63,
+            105.14,
+            90.94,
+            118.84,
+            101.53
+          ],
+          "median_ms": 105.14,
+          "exact_tab_and_pane_verified": true
+        }
+      ],
+      "cross_tab_transition": true,
+      "native_median_ms": 68.36,
+      "default_config_and_sources": true,
+      "test_tab_cleaned": true,
+      "method": "Live local Rex, real fzf, five cross-tab transitions from a test-owned shell tab to the same existing agent pane. Native reference uses one Rex CLI connection for session.attach, session.focus_block and client.perform(session.select) to the same target, without metadata validation. Enter-to-process-exit includes state recording; GUI input-to-frame latency is not measured. Each binary uses isolated state. The default-config flag uses the user configuration and all default sources; otherwise preview is disabled and directory recording runs true."
+    },
+    "legacy_compatibility": {
+      "method": "Four sessions, one unnamed tab and four panes per session (three agents and one shell); each Rex CLI process sleeps 15ms to model process/connection setup (individual RPC latency within Lua is not simulated). Real fzf in a PTY; preview disabled. Selection measures Enter until process exit, including target validation, focus/switch and state updates. The first run has empty history; later runs reuse it. RSS sums the picker and its descendants; CPU is the idle CPU-time delta, excluding the Python wrapper. This does not measure live app rendering or peak startup memory.",
+      "runs": 3,
+      "legacy_rex": true,
+      "agents": false,
+      "median": {
+        "open_ms": 864.45,
+        "open_rex_calls": 52,
+        "selection_ms": 352.93,
+        "switch_ms": 341.03,
+        "selection_rex_calls": 18,
+        "idle_rss_kib": 15328,
+        "idle_cpu_percent": 0.0
+      },
+      "samples": [
+        {
+          "open_ms": 1331.29,
+          "open_rex_calls": 52,
+          "selection_ms": 393.22,
+          "switch_ms": 382.46,
+          "selection_rex_calls": 19,
+          "idle_rss_kib": 15248,
+          "idle_cpu_percent": 0.0,
+          "idle_rex_calls": 0,
+          "terminal_restored": true
+        },
+        {
+          "open_ms": 864.45,
+          "open_rex_calls": 52,
+          "selection_ms": 352.93,
+          "switch_ms": 341.03,
+          "selection_rex_calls": 18,
+          "idle_rss_kib": 15360,
+          "idle_cpu_percent": 0.0,
+          "idle_rex_calls": 0,
+          "terminal_restored": true
+        },
+        {
+          "open_ms": 863.67,
+          "open_rex_calls": 52,
+          "selection_ms": 347.26,
+          "switch_ms": 337.44,
+          "selection_rex_calls": 18,
+          "idle_rss_kib": 15328,
+          "idle_cpu_percent": 0.0,
+          "idle_rex_calls": 0,
+          "terminal_restored": true
+        }
+      ]
+    },
+    "live_functional": {
+      "floating": {
+        "installed_shortcut_empty_query": true,
+        "prefilled_query_reopen": true,
+        "other_floating_pane_retained": true,
+        "own_picker_excluded": true,
+        "both_cancel_paths": true,
+        "accept_from_real_floating_pane": true,
+        "exact_agent_tab_and_pane": true,
+        "test_panes_cleaned_and_initial_focus_restored": true
+      },
+      "history": {
+        "cross_session_selection": true,
+        "first_history_seeded_with_valid_origin": true,
+        "last_returns_to_original_session": true,
+        "test_session_cleaned": true
+      },
+      "invalid_inherited_context_matches_whoami": true
+    }
+  },
+  "default_path_optimization": {
+    "comparison_base": "Release binary captured at the start of this task, before the default-path edits",
+    "build": "Both candidates built with cargo build --release; release profile unchanged.",
+    "environment": {
+      "os": "macOS 27.2",
+      "arch": "arm64",
+      "rust": "1.99.1",
+      "fzf": "0.75.0 (Homebrew)",
+      "worktrunk": "0.81.0",
+      "rex": "0.0.1794069975-g6c6689",
+      "rex_app": "0.1.0 (1874)"
+    },
+    "changes": [
+      "Reuse the current rendered rows for the same query and catalog revision; invalidate on replacement/removal and reject late results.",
+      "Connection snapshots omit presentation titles. Agent connection snapshots read only the selected block's process and program status and take its current window from the fresh view.",
+      "Preserve synchronous directory recording and its existing errors."
+    ],
+    "method": "Final default measurement uses 11 quiet, alternating before/after pairs, full user configuration and default sources, with no CLI counting wrappers or diagnostic markers. Preview resolves to its unchanged default false; directory recording uses real zoxide. Each run switches from a test-owned tab to the same real agent pane and verifies full window/block IDs. Each binary has isolated state. Native reference uses one CLI connection for attach, focus_block and client.perform(session.select). Enter-to-process-exit includes history and directory recording; native UI input-to-frame latency is not measured. Acceptance suites were not running during timing.",
+    "measurement_corrections": [
+      "The first unwrapped run printed each sample to the agent terminal and measured all old samples before all new samples. It showed no stable improvement (82.011ms vs 87.743ms). These raw results are retained; final inference uses quiet paired sampling to reduce terminal-output and ordering effects. This does not isolate which measurement factor caused the variation.",
+      "Stage diagnosis uses temporary trace markers and transparent process wrappers; those add overhead and are not the final absolute timing measurements. All temporary source instrumentation was removed."
+    ],
+    "validation": [
+      {
+        "command": "cargo fmt --check",
+        "status": "passed"
+      },
+      {
+        "command": "cargo test",
+        "status": "passed",
+        "tests": 164,
+        "ignored": 1
+      },
+      {
+        "command": "cargo test --test backend lua_snapshot_only_reads_needed_connection_metadata -- --ignored --nocapture",
+        "status": "passed",
+        "tests": 1,
+        "detail": "Actual Lua with mocked RPCs: catalog discovery 11 calls, scoped discovery 10 calls, connection session 7 calls, connection agent 3 calls."
+      },
+      {
+        "command": "cargo clippy --all-targets -- -D warnings",
+        "status": "passed"
+      },
+      {
+        "command": "cargo build; cargo build --release",
+        "status": "passed"
+      },
+      {
+        "command": "python3 scripts/pty_smoke.py --binary target/debug/rexue",
+        "status": "passed after fixing the test query",
+        "cases": 83
+      },
+      {
+        "command": "python3 scripts/worktree_smoke.py --binary target/debug/rexue",
+        "status": "passed",
+        "cases": 21
+      },
+      {
+        "command": "python3 scripts/worktree_removal_smoke.py --binary target/debug/rexue",
+        "status": "passed",
+        "cases": 9
+      },
+      {
+        "command": "rex config check examples/rex-picker.lua; rex config check examples/rex-picker-floating.lua",
+        "status": "passed"
+      },
+      {
+        "command": "cargo install --locked --path . --force",
+        "status": "passed",
+        "installed": "/Users/nick/.cargo/bin/rexue",
+        "version": "0.1.13"
+      },
+      {
+        "command": "git diff --check",
+        "status": "passed"
+      }
+    ],
+    "acceptance_fixture_correction": {
+      "case": "worktree-confirm-cancel-then-safe-remove-and-refresh",
+      "initial_failure": "Expected 0/0 after removing feature/scoped, but fzf still matched feature/picker-created through the randomized full checkout path.",
+      "reproduction": "Replaying the exact remaining path from the failed run matched the fuzzy query feature/scoped; the exact query 'feature/scoped did not match.",
+      "fix": "Use the exact branch query for this removal assertion; product fuzzy matching is unchanged."
+    },
+    "live_check_correction": "An existing different Rexue floating picker made a name-based exclusion assertion ambiguous. The final check uses full block IDs in the real snapshot, verifies the test picker is excluded, retains other floating blocks, and exercises acceptance and history.",
+    "limits": [
+      "Live timings still vary with Rex client rendering; 9 of 11 pairs improved, so the median is not a per-run guarantee.",
+      "Native reference omits fzf, target metadata validation, history and directory recording.",
+      "Cross-host latency and native GUI input-to-frame latency are not measured.",
+      "The directory-recording stub control executes true and does not describe the installed default behavior."
+    ],
+    "recorded_at": "2026-11-08T05:15:27.547647+00:00",
+    "binary_sha256": {
+      "before": "a5b43ad03c944bdf9feb10382f42217af10de59815d3e8e4a6f12b9f5241a693",
+      "after": "27fa9be118e3b9833f567e36584b169f08c6af9aeb50f7f15f0bea1c6f8335ce"
+    },
+    "diagnosis": {
+      "process_baseline": [
+        {
+          "binary": "/private/tmp/rexue-round3-before",
+          "mode": "default",
+          "median_ms": 103.326,
+          "samples": [
+            {
+              "elapsed_ms": 120.975,
+              "calls": [
+                {
+                  "program": "fzf-filter",
+                  "start_ms": 9.489
+                },
+                {
+                  "program": "rex",
+                  "start_ms": 24.127
+                },
+                {
+                  "program": "zoxide-add",
+                  "start_ms": 102.31
+                }
+              ],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 91.709,
+              "calls": [
+                {
+                  "program": "fzf-filter",
+                  "start_ms": 6.498
+                },
+                {
+                  "program": "rex",
+                  "start_ms": 19.981
+                },
+                {
+                  "program": "zoxide-add",
+                  "start_ms": 74.719
+                }
+              ],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 103.326,
+              "calls": [
+                {
+                  "program": "fzf-filter",
+                  "start_ms": 10.386
+                },
+                {
+                  "program": "rex",
+                  "start_ms": 24.141
+                },
+                {
+                  "program": "zoxide-add",
+                  "start_ms": 86.819
+                }
+              ],
+              "traces": [],
+              "exact_target": true
+            }
+          ]
+        }
+      ],
+      "stage_baseline": [
+        {
+          "binary": "/Users/nick/Projects/rexue/target/release/rexue",
+          "mode": "default",
+          "median_ms": 127.769,
+          "samples": [
+            {
+              "elapsed_ms": 127.769,
+              "calls": [
+                {
+                  "program": "fzf-filter",
+                  "start_ms": 11.423
+                },
+                {
+                  "program": "rex",
+                  "start_ms": 25.136
+                },
+                {
+                  "program": "zoxide-add",
+                  "start_ms": 110.481
+                }
+              ],
+              "traces": [
+                {
+                  "stage": "fzf_exited",
+                  "at_ms": 1.627
+                },
+                {
+                  "stage": "relay_done",
+                  "at_ms": 1.76
+                },
+                {
+                  "stage": "revalidate_start",
+                  "at_ms": 1.859
+                },
+                {
+                  "stage": "revalidate_done",
+                  "at_ms": 18.236
+                },
+                {
+                  "stage": "bridge_done",
+                  "at_ms": 18.344
+                },
+                {
+                  "stage": "connect_start",
+                  "at_ms": 18.722
+                },
+                {
+                  "stage": "prepared",
+                  "at_ms": 65.778
+                },
+                {
+                  "stage": "validated",
+                  "at_ms": 65.91
+                },
+                {
+                  "stage": "switched",
+                  "at_ms": 103.575
+                },
+                {
+                  "stage": "state_saved",
+                  "at_ms": 104.064
+                },
+                {
+                  "stage": "recorded",
+                  "at_ms": 121.238
+                }
+              ],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 147.195,
+              "calls": [
+                {
+                  "program": "fzf-filter",
+                  "start_ms": 19.589
+                },
+                {
+                  "program": "rex",
+                  "start_ms": 41.779
+                },
+                {
+                  "program": "zoxide-add",
+                  "start_ms": 129.014
+                }
+              ],
+              "traces": [
+                {
+                  "stage": "fzf_exited",
+                  "at_ms": 3.146
+                },
+                {
+                  "stage": "relay_done",
+                  "at_ms": 3.751
+                },
+                {
+                  "stage": "revalidate_start",
+                  "at_ms": 4.124
+                },
+                {
+                  "stage": "revalidate_done",
+                  "at_ms": 28.722
+                },
+                {
+                  "stage": "bridge_done",
+                  "at_ms": 28.825
+                },
+                {
+                  "stage": "connect_start",
+                  "at_ms": 29.11
+                },
+                {
+                  "stage": "prepared",
+                  "at_ms": 82.706
+                },
+                {
+                  "stage": "validated",
+                  "at_ms": 82.924
+                },
+                {
+                  "stage": "switched",
+                  "at_ms": 121.653
+                },
+                {
+                  "stage": "state_saved",
+                  "at_ms": 122.247
+                },
+                {
+                  "stage": "recorded",
+                  "at_ms": 140.849
+                }
+              ],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 136.491,
+              "calls": [
+                {
+                  "program": "fzf-filter",
+                  "start_ms": 16.82
+                },
+                {
+                  "program": "rex",
+                  "start_ms": 39.446
+                },
+                {
+                  "program": "zoxide-add",
+                  "start_ms": 118.592
+                }
+              ],
+              "traces": [
+                {
+                  "stage": "fzf_exited",
+                  "at_ms": 2.968
+                },
+                {
+                  "stage": "relay_done",
+                  "at_ms": 3.23
+                },
+                {
+                  "stage": "revalidate_start",
+                  "at_ms": 3.525
+                },
+                {
+                  "stage": "revalidate_done",
+                  "at_ms": 23.181
+                },
+                {
+                  "stage": "bridge_done",
+                  "at_ms": 23.326
+                },
+                {
+                  "stage": "connect_start",
+                  "at_ms": 30.002
+                },
+                {
+                  "stage": "prepared",
+                  "at_ms": 82.55
+                },
+                {
+                  "stage": "validated",
+                  "at_ms": 82.772
+                },
+                {
+                  "stage": "switched",
+                  "at_ms": 112.093
+                },
+                {
+                  "stage": "state_saved",
+                  "at_ms": 112.675
+                },
+                {
+                  "stage": "recorded",
+                  "at_ms": 129.74
+                }
+              ],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 120.128,
+              "calls": [
+                {
+                  "program": "fzf-filter",
+                  "start_ms": 8.802
+                },
+                {
+                  "program": "rex",
+                  "start_ms": 24.353
+                },
+                {
+                  "program": "zoxide-add",
+                  "start_ms": 102.89
+                }
+              ],
+              "traces": [
+                {
+                  "stage": "fzf_exited",
+                  "at_ms": 1.542
+                },
+                {
+                  "stage": "relay_done",
+                  "at_ms": 1.661
+                },
+                {
+                  "stage": "revalidate_start",
+                  "at_ms": 1.759
+                },
+                {
+                  "stage": "revalidate_done",
+                  "at_ms": 16.265
+                },
+                {
+                  "stage": "bridge_done",
+                  "at_ms": 16.398
+                },
+                {
+                  "stage": "connect_start",
+                  "at_ms": 16.832
+                },
+                {
+                  "stage": "prepared",
+                  "at_ms": 67.052
+                },
+                {
+                  "stage": "validated",
+                  "at_ms": 67.294
+                },
+                {
+                  "stage": "switched",
+                  "at_ms": 96.987
+                },
+                {
+                  "stage": "state_saved",
+                  "at_ms": 97.469
+                },
+                {
+                  "stage": "recorded",
+                  "at_ms": 113.984
+                }
+              ],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 127.123,
+              "calls": [
+                {
+                  "program": "fzf-filter",
+                  "start_ms": 14.33
+                },
+                {
+                  "program": "rex",
+                  "start_ms": 27.006
+                },
+                {
+                  "program": "zoxide-add",
+                  "start_ms": 110.804
+                }
+              ],
+              "traces": [
+                {
+                  "stage": "fzf_exited",
+                  "at_ms": 5.097
+                },
+                {
+                  "stage": "relay_done",
+                  "at_ms": 5.417
+                },
+                {
+                  "stage": "revalidate_start",
+                  "at_ms": 5.6
+                },
+                {
+                  "stage": "revalidate_done",
+                  "at_ms": 20.539
+                },
+                {
+                  "stage": "bridge_done",
+                  "at_ms": 20.645
+                },
+                {
+                  "stage": "connect_start",
+                  "at_ms": 20.95
+                },
+                {
+                  "stage": "prepared",
+                  "at_ms": 66.444
+                },
+                {
+                  "stage": "validated",
+                  "at_ms": 66.664
+                },
+                {
+                  "stage": "switched",
+                  "at_ms": 103.939
+                },
+                {
+                  "stage": "state_saved",
+                  "at_ms": 104.566
+                },
+                {
+                  "stage": "recorded",
+                  "at_ms": 120.758
+                }
+              ],
+              "exact_target": true
+            }
+          ]
+        }
+      ],
+      "cache_only_stage": [
+        {
+          "binary": "/Users/nick/Projects/rexue/target/release/rexue",
+          "mode": "default",
+          "median_ms": 121.698,
+          "samples": [
+            {
+              "elapsed_ms": 129.404,
+              "calls": [
+                {
+                  "program": "rex",
+                  "start_ms": 23.8
+                },
+                {
+                  "program": "zoxide-add",
+                  "start_ms": 112.29
+                }
+              ],
+              "traces": [
+                {
+                  "stage": "fzf_exited",
+                  "at_ms": 2.621
+                },
+                {
+                  "stage": "relay_done",
+                  "at_ms": 2.871
+                },
+                {
+                  "stage": "revalidate_start",
+                  "at_ms": 3.099
+                },
+                {
+                  "stage": "revalidate_done",
+                  "at_ms": 3.134
+                },
+                {
+                  "stage": "bridge_done",
+                  "at_ms": 3.313
+                },
+                {
+                  "stage": "connect_start",
+                  "at_ms": 4.116
+                },
+                {
+                  "stage": "prepared",
+                  "at_ms": 67.729
+                },
+                {
+                  "stage": "validated",
+                  "at_ms": 67.905
+                },
+                {
+                  "stage": "switched",
+                  "at_ms": 103.617
+                },
+                {
+                  "stage": "state_saved",
+                  "at_ms": 104.132
+                },
+                {
+                  "stage": "recorded",
+                  "at_ms": 122.411
+                }
+              ],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 100.575,
+              "calls": [
+                {
+                  "program": "rex",
+                  "start_ms": 16.176
+                },
+                {
+                  "program": "zoxide-add",
+                  "start_ms": 83.943
+                }
+              ],
+              "traces": [
+                {
+                  "stage": "fzf_exited",
+                  "at_ms": 1.059
+                },
+                {
+                  "stage": "relay_done",
+                  "at_ms": 1.15
+                },
+                {
+                  "stage": "revalidate_start",
+                  "at_ms": 1.214
+                },
+                {
+                  "stage": "revalidate_done",
+                  "at_ms": 1.224
+                },
+                {
+                  "stage": "bridge_done",
+                  "at_ms": 1.299
+                },
+                {
+                  "stage": "connect_start",
+                  "at_ms": 1.564
+                },
+                {
+                  "stage": "prepared",
+                  "at_ms": 46.564
+                },
+                {
+                  "stage": "validated",
+                  "at_ms": 46.805
+                },
+                {
+                  "stage": "switched",
+                  "at_ms": 78.216
+                },
+                {
+                  "stage": "state_saved",
+                  "at_ms": 78.695
+                },
+                {
+                  "stage": "recorded",
+                  "at_ms": 93.849
+                }
+              ],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 121.698,
+              "calls": [
+                {
+                  "program": "rex",
+                  "start_ms": 25.086
+                },
+                {
+                  "program": "zoxide-add",
+                  "start_ms": 103.74
+                }
+              ],
+              "traces": [
+                {
+                  "stage": "fzf_exited",
+                  "at_ms": 3.964
+                },
+                {
+                  "stage": "relay_done",
+                  "at_ms": 4.425
+                },
+                {
+                  "stage": "revalidate_start",
+                  "at_ms": 4.726
+                },
+                {
+                  "stage": "revalidate_done",
+                  "at_ms": 4.766
+                },
+                {
+                  "stage": "bridge_done",
+                  "at_ms": 5.019
+                },
+                {
+                  "stage": "connect_start",
+                  "at_ms": 7.085
+                },
+                {
+                  "stage": "prepared",
+                  "at_ms": 66.926
+                },
+                {
+                  "stage": "validated",
+                  "at_ms": 67.156
+                },
+                {
+                  "stage": "switched",
+                  "at_ms": 97.055
+                },
+                {
+                  "stage": "state_saved",
+                  "at_ms": 97.611
+                },
+                {
+                  "stage": "recorded",
+                  "at_ms": 114.027
+                }
+              ],
+              "exact_target": true
+            }
+          ]
+        }
+      ]
+    },
+    "initial_serial_measurement": {
+      "native_cli_ms": [
+        83.822,
+        60.105,
+        59.501,
+        51.633,
+        50.182,
+        57.233,
+        49.518,
+        60.669,
+        56.635
+      ],
+      "native_median_ms": 57.233,
+      "comparisons": [
+        {
+          "binary": "/private/tmp/rexue-round3-before",
+          "mode": "default",
+          "instrumented": false,
+          "median_ms": 82.011,
+          "samples": [
+            {
+              "elapsed_ms": 115.018,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 77.965,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 82.011,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 69.256,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 78.484,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 85.882,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 78.203,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 105.365,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 96.172,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            }
+          ]
+        },
+        {
+          "binary": "/Users/nick/Projects/rexue/target/release/rexue",
+          "mode": "default",
+          "instrumented": false,
+          "median_ms": 87.743,
+          "samples": [
+            {
+              "elapsed_ms": 85.21,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 97.435,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 61.576,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 92.009,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 106.526,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 79.26,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 89.141,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 87.743,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 82.627,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            }
+          ]
+        }
+      ]
+    },
+    "paired_default_measurement": {
+      "native_cli_ms": [
+        115.849,
+        78.653,
+        67.724,
+        70.912,
+        58.208,
+        75.356,
+        60.06,
+        60.561,
+        68.99,
+        70.299,
+        74.093
+      ],
+      "native_median_ms": 70.299,
+      "comparisons": [
+        {
+          "binary": "/private/tmp/rexue-round3-before",
+          "mode": "default",
+          "instrumented": false,
+          "median_ms": 105.934,
+          "samples": [
+            {
+              "elapsed_ms": 104.694,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 107.182,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 101.427,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 81.598,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 110.696,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 89.802,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 133.552,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 120.98,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 98.446,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 119.388,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 105.934,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            }
+          ],
+          "paired": true,
+          "quiet": true
+        },
+        {
+          "binary": "/Users/nick/Projects/rexue/target/release/rexue",
+          "mode": "default",
+          "instrumented": false,
+          "median_ms": 90.692,
+          "samples": [
+            {
+              "elapsed_ms": 90.692,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 93.322,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 82.716,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 85.188,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 75.982,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 103.424,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 67.927,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 100.133,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 87.946,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 112.511,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            },
+            {
+              "elapsed_ms": 98.721,
+              "calls": [],
+              "traces": [],
+              "exact_target": true
+            }
+          ],
+          "paired": true,
+          "quiet": true
+        }
+      ]
+    },
+    "recording_stub_control": [
+      {
+        "binary": "/private/tmp/rexue-round3-before",
+        "mode": "no-record",
+        "instrumented": false,
+        "median_ms": 97.192,
+        "samples": [
+          {
+            "elapsed_ms": 77.548,
+            "calls": [],
+            "traces": [],
+            "exact_target": true
+          },
+          {
+            "elapsed_ms": 65.994,
+            "calls": [],
+            "traces": [],
+            "exact_target": true
+          },
+          {
+            "elapsed_ms": 88.302,
+            "calls": [],
+            "traces": [],
+            "exact_target": true
+          },
+          {
+            "elapsed_ms": 73.216,
+            "calls": [],
+            "traces": [],
+            "exact_target": true
+          },
+          {
+            "elapsed_ms": 102.585,
+            "calls": [],
+            "traces": [],
+            "exact_target": true
+          },
+          {
+            "elapsed_ms": 97.192,
+            "calls": [],
+            "traces": [],
+            "exact_target": true
+          },
+          {
+            "elapsed_ms": 106.803,
+            "calls": [],
+            "traces": [],
+            "exact_target": true
+          },
+          {
+            "elapsed_ms": 121.863,
+            "calls": [],
+            "traces": [],
+            "exact_target": true
+          },
+          {
+            "elapsed_ms": 101.295,
+            "calls": [],
+            "traces": [],
+            "exact_target": true
+          },
+          {
+            "elapsed_ms": 71.116,
+            "calls": [],
+            "traces": [],
+            "exact_target": true
+          },
+          {
+            "elapsed_ms": 111.48,
+            "calls": [],
+            "traces": [],
+            "exact_target": true
+          }
+        ],
+        "paired": true,
+        "quiet": true
+      },
+      {
+        "binary": "/Users/nick/Projects/rexue/target/release/rexue",
+        "mode": "no-record",
+        "instrumented": false,
+        "median_ms": 83.865,
+        "samples": [
+          {
+            "elapsed_ms": 99.473,
+            "calls": [],
+            "traces": [],
+            "exact_target": true
+          },
+          {
+            "elapsed_ms": 51.767,
+            "calls": [],
+            "traces": [],
+            "exact_target": true
+          },
+          {
+            "elapsed_ms": 88.739,
+            "calls": [],
+            "traces": [],
+            "exact_target": true
+          },
+          {
+            "elapsed_ms": 74.875,
+            "calls": [],
+            "traces": [],
+            "exact_target": true
+          },
+          {
+            "elapsed_ms": 68.538,
+            "calls": [],
+            "traces": [],
+            "exact_target": true
+          },
+          {
+            "elapsed_ms": 84.835,
+            "calls": [],
+            "traces": [],
+            "exact_target": true
+          },
+          {
+            "elapsed_ms": 83.865,
+            "calls": [],
+            "traces": [],
+            "exact_target": true
+          },
+          {
+            "elapsed_ms": 67.585,
+            "calls": [],
+            "traces": [],
+            "exact_target": true
+          },
+          {
+            "elapsed_ms": 93.958,
+            "calls": [],
+            "traces": [],
+            "exact_target": true
+          },
+          {
+            "elapsed_ms": 59.397,
+            "calls": [],
+            "traces": [],
+            "exact_target": true
+          },
+          {
+            "elapsed_ms": 95.226,
+            "calls": [],
+            "traces": [],
+            "exact_target": true
+          }
+        ],
+        "paired": true,
+        "quiet": true
+      }
+    ],
+    "fixture_acceptance": {
+      "fixture-session": {
+        "method": "Four sessions, one unnamed tab and four panes per session (three agents and one shell); each Rex CLI process sleeps 15ms to model process/connection setup (individual RPC latency within Lua is not simulated). Real fzf in a PTY; preview disabled. switch_ms measures Enter until the fixture receives the validated switch request; selection_ms measures Enter until process exit, including target validation, focus/switch and state updates. The first run has empty history; later runs reuse it. RSS sums the picker and its descendants; CPU is the idle CPU-time delta, excluding the Python wrapper. This does not measure live app rendering or peak startup memory.",
+        "runs": 5,
+        "legacy_rex": false,
+        "agents": false,
+        "query": "project-0",
+        "median": {
+          "open_ms": 630.08,
+          "open_rex_calls": 2,
+          "selection_ms": 44.77,
+          "switch_ms": 34.23,
+          "selection_rex_calls": 1,
+          "idle_rss_kib": 15056,
+          "idle_cpu_percent": 0.0
+        },
+        "samples": [
+          {
+            "open_ms": 1220.49,
+            "open_rex_calls": 2,
+            "selection_ms": 47.03,
+            "switch_ms": 34.26,
+            "selection_rex_calls": 1,
+            "idle_rss_kib": 15120,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true,
+            "selection_fzf_calls": 0
+          },
+          {
+            "open_ms": 649.76,
+            "open_rex_calls": 2,
+            "selection_ms": 44.77,
+            "switch_ms": 33.08,
+            "selection_rex_calls": 1,
+            "idle_rss_kib": 14816,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true,
+            "selection_fzf_calls": 0
+          },
+          {
+            "open_ms": 620.85,
+            "open_rex_calls": 2,
+            "selection_ms": 41.37,
+            "switch_ms": 30.87,
+            "selection_rex_calls": 1,
+            "idle_rss_kib": 15104,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true,
+            "selection_fzf_calls": 0
+          },
+          {
+            "open_ms": 630.08,
+            "open_rex_calls": 2,
+            "selection_ms": 46.54,
+            "switch_ms": 34.83,
+            "selection_rex_calls": 1,
+            "idle_rss_kib": 14720,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true,
+            "selection_fzf_calls": 0
+          },
+          {
+            "open_ms": 616.05,
+            "open_rex_calls": 2,
+            "selection_ms": 44.24,
+            "switch_ms": 34.23,
+            "selection_rex_calls": 1,
+            "idle_rss_kib": 15056,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true,
+            "selection_fzf_calls": 0
+          }
+        ]
+      },
+      "fixture-agent": {
+        "method": "Four sessions, one unnamed tab and four panes per session (three agents and one shell); each Rex CLI process sleeps 15ms to model process/connection setup (individual RPC latency within Lua is not simulated). Real fzf in a PTY; preview disabled. switch_ms measures Enter until the fixture receives the validated switch request; selection_ms measures Enter until process exit, including target validation, focus/switch and state updates. The first run has empty history; later runs reuse it. RSS sums the picker and its descendants; CPU is the idle CPU-time delta, excluding the Python wrapper. This does not measure live app rendering or peak startup memory.",
+        "runs": 5,
+        "legacy_rex": false,
+        "agents": true,
+        "query": "project-0",
+        "median": {
+          "open_ms": 635.78,
+          "open_rex_calls": 2,
+          "selection_ms": 44.32,
+          "switch_ms": 33.21,
+          "selection_rex_calls": 1,
+          "idle_rss_kib": 15088,
+          "idle_cpu_percent": 0.0
+        },
+        "samples": [
+          {
+            "open_ms": 1205.34,
+            "open_rex_calls": 2,
+            "selection_ms": 42.43,
+            "switch_ms": 29.98,
+            "selection_rex_calls": 1,
+            "idle_rss_kib": 15152,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true,
+            "selection_fzf_calls": 0
+          },
+          {
+            "open_ms": 635.78,
+            "open_rex_calls": 2,
+            "selection_ms": 44.32,
+            "switch_ms": 31.78,
+            "selection_rex_calls": 1,
+            "idle_rss_kib": 14976,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true,
+            "selection_fzf_calls": 0
+          },
+          {
+            "open_ms": 645.19,
+            "open_rex_calls": 2,
+            "selection_ms": 43.69,
+            "switch_ms": 33.21,
+            "selection_rex_calls": 1,
+            "idle_rss_kib": 15088,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true,
+            "selection_fzf_calls": 0
+          },
+          {
+            "open_ms": 627.86,
+            "open_rex_calls": 2,
+            "selection_ms": 48.53,
+            "switch_ms": 35.97,
+            "selection_rex_calls": 1,
+            "idle_rss_kib": 15168,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true,
+            "selection_fzf_calls": 0
+          },
+          {
+            "open_ms": 626.98,
+            "open_rex_calls": 2,
+            "selection_ms": 48.13,
+            "switch_ms": 34.99,
+            "selection_rex_calls": 1,
+            "idle_rss_kib": 14944,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true,
+            "selection_fzf_calls": 0
+          }
+        ]
+      },
+      "fixture-legacy": {
+        "method": "Four sessions, one unnamed tab and four panes per session (three agents and one shell); each Rex CLI process sleeps 15ms to model process/connection setup (individual RPC latency within Lua is not simulated). Real fzf in a PTY; preview disabled. switch_ms measures Enter until the fixture receives the validated switch request; selection_ms measures Enter until process exit, including target validation, focus/switch and state updates. The first run has empty history; later runs reuse it. RSS sums the picker and its descendants; CPU is the idle CPU-time delta, excluding the Python wrapper. This does not measure live app rendering or peak startup memory.",
+        "runs": 3,
+        "legacy_rex": true,
+        "agents": false,
+        "query": "project-0",
+        "median": {
+          "open_ms": 838.33,
+          "open_rex_calls": 51,
+          "selection_ms": 344.3,
+          "switch_ms": 332.39,
+          "selection_rex_calls": 18,
+          "idle_rss_kib": 15376,
+          "idle_cpu_percent": 0.0
+        },
+        "samples": [
+          {
+            "open_ms": 1403.7,
+            "open_rex_calls": 51,
+            "selection_ms": 395.87,
+            "switch_ms": 383.2,
+            "selection_rex_calls": 19,
+            "idle_rss_kib": 15072,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true,
+            "selection_fzf_calls": 0
+          },
+          {
+            "open_ms": 826.37,
+            "open_rex_calls": 51,
+            "selection_ms": 344.3,
+            "switch_ms": 332.39,
+            "selection_rex_calls": 18,
+            "idle_rss_kib": 15392,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true,
+            "selection_fzf_calls": 0
+          },
+          {
+            "open_ms": 838.33,
+            "open_rex_calls": 51,
+            "selection_ms": 339.13,
+            "switch_ms": 329.0,
+            "selection_rex_calls": 18,
+            "idle_rss_kib": 15376,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true,
+            "selection_fzf_calls": 0
+          }
+        ]
+      },
+      "startup-session": {
+        "method": "Four sessions, one unnamed tab and four panes per session (three agents and one shell); each Rex CLI process sleeps 15ms to model process/connection setup (individual RPC latency within Lua is not simulated). Real fzf in a PTY; preview disabled. switch_ms measures Enter until the fixture receives the validated switch request; selection_ms measures Enter until process exit, including target validation, focus/switch and state updates. The first run has empty history; later runs reuse it. RSS sums the picker and its descendants; CPU is the idle CPU-time delta, excluding the Python wrapper. This does not measure live app rendering or peak startup memory.",
+        "runs": 5,
+        "legacy_rex": false,
+        "agents": false,
+        "query": "",
+        "median": {
+          "open_ms": 652.56,
+          "open_rex_calls": 3,
+          "selection_ms": 42.92,
+          "switch_ms": 31.4,
+          "selection_rex_calls": 1,
+          "idle_rss_kib": 14864,
+          "idle_cpu_percent": 0.0
+        },
+        "samples": [
+          {
+            "open_ms": 1466.6,
+            "open_rex_calls": 3,
+            "selection_ms": 48.01,
+            "switch_ms": 36.08,
+            "selection_rex_calls": 1,
+            "idle_rss_kib": 14832,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true
+          },
+          {
+            "open_ms": 652.56,
+            "open_rex_calls": 3,
+            "selection_ms": 42.92,
+            "switch_ms": 31.4,
+            "selection_rex_calls": 1,
+            "idle_rss_kib": 15056,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true
+          },
+          {
+            "open_ms": 652.02,
+            "open_rex_calls": 3,
+            "selection_ms": 41.69,
+            "switch_ms": 30.86,
+            "selection_rex_calls": 1,
+            "idle_rss_kib": 14864,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true
+          },
+          {
+            "open_ms": 648.73,
+            "open_rex_calls": 3,
+            "selection_ms": 42.15,
+            "switch_ms": 30.91,
+            "selection_rex_calls": 1,
+            "idle_rss_kib": 14560,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true
+          },
+          {
+            "open_ms": 659.44,
+            "open_rex_calls": 3,
+            "selection_ms": 44.25,
+            "switch_ms": 33.09,
+            "selection_rex_calls": 1,
+            "idle_rss_kib": 15056,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true
+          }
+        ]
+      },
+      "startup-agent": {
+        "method": "Four sessions, one unnamed tab and four panes per session (three agents and one shell); each Rex CLI process sleeps 15ms to model process/connection setup (individual RPC latency within Lua is not simulated). Real fzf in a PTY; preview disabled. switch_ms measures Enter until the fixture receives the validated switch request; selection_ms measures Enter until process exit, including target validation, focus/switch and state updates. The first run has empty history; later runs reuse it. RSS sums the picker and its descendants; CPU is the idle CPU-time delta, excluding the Python wrapper. This does not measure live app rendering or peak startup memory.",
+        "runs": 5,
+        "legacy_rex": false,
+        "agents": true,
+        "query": "",
+        "median": {
+          "open_ms": 661.59,
+          "open_rex_calls": 3,
+          "selection_ms": 40.47,
+          "switch_ms": 30.01,
+          "selection_rex_calls": 1,
+          "idle_rss_kib": 14912,
+          "idle_cpu_percent": 0.0
+        },
+        "samples": [
+          {
+            "open_ms": 933.57,
+            "open_rex_calls": 3,
+            "selection_ms": 40.47,
+            "switch_ms": 30.01,
+            "selection_rex_calls": 1,
+            "idle_rss_kib": 15056,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true
+          },
+          {
+            "open_ms": 646.04,
+            "open_rex_calls": 3,
+            "selection_ms": 38.42,
+            "switch_ms": 28.54,
+            "selection_rex_calls": 1,
+            "idle_rss_kib": 15136,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true
+          },
+          {
+            "open_ms": 648.81,
+            "open_rex_calls": 3,
+            "selection_ms": 42.77,
+            "switch_ms": 32.33,
+            "selection_rex_calls": 1,
+            "idle_rss_kib": 14784,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true
+          },
+          {
+            "open_ms": 661.59,
+            "open_rex_calls": 3,
+            "selection_ms": 44.17,
+            "switch_ms": 33.29,
+            "selection_rex_calls": 1,
+            "idle_rss_kib": 14912,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true
+          },
+          {
+            "open_ms": 668.65,
+            "open_rex_calls": 3,
+            "selection_ms": 40.46,
+            "switch_ms": 29.83,
+            "selection_rex_calls": 1,
+            "idle_rss_kib": 14864,
+            "idle_cpu_percent": 0.0,
+            "idle_rex_calls": 0,
+            "terminal_restored": true
+          }
+        ]
+      }
+    },
+    "live_acceptance": {
+      "installed_shortcut_empty_and_prefilled": true,
+      "own_picker_excluded": true,
+      "other_floating_pane_retained": true,
+      "real_floating_agent_selection": true,
+      "exact_tab_and_pane": true,
+      "cross_session_selection_and_last": true,
+      "test_resources_cleaned": true,
+      "origin_restored": true
+    },
+    "result": {
+      "before_median_ms": 105.934,
+      "after_median_ms": 90.692,
+      "native_reference_median_ms": 70.299,
+      "median_paired_reduction_ms": 13.86,
+      "improvement_percent": 14.39,
+      "pairs_faster": 9,
+      "pairs": 11
+    }
+  }
+}

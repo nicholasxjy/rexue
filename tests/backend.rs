@@ -35,8 +35,15 @@ impl FakeRex {
         let script = format!(
             r#"#!/bin/sh
 root={}
-if [ "$4" = '-S' ]; then request="$6 $7"; else request="$4 $5"; fi
-if [ "$request" = 'do --eval' ] && [ ! -f "$root/snapshot.json" ] && [ ! -f "$root/snapshot.exit" ] && [ ! -f "$root/fail.exit" ]; then
+if [ "$4" = '-S' ]; then request="$6 $7"; script="$8"; else request="$4 $5"; script="$6"; fi
+case "$script" in
+    *rexue-connect*)
+        if [ ! -f "$root/connect.json" ]; then
+            printf 'Error: unknown flag: --eval' >&2
+            exit 2
+        fi ;;
+esac
+if [ "$request" = 'do --eval' ] && [ ! -f "$root/connect.json" ] && [ ! -f "$root/snapshot.json" ] && [ ! -f "$root/snapshot.exit" ] && [ ! -f "$root/fail.exit" ]; then
     printf 'Error: unknown flag: --eval' >&2
     exit 2
 fi
@@ -53,7 +60,16 @@ case "$1 $2" in
             /bin/cat "$root/snapshot.stderr" >&2
             exit "$(/bin/cat "$root/snapshot.exit")"
         fi
-        /bin/cat "$root/snapshot.json" ;;
+        case "$3" in
+            *rexue-connect*)
+                /bin/cat "$root/connect.json"
+                printf '\n'
+                IFS= read -r reply || exit 90
+                printf '%s' "$reply" > "$root/connect-reply.json"
+                if [ -f "$root/connect-fail" ]; then printf 'switch fixture failure' >&2; exit 7; fi
+                printf '{{}}' ;;
+            *) /bin/cat "$root/snapshot.json" ;;
+        esac ;;
     'whoami --json') /bin/cat "$root/context.json" ;;
     'client ls') /bin/cat "$root/clients.json" ;;
     '-C '*)
@@ -342,6 +358,321 @@ fn fast_snapshot_preserves_catalog_with_one_process_and_refreshes_metadata() {
     assert!(entries[0].tab_names[1].contains("Updated task"));
     assert_eq!(entries[1].agent.as_ref().unwrap().state, "working");
     assert_eq!(entries[1].target(), "block:pi-full");
+}
+
+fn connection_fixture(fake: &FakeRex) -> Value {
+    let mut snapshot = snapshot_fixture(fake);
+    let read = |name| {
+        serde_json::from_slice::<Value>(&fs::read(fake.dir.path().join(name)).unwrap()).unwrap()
+    };
+    snapshot["connection"] = json!({
+        "clients": read("clients.json")["clients"],
+        "inspections": {"client:desktop-full": read("actions.json")},
+        "previous": read("context.json")["session_id"],
+    });
+    snapshot
+}
+
+#[test]
+fn selected_session_refresh_batches_metadata_without_scanning_other_sessions() {
+    let fake = FakeRex::new();
+    agents_fixture(&fake);
+    for block in [None, Some("block:codex-full")] {
+        let expected = fake.rex.list_session("session:agents-full", block).unwrap();
+        fake.json("snapshot.json", snapshot_fixture(&fake));
+        let before = fake.calls().len();
+        let actual = fake.rex.list_session("session:agents-full", block).unwrap();
+        assert_eq!(
+            serde_json::to_value(actual).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+        let calls = fake.calls();
+        assert_eq!(
+            calls.len() - before,
+            1,
+            "refresh must use one Rex connection"
+        );
+        let call = &calls[before];
+        let args = call.iter().position(|arg| arg == "--args").unwrap();
+        let args: Value = serde_json::from_str(&call[args + 1]).unwrap();
+        assert_eq!(args["session_id"], "session:agents-full");
+        assert_eq!(args["block_id"], json!(block));
+        fs::remove_file(fake.dir.path().join("snapshot.json")).unwrap();
+    }
+}
+
+#[test]
+fn selected_agent_refresh_uses_fresh_window_and_rejects_exited_agents() {
+    let fake = FakeRex::new();
+    agents_fixture(&fake);
+    let mut manager = fake.manager(Config::default());
+    manager.config.frecency.add_command = Some("true".into());
+    let mut entry = manager.resolve_entry("block:codex-full").unwrap();
+    entry.agent.as_mut().unwrap().window_id = "window:old-full".into();
+    fake.json("connect.json", connection_fixture(&fake));
+    let before = fake.calls().len();
+    manager
+        .connect_entry(entry.clone(), &ConnectOptions::default())
+        .unwrap();
+    let calls = fake.calls();
+    assert_eq!(
+        calls.len() - before,
+        1,
+        "agent validation and focus must share one Rex connection"
+    );
+    let args: Value =
+        serde_json::from_slice(&fs::read(fake.dir.path().join("connect-reply.json")).unwrap())
+            .unwrap();
+    assert_eq!(args["session_id"], "session:agents-full");
+    assert_eq!(args["window_id"], "window:agents-full");
+    assert_eq!(args["block_id"], "block:codex-full");
+    let mut snapshot = connection_fixture(&fake);
+    snapshot["snapshots"]["session:agents-full"]["blocks"]["block:codex-full"]["process"] =
+        json!({"last_exit": {"exit_code": 0}});
+    fake.json("connect.json", snapshot);
+    fs::remove_file(fake.dir.path().join("connect-reply.json")).unwrap();
+    let before = fake.calls().len();
+    let error = manager
+        .connect_entry(entry, &ConnectOptions::default())
+        .unwrap_err();
+    assert!(error.to_string().contains("no longer running"));
+    assert_eq!(
+        fake.calls().len() - before,
+        1,
+        "reject before focus or switch"
+    );
+    assert!(!fake.dir.path().join("connect-reply.json").exists());
+}
+
+#[test]
+fn one_connection_agent_snapshot_needs_only_its_live_process_and_status() {
+    let fake = FakeRex::new();
+    agents_fixture(&fake);
+    let mut manager = fake.manager(Config::default());
+    manager.config.frecency.add_command = Some("true".into());
+    let entry = manager.resolve_entry("block:codex-full").unwrap();
+    let mut snapshot = connection_fixture(&fake);
+    let session = &mut snapshot["snapshots"]["session:agents-full"];
+    session["target_only"] = json!(true);
+    let process = session["blocks"]["block:codex-full"]["process"].clone();
+    session["blocks"] =
+        json!({"block:codex-full": {"process": process, "program_status": {"records": []}}});
+    fake.json("connect.json", snapshot);
+    let before = fake.calls().len();
+    let result = manager
+        .connect_entry(entry, &ConnectOptions::default())
+        .unwrap();
+    assert_eq!(result.path, fs::canonicalize(fake.dir.path()).unwrap());
+    assert_eq!(
+        fake.calls().len() - before,
+        1,
+        "do not query unrelated focused panes or missing titles"
+    );
+    let reply: Value =
+        serde_json::from_slice(&fs::read(fake.dir.path().join("connect-reply.json")).unwrap())
+            .unwrap();
+    assert_eq!(reply["window_id"], "window:agents-full");
+    assert_eq!(reply["block_id"], "block:codex-full");
+}
+
+#[test]
+#[ignore = "requires the installed Rex CLI with Lua; uses mocked RPCs"]
+fn lua_snapshot_only_reads_needed_connection_metadata() {
+    let script = concat!(
+        r#"
+local calls = 0
+rex.call = function(method, args)
+    calls = calls + 1
+    if method == "session.list" then
+        return {sessions = {{session_id = "session:target", label = "target"}}}
+    elseif method == "session.attach" then
+        local function pane(id) return {block_id = id, creator_name = "com.superlogical.terminal"} end
+        return {view = {label = "target", active_window_id = "window:one", windows = {
+            {window_id = "window:one", focused_block_id = "block:other", layers = {{blocks = {pane("block:other")}}}},
+            {window_id = "window:two", focused_block_id = "block:peer", layers = {{blocks = {pane("block:target"), pane("block:peer")}}}},
+        }}}
+    elseif method == "block.method" then
+        if rex.args.connect then
+            assert(args.method ~= "title", "selection must not read display titles")
+            if rex.args.block_id then assert(args.block_id == rex.args.block_id, "selection scanned an unrelated pane") end
+        end
+        return {}
+    end
+    error("unexpected method " .. method)
+end
+local function snapshot()
+"#,
+        include_str!("../src/rex_snapshot.lua"),
+        r#"
+end
+local result = snapshot()
+return {calls = calls, session = result.snapshots["session:target"]}
+"#
+    );
+    for (args, expected, blocks) in [
+        (json!({}), 11, 3),
+        (
+            json!({"session_id": "session:target", "block_id": "block:target"}),
+            10,
+            3,
+        ),
+        (
+            json!({"session_id": "session:target", "connect": true}),
+            7,
+            3,
+        ),
+        (
+            json!({"session_id": "session:target", "block_id": "block:target", "connect": true}),
+            3,
+            1,
+        ),
+    ] {
+        let result = Rex::default()
+            .json(&[
+                "do",
+                "--eval",
+                script,
+                "--args",
+                &args.to_string(),
+                "--json",
+            ])
+            .unwrap();
+        assert_eq!(result["calls"], expected, "{args}");
+        assert_eq!(
+            result["session"]["blocks"].as_object().unwrap().len(),
+            blocks
+        );
+    }
+}
+
+#[test]
+fn one_connection_preserves_session_tab_pane_and_detach_targets() {
+    for (window, block, expected_window, detach) in [
+        (None, None, None, false),
+        (
+            Some("window:agents-full"),
+            None,
+            Some("window:agents-full"),
+            false,
+        ),
+        (
+            Some("window:old-full"),
+            Some("block:stale-full"),
+            Some("window:agents-full"),
+            false,
+        ),
+        (
+            Some("window:old-full"),
+            Some("block:browser-full"),
+            Some("window:shell-full"),
+            true,
+        ),
+    ] {
+        let fake = FakeRex::new();
+        agents_fixture(&fake);
+        fake.json("connect.json", connection_fixture(&fake));
+        let mut manager = fake.manager(Config::default());
+        manager.config.frecency.add_command = Some("true".into());
+        let mut entry = Entry::new("old label", fake.dir.path(), Source::Rex);
+        entry.session_id = Some("session:agents-full".into());
+        entry.window_id = window.map(str::to_owned);
+        entry.block_id = block.map(str::to_owned);
+        let result = manager
+            .connect_entry(
+                entry,
+                &ConnectOptions {
+                    detach,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(!result.created);
+        let reply: Value =
+            serde_json::from_slice(&fs::read(fake.dir.path().join("connect-reply.json")).unwrap())
+                .unwrap();
+        assert_eq!(reply["window_id"], json!(expected_window));
+        assert_eq!(reply["block_id"], json!(block));
+        assert_eq!(
+            reply["client_id"],
+            if detach {
+                Value::Null
+            } else {
+                json!("client:desktop-full")
+            }
+        );
+        assert_eq!(fake.calls().len(), 1);
+    }
+}
+
+#[test]
+fn one_connection_switch_failure_preserves_history_and_does_not_retry() {
+    let fake = FakeRex::new();
+    agents_fixture(&fake);
+    let mut manager = fake.manager(Config::default());
+    manager.config.frecency.add_command = Some("true".into());
+    let entry = manager.resolve_entry("block:pi-full").unwrap();
+    fake.json("connect.json", connection_fixture(&fake));
+    manager
+        .connect_entry(entry.clone(), &ConnectOptions::default())
+        .unwrap();
+    let state_file = manager.state_dir.join("state.json");
+    let before = fs::read(&state_file).unwrap();
+    let state: Value = serde_json::from_slice(&before).unwrap();
+    assert_eq!(
+        state["history"]["client:desktop-full"],
+        json!(["session:agents-full", "session:previous-full"])
+    );
+    fs::write(fake.dir.path().join("connect-fail"), "").unwrap();
+    let calls = fake.calls().len();
+    let error = manager
+        .connect_entry(entry, &ConnectOptions::default())
+        .unwrap_err();
+    assert!(format!("{error:#}").contains("switch fixture failure"));
+    assert_eq!(fs::read(state_file).unwrap(), before);
+    assert_eq!(fake.calls().len() - calls, 1);
+}
+
+#[test]
+fn one_connection_preflight_errors_never_submit_focus() {
+    for mode in ["unsupported", "ambiguous", "malformed"] {
+        let fake = FakeRex::new();
+        agents_fixture(&fake);
+        let manager = fake.manager(Config::default());
+        let entry = manager.resolve_entry("block:pi-full").unwrap();
+        let mut snapshot = connection_fixture(&fake);
+        let mut manager = manager;
+        match mode {
+            "unsupported" => {
+                snapshot["connection"]["inspections"]["client:desktop-full"] =
+                    json!({"actions": []})
+            }
+            "ambiguous" => {
+                manager.rex.client = None;
+                snapshot["connection"]["clients"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(client("client:other-full", "Other", "app", "connected"));
+            }
+            _ => snapshot["snapshots"] = json!({}),
+        }
+        fake.json("connect.json", snapshot);
+        let calls = fake.calls().len();
+        let error = manager
+            .connect_entry(entry, &ConnectOptions::default())
+            .unwrap_err();
+        let message = format!("{error:#}");
+        assert!(
+            message.contains(match mode {
+                "unsupported" => "does not support session.select",
+                "ambiguous" => "multiple Rex app clients",
+                _ => "missing session metadata",
+            }),
+            "{message}"
+        );
+        assert_eq!(fake.calls().len() - calls, 1);
+        assert!(!fake.dir.path().join("connect-reply.json").exists());
+        assert!(!manager.state_dir.join("state.json").exists());
+    }
 }
 
 #[test]

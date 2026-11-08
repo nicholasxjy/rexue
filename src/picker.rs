@@ -103,6 +103,8 @@ struct Catalog {
     targets: BTreeMap<u64, Entry>,
     branches: BTreeMap<u64, String>,
     next_id: u64,
+    revision: u64,
+    rendered_rows: Option<(String, Vec<u8>)>,
     last_query: String,
     auto_armed: bool,
     status: String,
@@ -128,6 +130,8 @@ impl Catalog {
             targets: BTreeMap::new(),
             branches: BTreeMap::new(),
             next_id: 0,
+            revision: 0,
+            rendered_rows: None,
             auto_armed: false,
             status: String::new(),
             initial_focus: None,
@@ -150,6 +154,8 @@ impl Catalog {
         id
     }
     fn replace(&mut self, mut entries: Vec<Entry>) {
+        self.revision += 1;
+        self.rendered_rows = None;
         if self.options.worktree {
             entries.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.path.cmp(&b.path)));
         } else {
@@ -246,6 +252,8 @@ impl Catalog {
         self.targets.retain(|id, _| reachable.contains(id));
     }
     fn removed(&mut self, entry: &Entry) {
+        self.revision += 1;
+        self.rendered_rows = None;
         self.entries
             .retain(|id| !same_entry(&self.targets[id], entry));
         self.targets.retain(|_, target| !same_entry(target, entry));
@@ -261,6 +269,13 @@ impl Catalog {
                 .aliases
                 .retain(|_, alias| alias.target != entry.name);
             self.targets.retain(|_, target| target.name != entry.name);
+        }
+    }
+
+    fn store_rows(&mut self, revision: u64, query: &str, rows: Vec<u8>) {
+        // A slow filter may finish after a refresh or a newer query.
+        if self.revision == revision && self.last_query == query {
+            self.rendered_rows = Some((query.into(), rows));
         }
     }
 
@@ -550,11 +565,16 @@ fn refresh(state: &Mutex<Catalog>, fetch: &Mutex<Box<dyn Fn() -> Result<Vec<Entr
 }
 
 fn rows(state: &Mutex<Catalog>, query: &str) -> Result<Vec<u8>> {
-    let (input, pattern, fuzzy, separator_aware, numbered) = {
+    let (input, pattern, fuzzy, separator_aware, numbered, revision) = {
         let mut s = state.lock().unwrap();
         if query != s.last_query {
             s.auto_armed = true;
             s.last_query = query.into();
+        }
+        if let Some((rendered_query, rows)) = &s.rendered_rows
+            && rendered_query == query
+        {
+            return Ok(rows.clone());
         }
         let (ids, pattern, fuzzy) = s.candidates(query);
         let options = &s.options;
@@ -585,6 +605,7 @@ fn rows(state: &Mutex<Catalog>, query: &str) -> Result<Vec<u8>> {
             fuzzy,
             options.separator_aware,
             !options.worktree && query.starts_with('#') && options.alias_filter_prefix != "#",
+            s.revision,
         )
     };
     // Use fzf itself for fuzzy matching and ordering. Keeping the visible finder
@@ -643,6 +664,10 @@ fn rows(state: &Mutex<Catalog>, query: &str) -> Result<Vec<u8>> {
         }
         matched = numbered;
     }
+    state
+        .lock()
+        .unwrap()
+        .store_rows(revision, query, matched.clone());
     Ok(matched)
 }
 
@@ -1411,6 +1436,44 @@ mod tests {
         assert!(!text.contains("detached") && !text.contains("#"));
         let detached = String::from_utf8(rows(&state, "review").unwrap()).unwrap();
         assert!(detached.contains("detached abc123"));
+    }
+
+    #[test]
+    fn rendered_rows_follow_query_refresh_and_removal() {
+        let mut entry = Entry::new("alpha", "/project", Source::Rex);
+        entry.session_id = Some("session:cached-full".into());
+        let state = Mutex::new(Catalog::new(PickerOptions::default(), vec![entry.clone()]));
+        let old = rows(&state, "alpha").unwrap();
+        assert_eq!(rows(&state, "alpha").unwrap(), old);
+        assert!(rows(&state, "beta").unwrap().is_empty());
+        assert_eq!(rows(&state, "alpha").unwrap(), old);
+        entry.name = "beta".into();
+        state.lock().unwrap().replace(vec![entry.clone()]);
+        assert!(rows(&state, "alpha").unwrap().is_empty());
+        assert!(!rows(&state, "beta").unwrap().is_empty());
+        state.lock().unwrap().removed(&entry);
+        assert!(rows(&state, "beta").unwrap().is_empty());
+    }
+
+    #[test]
+    fn late_row_results_cannot_restore_a_replaced_catalog_or_query() {
+        let entry = Entry::new("alpha", "/project", Source::Directory);
+        let state = Mutex::new(Catalog::new(PickerOptions::default(), vec![entry]));
+        let old_revision = state.lock().unwrap().revision;
+        let old_rows = rows(&state, "alpha").unwrap();
+        {
+            let mut catalog = state.lock().unwrap();
+            catalog.replace(Vec::new());
+            catalog.store_rows(old_revision, "alpha", old_rows.clone());
+        }
+        assert!(rows(&state, "alpha").unwrap().is_empty());
+        let current_revision = state.lock().unwrap().revision;
+        rows(&state, "beta").unwrap();
+        state
+            .lock()
+            .unwrap()
+            .store_rows(current_revision, "alpha", old_rows);
+        assert!(rows(&state, "alpha").unwrap().is_empty());
     }
 
     #[test]
