@@ -1300,8 +1300,8 @@ mod tests {
     #[test]
     fn picker_tab_visibility_survives_config_loading() {
         for (text, expected) in [
-            ("", true),
-            ("[tui]", true),
+            ("", false),
+            ("[tui]", false),
             ("[tui]\nshow_tabs=true", true),
             ("[tui]\nshow_tabs=false", false),
         ] {

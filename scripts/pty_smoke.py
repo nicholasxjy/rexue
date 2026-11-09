@@ -191,7 +191,7 @@ elif a[:2]==['client','ls']:print('{"clients":[]}')
 else:
     print('unexpected fixture command: '+repr(a),file=sys.stderr);sys.exit(91)
 ''')
-        config = 'strict_mode=true\n[tui]\npreview=true\npreview_min_width=50\n[[session]]\nname=' + json.dumps(name, ensure_ascii=False) + '\npath=' + json.dumps(str(root)) + '\nalias="Ä"\nalias_auto_connect=true\n'
+        config = 'strict_mode=true\n[tui]\nshow_tabs=true\npreview=true\npreview_min_width=50\n[[session]]\nname=' + json.dumps(name, ensure_ascii=False) + '\npath=' + json.dumps(str(root)) + '\nalias="Ä"\nalias_auto_connect=true\n'
         cfg.write_text(config)
         base = ['--rex-bin', str(rex), '--detach', '-C', str(cfg)]
 
@@ -379,7 +379,7 @@ else:
         run_case('session-tab-icons-can-be-disabled', ['picker', '--rex', '--icons=false'],
                  lambda s: session_agent_titles(s, False))
 
-        cfg.write_text(config.replace('[tui]\n', '[tui]\nshow_tabs=false\n', 1))
+        cfg.write_text(config.replace('show_tabs=true\n', '', 1))
         def panes_without_tabs(s):
             s.resize(240, 30)
             s.expect('4/4')
@@ -391,9 +391,11 @@ else:
             s.expect('AGENT_PREVIEW_block:second')
             s.send(b'\r')
         before = len((root/'rex-calls.jsonl').read_text().splitlines())
-        run_case('hidden-tabs-flatten-panes-across-tabs', ['picker', '--rex', '--agents', '--icons=false'], panes_without_tabs)
+        run_case('default-hidden-tabs-flatten-panes-across-tabs', ['picker', '--rex', '--agents', '--icons=false'], panes_without_tabs)
         calls = [json.loads(line) for line in (root/'rex-calls.jsonl').read_text().splitlines()[before:]]
         assert ['focus', '-s', 'session:agents', 'block:second'] in calls, calls
+        cfg.write_text(config.replace('show_tabs=true', 'show_tabs=false', 1))
+        run_case('explicit-hidden-tabs-flatten-panes-across-tabs', ['picker', '--rex', '--agents', '--icons=false'], panes_without_tabs)
         current.update(block_id='block:second')
         context.write_text(json.dumps(current))
         run_case('hidden-tabs-preserve-current-pane-focus', ['picker', '--rex'],

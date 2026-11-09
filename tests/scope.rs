@@ -158,16 +158,16 @@ fn imports_append_session_wildcard_and_worktree_definitions_once() {
 }
 
 #[test]
-fn picker_tab_visibility_defaults_to_true_and_requires_a_boolean() {
+fn picker_tab_visibility_defaults_to_false_and_requires_a_boolean() {
     for text in [
         "",
         "strict_mode=true\n[tui]",
-        "strict_mode=true\n[tui]\nshow_tabs=true",
+        "strict_mode=true\n[tui]\nshow_tabs=false",
     ] {
-        assert!(load(text).unwrap().tui.show_tabs);
+        assert!(!load(text).unwrap().tui.show_tabs);
     }
     assert!(
-        !load("strict_mode=true\n[tui]\nshow_tabs=false")
+        load("strict_mode=true\n[tui]\nshow_tabs=true")
             .unwrap()
             .tui
             .show_tabs
@@ -241,6 +241,7 @@ fn picker_keybindings_reject_invalid_keys_types_and_conflicts() {
 #[test]
 fn editable_configuration_example_loads_with_keybinding_defaults() {
     let cfg = load(include_str!("../examples/rexue.toml")).unwrap();
+    assert!(!cfg.tui.show_tabs);
     assert_eq!(cfg.tui.keybindings.keys("rename"), ["ctrl-r"]);
 }
 

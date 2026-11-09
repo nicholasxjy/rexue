@@ -67,7 +67,7 @@ impl Default for PickerOptions {
     fn default() -> Self {
         Self {
             show_icons: true,
-            show_tabs: true,
+            show_tabs: false,
             native_icons: false,
             separator_aware: false,
             prompt: "> ".into(),
@@ -1916,7 +1916,10 @@ mod tests {
             "agent": {"app": "pi", "state": "working", "session_name": "project", "window_id": "window:second", "block_id": "block:agent"}
         })).unwrap();
         let state = Mutex::new(Catalog::new(
-            PickerOptions::default(),
+            PickerOptions {
+                show_tabs: true,
+                ..Default::default()
+            },
             vec![agent, session.clone()],
         ));
         let text = String::from_utf8(rows(&state, "").unwrap()).unwrap();
@@ -1963,7 +1966,7 @@ mod tests {
     }
 
     #[test]
-    fn hidden_tabs_keep_panes_in_order_with_stable_targets_and_tree_connectors() {
+    fn default_hidden_tabs_keep_panes_in_order_with_stable_targets_and_tree_connectors() {
         let mut session: Entry = serde_json::from_value(serde_json::json!({
             "name": "project", "source": "rex", "session_id": "session:full",
             "tabs": [
@@ -1982,7 +1985,6 @@ mod tests {
         let agent = session.tabs[3].panes[0].clone();
         let state = Mutex::new(Catalog::new(
             PickerOptions {
-                show_tabs: false,
                 show_icons: false,
                 ..Default::default()
             },

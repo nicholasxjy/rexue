@@ -53,7 +53,7 @@ icon = ""
 # in FZF_DEFAULT_OPTS_FILE or FZF_DEFAULT_OPTS (the latter takes precedence).
 # Show unified tab icons and Rex program artwork for panes; character icons use a Nerd Font.
 show_icons = true
-show_tabs = true # false: show panes directly under their session, without tab rows.
+show_tabs = false # true: show tab rows between sessions and panes.
 prompt = "> "
 placeholder = "Filter Sessions..."
 pointer = "> "

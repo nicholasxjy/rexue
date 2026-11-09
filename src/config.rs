@@ -145,7 +145,7 @@ impl Default for TuiConfig {
     fn default() -> Self {
         Self {
             show_icons: true,
-            show_tabs: true,
+            show_tabs: false,
             prompt: "> ".into(),
             placeholder: "Filter Sessions...".into(),
             pointer: "> ".into(),
