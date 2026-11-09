@@ -1334,7 +1334,7 @@ fn display_icon(
 
 fn display(entry: &Entry, options: &PickerOptions) -> String {
     if entry.window_id().is_some() && entry.block_id().is_none() {
-        return display_tab(&entry.name, !entry.agent_tab_indices.is_empty(), options);
+        return display_tab(&entry.name, options);
     }
     let mut text = String::new();
     if options.show_icons {
@@ -1373,7 +1373,10 @@ fn display(entry: &Entry, options: &PickerOptions) -> String {
         if let Some(alias) = options.aliases.values().find(|a| a.target == entry.name) {
             text.push_str(&format!("\x1b[2m[{}]\x1b[22m ", clean(&alias.alias)));
         }
-        text.push_str(&clean(entry.pane_title.as_deref().unwrap_or(&entry.name)));
+        text.push_str(&match &entry.pane_title {
+            Some(title) => display_title(title),
+            None => clean(&entry.name),
+        });
         if let Some(agent) = &entry.agent {
             let status = match agent.state.as_str() {
                 "working" => "•••",
@@ -1387,24 +1390,27 @@ fn display(entry: &Entry, options: &PickerOptions) -> String {
             }
         }
         if entry.is_session() && entry.tabs.is_empty() {
-            for (index, name) in entry.tab_names.iter().enumerate() {
-                let is_agent = entry.agent_tab_indices.contains(&index);
-                text.push_str(&format!(" [{}]", display_tab(name, is_agent, options)));
+            for name in &entry.tab_names {
+                text.push_str(&format!(" [{}]", display_tab(name, options)));
             }
         }
     }
     text
 }
-fn display_tab(name: &str, is_agent: bool, options: &PickerOptions) -> String {
-    let name = clean(name);
-    let name = if is_agent {
-        name
-    } else {
-        name.replace('|', " ")
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ")
-    };
+fn display_title(title: &str) -> String {
+    let title = clean(title)
+        .replace('|', " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    match title.split_once(' ') {
+        Some((command, detail)) => format!("{command} \x1b[2m{detail}\x1b[22m"),
+        None => title,
+    }
+}
+
+fn display_tab(name: &str, options: &PickerOptions) -> String {
+    let name = display_title(name);
     if options.show_icons {
         format!(
             "{}{name}",
@@ -1695,12 +1701,12 @@ mod tests {
         let mut options = PickerOptions::default();
         assert_eq!(
             strip_ansi_escapes::strip_str(display(&entry, &options)),
-            "  project [  zsh ~/Projects/rexue] [  Shell | Agent] [  Fix picker]"
+            "  project [  zsh ~/Projects/rexue] [  Shell Agent] [  Fix picker]"
         );
         options.show_icons = false;
         assert_eq!(
             display(&entry, &options),
-            "project [zsh ~/Projects/rexue] [Shell | Agent] [Fix picker]"
+            "project [zsh \x1b[2m~/Projects/rexue\x1b[22m] [Shell \x1b[2mAgent\x1b[22m] [Fix \x1b[2mpicker\x1b[22m]"
         );
 
         options.show_icons = true;
@@ -1727,6 +1733,27 @@ mod tests {
     }
 
     #[test]
+    fn titles_remove_pipes_and_dim_details_after_the_first_word() {
+        for (title, expected) in [
+            ("", ""),
+            (" |  | ", ""),
+            (" zsh | | ", "zsh"),
+            (
+                " zsh |  | ~/Projects/rexue  ",
+                "zsh \x1b[2m~/Projects/rexue\x1b[22m",
+            ),
+            ("pi task title", "pi \x1b[2mtask title\x1b[22m"),
+            (
+                "\x1b[31m终端\x1b[0m | ~/项目\t\n\0",
+                "终端 \x1b[2m~/项目\x1b[22m",
+            ),
+            ("pi|task||title", "pi \x1b[2mtask title\x1b[22m"),
+        ] {
+            assert_eq!(display_title(title), expected, "{title:?}");
+        }
+    }
+
+    #[test]
     fn row_icons_align_wide_glyphs_and_tabs_without_leaking_controls_or_color() {
         let mut options = PickerOptions {
             icon_width: 2,
@@ -1737,12 +1764,15 @@ mod tests {
         entry.icon = Some("\x1b[31m界\x1b[0m\t\n".into());
         assert_eq!(display(&entry, &options), "\x1b[34m界\x1b[39m  中文项目");
         assert_eq!(
-            display_tab("终端 | ~/项目", false, &options),
-            "\x1b[34m\x1b[39m   终端 ~/项目"
+            display_tab("终端 | ~/项目", &options),
+            "\x1b[34m\x1b[39m   终端 \x1b[2m~/项目\x1b[22m"
         );
         options.show_icons = false;
         assert_eq!(display(&entry, &options), "中文项目");
-        assert_eq!(display_tab("终端 | ~/项目", false, &options), "终端 ~/项目");
+        assert_eq!(
+            display_tab("终端 | ~/项目", &options),
+            "终端 \x1b[2m~/项目\x1b[22m"
+        );
     }
 
     #[test]
@@ -1819,8 +1849,10 @@ mod tests {
             show_icons: false,
             ..Default::default()
         };
-        let text = strip_ansi_escapes::strip_str(display(&entry, &options));
-        assert_eq!(text, "相同的 | pane 标题  Blocked");
+        assert_eq!(
+            display(&entry, &options),
+            "相同的 \x1b[2mpane 标题\x1b[22m  \x1b[2mBlocked\x1b[22m"
+        );
         assert_eq!(entry.target(), "block:second");
         assert!(entry.display_name().starts_with(&session));
     }
@@ -1886,7 +1918,7 @@ mod tests {
         assert_eq!(catalog.entries, vec![ids[0], ids[2], ids[1]]);
         let state = Mutex::new(catalog);
         let text = String::from_utf8(rows(&state, "").unwrap()).unwrap();
-        assert!(text.contains("\tSame | title  \x1b[2m•••\x1b[22m\0"));
+        assert!(text.contains("\tSame \x1b[2mtitle\x1b[22m  \x1b[2m•••\x1b[22m\0"));
         assert!(!text.contains('\n'));
         assert!(text.starts_with(&format!("{}\tproject\tproject\0", ids[0])));
         let filtered = String::from_utf8(rows(&state, "blocked").unwrap()).unwrap();
@@ -1936,9 +1968,9 @@ mod tests {
         assert_eq!(visible[0], "  project");
         assert_eq!(visible[1], "├──   Shell cwd");
         assert!(visible[2].starts_with("│   └── "));
-        assert_eq!(visible[3], "└──   Agents | task");
-        assert_eq!(visible[4], "    └── 󰚩  Own | task  •••");
-        assert_eq!(visible[2], "│   └──   zsh | cwd");
+        assert_eq!(visible[3], "└──   Agents task");
+        assert_eq!(visible[4], "    └── 󰚩  Own task  •••");
+        assert_eq!(visible[2], "│   └──   zsh cwd");
         for (row, expected) in fields.iter().zip([
             "session:full",
             "window:first",
@@ -1962,7 +1994,7 @@ mod tests {
         assert!(filtered.contains("[working]"));
         assert!(filtered.contains("Own | task"));
         let numbered = String::from_utf8(rows(&state, "#").unwrap()).unwrap();
-        assert!(strip_ansi_escapes::strip_str(numbered).contains("#4 └──   Agents | task"));
+        assert!(strip_ansi_escapes::strip_str(numbered).contains("#4 └──   Agents task"));
     }
 
     #[test]

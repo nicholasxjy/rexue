@@ -383,7 +383,7 @@ else:
         def panes_without_tabs(s):
             s.resize(240, 30)
             s.expect('4/4')
-            s.expect('├── Shell |  | title')
+            s.expect('├── Shell title')
             s.expect('├── Agent title  •••')
             s.expect('└── Other pane title  Blocked')
             s.expect('AGENT_PREVIEW_block:shell')
