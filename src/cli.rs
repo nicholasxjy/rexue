@@ -482,6 +482,7 @@ fn picker_options_for(
         .max(1);
     Ok(picker::PickerOptions {
         show_icons: args.icons.unwrap_or(cfg.tui.show_icons),
+        show_tabs: cfg.tui.show_tabs,
         separator_aware: args.separator_aware.unwrap_or(cfg.separator_aware),
         prompt: args
             .prompt
@@ -1294,6 +1295,24 @@ mod tests {
         let path = dir.path().join("picker.toml");
         std::fs::write(&path, text).unwrap();
         Config::load(Some(&path)).unwrap()
+    }
+
+    #[test]
+    fn picker_tab_visibility_survives_config_loading() {
+        for (text, expected) in [
+            ("", true),
+            ("[tui]", true),
+            ("[tui]\nshow_tabs=true", true),
+            ("[tui]\nshow_tabs=false", false),
+        ] {
+            let cfg = loaded_picker_config(text);
+            assert_eq!(
+                picker_options(&cfg, &PickerArgs::default())
+                    .unwrap()
+                    .show_tabs,
+                expected
+            );
+        }
     }
 
     #[test]

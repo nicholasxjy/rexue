@@ -158,6 +158,29 @@ fn imports_append_session_wildcard_and_worktree_definitions_once() {
 }
 
 #[test]
+fn picker_tab_visibility_defaults_to_true_and_requires_a_boolean() {
+    for text in [
+        "",
+        "strict_mode=true\n[tui]",
+        "strict_mode=true\n[tui]\nshow_tabs=true",
+    ] {
+        assert!(load(text).unwrap().tui.show_tabs);
+    }
+    assert!(
+        !load("strict_mode=true\n[tui]\nshow_tabs=false")
+            .unwrap()
+            .tui
+            .show_tabs
+    );
+    for value in ["''", "'false'", "0", "[]"] {
+        assert!(
+            load(&format!("[tui]\nshow_tabs={value}")).is_err(),
+            "{value}"
+        );
+    }
+}
+
+#[test]
 fn picker_keybindings_keep_defaults_and_override_individual_actions() {
     let defaults = load("strict_mode=true").unwrap();
     assert_eq!(defaults.tui.keybindings.keys("rename"), ["ctrl-r"]);

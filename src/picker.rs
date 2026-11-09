@@ -41,6 +41,7 @@ pub enum InitialFocus {
 #[derive(Debug, Clone)]
 pub struct PickerOptions {
     pub show_icons: bool,
+    pub show_tabs: bool,
     pub native_icons: bool,
     pub separator_aware: bool,
     pub prompt: String,
@@ -66,6 +67,7 @@ impl Default for PickerOptions {
     fn default() -> Self {
         Self {
             show_icons: true,
+            show_tabs: true,
             native_icons: false,
             separator_aware: false,
             prompt: "> ".into(),
@@ -182,7 +184,7 @@ impl Catalog {
         self.entries.clear();
         self.branches.clear();
         for entry in entries {
-            // Agents already appear under their owning tab when its root is present.
+            // Agents already appear in the session tree when its root is present.
             if entry.agent.is_some()
                 && entry
                     .session_id
@@ -193,28 +195,43 @@ impl Catalog {
             }
             let id = self.remember(entry.clone());
             self.entries.push(id);
+            let mut remaining_panes = entry.tabs.iter().map(|tab| tab.panes.len()).sum::<usize>();
             for (index, tab) in entry.tabs.iter().enumerate() {
                 let last_tab = index + 1 == entry.tabs.len();
-                let mut child = Entry::new(&tab.name, &entry.path, Source::Rex);
-                child.session_id = entry.session_id.clone();
-                child.window_id = Some(tab.window_id.clone());
-                child.tab_names.push(tab.name.clone());
-                if tab.is_agent {
-                    child.agent_tab_indices.push(0);
+                if self.options.show_tabs {
+                    let mut child = Entry::new(&tab.name, &entry.path, Source::Rex);
+                    child.session_id = entry.session_id.clone();
+                    child.window_id = Some(tab.window_id.clone());
+                    child.tab_names.push(tab.name.clone());
+                    if tab.is_agent {
+                        child.agent_tab_indices.push(0);
+                    }
+                    let id = self.remember(child);
+                    self.entries.push(id);
+                    self.branches
+                        .insert(id, if last_tab { "└── " } else { "├── " }.into());
                 }
-                let id = self.remember(child);
-                self.entries.push(id);
-                self.branches
-                    .insert(id, if last_tab { "└── " } else { "├── " }.into());
                 for (index, pane) in tab.panes.iter().enumerate() {
+                    remaining_panes -= 1;
+                    let last_pane = if self.options.show_tabs {
+                        index + 1 == tab.panes.len()
+                    } else {
+                        remaining_panes == 0
+                    };
                     let id = self.remember(pane.clone());
                     self.entries.push(id);
                     self.branches.insert(
                         id,
                         format!(
                             "{}{}",
-                            if last_tab { "    " } else { "│   " },
-                            if index + 1 == tab.panes.len() {
+                            if !self.options.show_tabs {
+                                ""
+                            } else if last_tab {
+                                "    "
+                            } else {
+                                "│   "
+                            },
+                            if last_pane {
                                 "└── "
                             } else {
                                 "├── "
@@ -1943,6 +1960,78 @@ mod tests {
         assert!(filtered.contains("Own | task"));
         let numbered = String::from_utf8(rows(&state, "#").unwrap()).unwrap();
         assert!(strip_ansi_escapes::strip_str(numbered).contains("#4 └──   Agents | task"));
+    }
+
+    #[test]
+    fn hidden_tabs_keep_panes_in_order_with_stable_targets_and_tree_connectors() {
+        let mut session: Entry = serde_json::from_value(serde_json::json!({
+            "name": "project", "source": "rex", "session_id": "session:full",
+            "tabs": [
+                {"name": "Empty first", "window_id": "window:empty-first"},
+                {"name": "Shell", "window_id": "window:first", "panes": [
+                    {"name": "project / zsh · pane 1 · Shell", "pane_title": "Shell", "source": "rex", "session_id": "session:full", "window_id": "window:first", "block_id": "block:shell"}
+                ]},
+                {"name": "Empty middle", "window_id": "window:empty-middle"},
+                {"name": "Agents", "window_id": "window:second", "panes": [
+                    {"name": "project / pi · pane 1 · Agents", "pane_title": "Same title", "source": "agent", "session_id": "session:full", "agent": {"app": "pi", "state": "working", "session_name": "project", "window_id": "window:second", "block_id": "block:first"}},
+                    {"name": "project / pi · pane 2 · Agents", "pane_title": "Same title", "source": "agent", "session_id": "session:full", "agent": {"app": "pi", "state": "blocked", "session_name": "project", "window_id": "window:second", "block_id": "block:second"}}
+                ]},
+                {"name": "Empty last", "window_id": "window:empty-last"}
+            ]
+        })).unwrap();
+        let agent = session.tabs[3].panes[0].clone();
+        let state = Mutex::new(Catalog::new(
+            PickerOptions {
+                show_tabs: false,
+                show_icons: false,
+                ..Default::default()
+            },
+            vec![agent, session.clone()],
+        ));
+        let text = String::from_utf8(rows(&state, "").unwrap()).unwrap();
+        let fields: Vec<_> = text
+            .split('\0')
+            .filter(|row| !row.is_empty())
+            .map(|row| row.splitn(3, '\t').collect::<Vec<_>>())
+            .collect();
+        let visible: Vec<_> = fields
+            .iter()
+            .map(|row| strip_ansi_escapes::strip_str(row[2]))
+            .collect();
+        assert_eq!(
+            visible,
+            [
+                "project",
+                "├── Shell",
+                "├── Same title  •••",
+                "└── Same title  Blocked"
+            ]
+        );
+        for (row, (expected, window)) in fields.iter().zip([
+            ("session:full", None),
+            ("block:shell", Some("window:first")),
+            ("block:first", Some("window:second")),
+            ("block:second", Some("window:second")),
+        ]) {
+            let selected = target(&state, Some(row[0])).unwrap();
+            assert_eq!(selected.target(), expected);
+            assert_eq!(selected.window_id(), window);
+        }
+        let ids = state.lock().unwrap().entries.clone();
+        session.tabs.retain(|tab| !tab.panes.is_empty());
+        session.tabs[1].name = "Renamed".into();
+        state.lock().unwrap().replace(vec![session.clone()]);
+        assert_eq!(state.lock().unwrap().entries, ids);
+        let filtered = String::from_utf8(rows(&state, "blocked").unwrap()).unwrap();
+        assert_eq!(
+            filtered.split('\0').filter(|row| !row.is_empty()).count(),
+            1
+        );
+        assert!(filtered.starts_with(&format!("{}\t", ids[3])));
+        session.tabs.clear();
+        state.lock().unwrap().replace(vec![session]);
+        assert_eq!(state.lock().unwrap().entries, [ids[0]]);
+        assert!(target(&state, Some(&ids[3].to_string())).is_err());
     }
 
     #[test]

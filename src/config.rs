@@ -129,6 +129,7 @@ pub struct WorktreeConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct TuiConfig {
     pub show_icons: bool,
+    pub show_tabs: bool,
     pub prompt: String,
     pub placeholder: String,
     pub pointer: String,
@@ -144,6 +145,7 @@ impl Default for TuiConfig {
     fn default() -> Self {
         Self {
             show_icons: true,
+            show_tabs: true,
             prompt: "> ".into(),
             placeholder: "Filter Sessions...".into(),
             pointer: "> ".into(),
@@ -677,6 +679,7 @@ fn check_unknown_keys(value: &mut toml::Value, kind: &str, strict: bool) -> Resu
         "worktree" => &["path", "icon"],
         "tui" => &[
             "show_icons",
+            "show_tabs",
             "prompt",
             "placeholder",
             "pointer",

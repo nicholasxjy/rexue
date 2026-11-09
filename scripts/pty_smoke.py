@@ -379,6 +379,32 @@ else:
         run_case('session-tab-icons-can-be-disabled', ['picker', '--rex', '--icons=false'],
                  lambda s: session_agent_titles(s, False))
 
+        cfg.write_text(config.replace('[tui]\n', '[tui]\nshow_tabs=false\n', 1))
+        def panes_without_tabs(s):
+            s.resize(240, 30)
+            s.expect('4/4')
+            s.expect('├── Shell |  | title')
+            s.expect('├── Agent title  •••')
+            s.expect('└── Other pane title  Blocked')
+            s.expect('AGENT_PREVIEW_block:shell')
+            s.send(b'\x1b[B' * 3)
+            s.expect('AGENT_PREVIEW_block:second')
+            s.send(b'\r')
+        before = len((root/'rex-calls.jsonl').read_text().splitlines())
+        run_case('hidden-tabs-flatten-panes-across-tabs', ['picker', '--rex', '--agents', '--icons=false'], panes_without_tabs)
+        calls = [json.loads(line) for line in (root/'rex-calls.jsonl').read_text().splitlines()[before:]]
+        assert ['focus', '-s', 'session:agents', 'block:second'] in calls, calls
+        current.update(block_id='block:second')
+        context.write_text(json.dumps(current))
+        run_case('hidden-tabs-preserve-current-pane-focus', ['picker', '--rex'],
+                 lambda s: (s.expect('4/4'), s.expect('AGENT_PREVIEW_block:second'), s.send(b'\r')))
+        context.unlink()
+        run_case('hidden-tabs-search-and-select-pane', ['picker', '--rex', '--query=blocked'],
+                 lambda s: (s.expect('1/1'), s.expect('AGENT_PREVIEW_block:second'), s.send(b'\r')))
+        run_case('hidden-tabs-keep-agent-only-list-flat', ['picker', '--agents'],
+                 lambda s: (s.expect('2/2'), s.expect('AGENT_PREVIEW_block:first'), s.send(b'\x1b')))
+        cfg.write_text(config)
+
         def agent_guards(s):
             s.expect('AGENT_PREVIEW_block:first')
             s.send(b'\x18')

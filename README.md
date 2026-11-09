@@ -36,7 +36,7 @@ rexue connect app            # Resolve a session name or configured alias.
 rexue last                   # Return to the previous session.
 ```
 
-The picker lists live Rex sessions. Sessions expand into tabs and panes; Enter focuses the selected target. `picker --agents` shows a flat agent list. See [picker settings](docs/CONFIGURATION.md#picker-settings) for titles, icons and initial focus.
+The picker lists live Rex sessions. Sessions expand into tabs and panes; Enter focuses the selected target. Set `show_tabs = false` under `[tui]` to show panes directly under each session. `picker --agents` shows a flat agent list. See [picker settings](docs/CONFIGURATION.md#picker-settings) for titles, icons and initial focus.
 
 **Enter** connects, **Esc** cancels, **Ctrl+J/K** moves, **Ctrl+O** toggles preview, **Ctrl+R** renames a session and **Ctrl+X** requests removal. Customize these in [`[tui.keybindings]`](docs/CONFIGURATION.md#keybindings).
 
