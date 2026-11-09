@@ -74,6 +74,7 @@ down = ["down", "ctrl-j", "ctrl-n"]
 half_page_up = ["ctrl-u"]
 half_page_down = ["ctrl-d"]
 toggle_preview = ["ctrl-o"]
+toggle_agents = ["@"] # Session picker: toggle agent panes, preserving the search.
 rename = ["ctrl-r"] # For example: ["ctrl-r", "alt-r", "f2"].
 remove = ["ctrl-x"]
 refresh = ["ctrl-r"] # Worktree picker only.

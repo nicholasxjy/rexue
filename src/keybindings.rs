@@ -12,6 +12,7 @@ pub(crate) const DEFAULT_BINDINGS: &[(&str, &[&str])] = &[
     ("half_page_up", &["ctrl-u"]),
     ("half_page_down", &["ctrl-d"]),
     ("toggle_preview", &["ctrl-o"]),
+    ("toggle_agents", &["@"]),
     ("rename", &["ctrl-r"]),
     ("remove", &["ctrl-x"]),
     ("refresh", &["ctrl-r"]),
@@ -111,7 +112,7 @@ impl Keybindings {
         if worktree {
             actions.extend(["refresh", "create_worktree"]);
         } else {
-            actions.push("rename");
+            actions.extend(["rename", "toggle_agents"]);
             actions.extend(
                 DEFAULT_BINDINGS
                     .iter()

@@ -189,7 +189,25 @@ fn picker_keybindings_keep_defaults_and_override_individual_actions() {
         ["esc", "ctrl-c", "ctrl-g", "ctrl-q"]
     );
     assert_eq!(defaults.tui.keybindings.keys("select_2"), ["2"]);
-    let configured = load("strict_mode=true\n[tui.keybindings]\nrename=['alt-r', 'f2']\ntoggle_preview=[]\nselect_2=['alt-2', 'f3']\naccept=['return']\n").unwrap();
+    assert_eq!(defaults.tui.keybindings.keys("toggle_agents"), ["@"]);
+    assert_eq!(
+        load("[tui.keybindings]")
+            .unwrap()
+            .tui
+            .keybindings
+            .keys("toggle_agents"),
+        ["@"]
+    );
+    assert!(
+        load("[tui.keybindings]\ntoggle_agents=[]")
+            .unwrap()
+            .tui
+            .keybindings
+            .keys("toggle_agents")
+            .is_empty()
+    );
+    let configured = load("strict_mode=true\n[tui.keybindings]\nrename=['alt-r', 'f2']\ntoggle_agents=['alt-a']\ntoggle_preview=[]\nselect_2=['alt-2', 'f3']\naccept=['return']\n").unwrap();
+    assert_eq!(configured.tui.keybindings.keys("toggle_agents"), ["alt-a"]);
     assert_eq!(configured.tui.keybindings.keys("rename"), ["alt-r", "f2"]);
     assert!(configured.tui.keybindings.keys("toggle_preview").is_empty());
     assert_eq!(configured.tui.keybindings.keys("accept"), ["enter"]);
@@ -222,6 +240,8 @@ fn picker_keybindings_reject_invalid_keys_types_and_conflicts() {
         "select_2=['1']",
         "confirm_yes=['tab']",
         "cancel=['ctrl-j']",
+        "toggle_agents=['ctrl-r']",
+        "rename=['@']",
     ] {
         assert!(
             load(&format!("[tui.keybindings]\n{settings}")).is_err(),
@@ -243,6 +263,7 @@ fn editable_configuration_example_loads_with_keybinding_defaults() {
     let cfg = load(include_str!("../examples/rexue.toml")).unwrap();
     assert!(!cfg.tui.show_tabs);
     assert_eq!(cfg.tui.keybindings.keys("rename"), ["ctrl-r"]);
+    assert_eq!(cfg.tui.keybindings.keys("toggle_agents"), ["@"]);
 }
 
 #[test]

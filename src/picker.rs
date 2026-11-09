@@ -109,6 +109,7 @@ struct Catalog {
     rendered_rows: Option<(String, Vec<u8>)>,
     last_query: String,
     auto_armed: bool,
+    agents_only: bool,
     status: String,
     initial_focus: Option<InitialFocus>,
     loaded_icons: BTreeSet<&'static str>,
@@ -136,6 +137,7 @@ impl Catalog {
             revision: 0,
             rendered_rows: None,
             auto_armed: false,
+            agents_only: false,
             status: String::new(),
             initial_focus: None,
             loaded_icons: BTreeSet::new(),
@@ -264,6 +266,13 @@ impl Catalog {
         }
     }
 
+    fn toggle_agents(&mut self) {
+        self.agents_only = !self.agents_only;
+        self.revision += 1;
+        self.rendered_rows = None;
+        self.auto_armed = false;
+    }
+
     fn store_rows(&mut self, revision: u64, query: &str, rows: Vec<u8>) {
         // A slow filter may finish after a refresh or a newer query.
         if self.revision == revision && self.last_query == query {
@@ -360,6 +369,10 @@ impl Catalog {
                 ("accept", "connect"),
                 ("cancel", "cancel"),
                 ("toggle_preview", "preview"),
+                (
+                    "toggle_agents",
+                    if self.agents_only { "all" } else { "agents" },
+                ),
                 ("rename", "rename"),
                 ("remove", "remove"),
             ]
@@ -459,6 +472,10 @@ impl Bridge {
                                 Ok(bytes)
                             }
                             "status" => Ok(state.lock().unwrap().header().into_bytes()),
+                            "toggle-agents" => {
+                                state.lock().unwrap().toggle_agents();
+                                Ok(format!("reload({HELPER} rows)+transform-header({HELPER} status)").into_bytes())
+                            }
                             "initial" => {
                                 let mut s = state.lock().unwrap();
                                 // Consume once, even if the user started typing before load.
@@ -478,7 +495,7 @@ impl Bridge {
                                     let s = state.lock().unwrap();
                                     let q = s.alias_query(&request.query).unwrap_or(&request.query);
                                     s.options.aliases.get(&alias_key(q)).filter(|a| {
-                                        s.auto_armed && s.alias_id(a).is_some() && !s.options.worktree && !s.options.disable_alias_auto_connect
+                                        s.auto_armed && s.alias_id(a).is_some() && !s.agents_only && !s.options.worktree && !s.options.disable_alias_auto_connect
                                             && (s.alias_query(&request.query).is_some() || a.auto_connect)
                                     }).map(|_| s.options.alias_auto_connect_delay)
                                 };
@@ -581,6 +598,9 @@ fn rows(state: &Mutex<Catalog>, query: &str) -> Result<Vec<u8>> {
         let mut input = Vec::new();
         for id in ids {
             let entry = &s.targets[&id];
+            if s.agents_only && entry.agent.is_none() {
+                continue;
+            }
             let search = if options.worktree || entry.source == Source::Agent {
                 format!(
                     "{} {}",
@@ -599,7 +619,11 @@ fn rows(state: &Mutex<Catalog>, query: &str) -> Result<Vec<u8>> {
             } else {
                 search
             };
-            let branch = s.branches.get(&id).map(String::as_str).unwrap_or("");
+            let branch = if s.agents_only {
+                ""
+            } else {
+                s.branches.get(&id).map(String::as_str).unwrap_or("")
+            };
             let display = display(entry, options);
             if branch.is_empty() {
                 write!(input, "{id}\t{search}\t{display}\0")?;
@@ -830,6 +854,11 @@ fn finder(options: &PickerOptions, bridge: &Bridge, header: &str, query: &str) -
         );
     } else {
         bindings.bind(&mut command, "rename", "print(rename)+accept");
+        bindings.bind(
+            &mut command,
+            "toggle_agents",
+            &format!("bg-cancel+transform({HELPER} toggle-agents)"),
+        );
         for digit in 1..=9 {
             bindings.bind(
                 &mut command,
@@ -2052,6 +2081,33 @@ mod tests {
             assert_eq!(selected.window_id(), window);
         }
         let ids = state.lock().unwrap().entries.clone();
+        let old_revision = state.lock().unwrap().revision;
+        state.lock().unwrap().toggle_agents();
+        state
+            .lock()
+            .unwrap()
+            .store_rows(old_revision, "", text.clone().into_bytes());
+        let filtered = String::from_utf8(rows(&state, "").unwrap()).unwrap();
+        let agent_ids: Vec<_> = filtered
+            .split('\0')
+            .filter(|row| !row.is_empty())
+            .map(|row| row.split('\t').next().unwrap())
+            .collect();
+        assert_eq!(agent_ids, [ids[2].to_string(), ids[3].to_string()]);
+        assert!(!filtered.contains("──"));
+        assert!(state.lock().unwrap().header().contains("@ all"));
+        assert!(rows(&state, "Shell").unwrap().is_empty());
+        let blocked = String::from_utf8(rows(&state, "blocked").unwrap()).unwrap();
+        assert!(blocked.starts_with(&format!("{}\t", ids[3])));
+        let numbered =
+            strip_ansi_escapes::strip_str(String::from_utf8(rows(&state, "#").unwrap()).unwrap());
+        assert!(numbered.contains("#1 Same title"));
+        assert!(numbered.contains("#2 Same title"));
+        assert!(!numbered.contains("#3"));
+        rows(&state, "").unwrap();
+        state.lock().unwrap().toggle_agents();
+        assert_eq!(rows(&state, "").unwrap(), text.as_bytes());
+        assert!(state.lock().unwrap().header().contains("@ agents"));
         session.tabs.retain(|tab| !tab.panes.is_empty());
         session.tabs[1].name = "Renamed".into();
         state.lock().unwrap().replace(vec![session.clone()]);

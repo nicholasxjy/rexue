@@ -38,7 +38,7 @@ rexue last                   # Return to the previous session.
 
 The picker lists live Rex sessions with panes directly under each session; Enter focuses the selected target. Set `show_tabs = true` under `[tui]` to show tab rows between sessions and panes. `picker --agents` shows a flat agent list. See [picker settings](docs/CONFIGURATION.md#picker-settings) for titles, icons and initial focus.
 
-**Enter** connects, **Esc** cancels, **Ctrl+J/K** moves, **Ctrl+O** toggles preview, **Ctrl+R** renames a session and **Ctrl+X** requests removal. Customize these in [`[tui.keybindings]`](docs/CONFIGURATION.md#keybindings).
+**Enter** connects, **Esc** cancels, **Ctrl+J/K** moves, **Ctrl+O** toggles preview, **@** toggles agent panes, **Ctrl+R** renames a session and **Ctrl+X** requests removal. Customize these in [`[tui.keybindings]`](docs/CONFIGURATION.md#keybindings).
 
 For worktrees, run inside a Git repository or add `--path ~/Projects/app`:
 

@@ -55,7 +55,7 @@ elif a[:1]==['capture']:
 else:
     print('{}')
 ''')
-        config = ['strict_mode=true', '[tui]', 'preview=true', 'preview_min_width=20']
+        config = ['strict_mode=true', '[tui]', 'show_tabs=true', 'preview=true', 'preview_min_width=20']
         for name in ('ALPHA', 'BETA', 'GAMMA'):
             config.extend(['[[session]]', f'name="{name}"',
                            'path=' + json.dumps(directory),

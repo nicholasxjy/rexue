@@ -77,7 +77,7 @@ Requires fzf **0.63+**. `[tui]` applies to both pickers:
 
 CLI overrides: `--focus-pane`, `--icons`, `--separator-aware`, `--prompt`, `--placeholder`, `--query`, `--preview`, `--no-preview`, `--no-alias-auto`. Boolean values use `=`, e.g. `--icons=false`; `--no-preview` wins. CLI prompt/placeholder values may be empty. Worktree picker supports icons, prompt, placeholder and query overrides.
 
-In the session picker, `/` filters aliases of live sessions and auto-connects an exact alias after typing. Outside this mode, auto-connect requires `alias_auto_connect = true`. Prefilled queries never auto-connect. `#` starts numbered selection unless it is the alias prefix. These modes do not apply to worktree pickers.
+In the session picker, `@` toggles a flat list containing only agent panes, preserving the current search; press it again to restore the full list. Change or disable this shortcut with `tui.keybindings.toggle_agents`. `/` filters aliases of live sessions and auto-connects an exact alias after typing. Outside this mode, auto-connect requires `alias_auto_connect = true`. Prefilled queries never auto-connect. `#` starts numbered selection unless it is the alias prefix. These modes do not apply to worktree pickers.
 
 `[icons.SOURCE]` accepts `icon` and `color` for `agent`, `rex`, `config`, `directory`, `worktree`. Colors: black, red, green, yellow, blue, magenta, cyan, white, optional `bright-`, or gray/grey. For session/source rows and character fallbacks, custom icons take priority: session → repository → wildcard → source. Native program artwork keeps its original colors.
 
@@ -99,6 +99,7 @@ select_2 = ["2", "alt-2"]
 | `up` / `down` | `up`, `ctrl-k`, `ctrl-p` / `down`, `ctrl-j`, `ctrl-n` | Both pickers. |
 | `half_page_up` / `half_page_down` | `ctrl-u` / `ctrl-d` | Both pickers. |
 | `toggle_preview` | `ctrl-o` | Both pickers. |
+| `toggle_agents` | `@` | Session picker: toggle between agent panes and the full list, keeping the current search. |
 | `rename` | `ctrl-r` | Live session roots. |
 | `remove` | `ctrl-x` | Confirm session or worktree removal; agent, tab and pane rows are ineligible. |
 | `refresh` | `ctrl-r` | Worktree picker. |
@@ -109,4 +110,4 @@ select_2 = ["2", "alt-2"]
 
 Keys include `enter`, `esc`, `tab`, `space`, arrows, `page-down`, `f1`–`f12`, `ctrl-a`–`ctrl-z`, `alt-r` and modified navigation (`ctrl-up`). Single printable characters are allowed except `: , + ( ) [ ] { }` and backslash. Names are case-sensitive; `return`/`ctrl-m`, `shift-tab`, `pgup` and `pgdn` normalize before validation.
 
-Invalid keys or duplicate assignments in one context fail loading. Reassign a key by replacing/disabling its previous action; separate contexts may share keys. Removing a digit shortcut restores digit input. Other fzf editing/mouse bindings remain available. Launch shortcuts belong in [Rex's `init.lua`](../README.md#configure).
+Invalid keys or duplicate assignments in one context fail loading. Reassign a key by replacing/disabling its previous action; separate contexts may share keys. Removing a printable shortcut restores text input for that key. Other fzf editing/mouse bindings remain available. Launch shortcuts belong in [Rex's `init.lua`](../README.md#configure).

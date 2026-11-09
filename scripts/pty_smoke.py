@@ -379,6 +379,40 @@ else:
         run_case('session-tab-icons-can-be-disabled', ['picker', '--rex', '--icons=false'],
                  lambda s: session_agent_titles(s, False))
 
+        def toggle_agents(s, key=b'@', total=4):
+            s.expect(f'{total}/{total}')
+            s.expect('AGENT_PREVIEW_block:shell')
+            s.send(key)
+            s.expect('2/2')
+            s.expect('AGENT_PREVIEW_block:first')
+            s.send(b'Shell')
+            s.expect('0/0')
+            offset = len(s.capture)
+            s.send(key)
+            s.until(lambda: b'AGENT_PREVIEW_block:shell' in s.capture[offset:], 'toggle did not restore shell with search intact')
+            offset = len(s.capture)
+            s.send(key)
+            s.until(lambda: b'0/0' in s.capture[offset:], 'toggle discarded search instead of filtering agents')
+            offset = len(s.capture)
+            s.send(b'\x7f' * len('Shell'))
+            s.until(lambda: b'2/2' in s.capture[offset:], 'clearing search did not restore agent rows')
+            s.send(b'Other pane title')
+            s.expect('1/1')
+            s.expect('AGENT_PREVIEW_block:second')
+            s.send(b'\r')
+
+        before = len((root/'rex-calls.jsonl').read_text().splitlines())
+        run_case('toggle-agents-from-session-tab-pane-tree', ['picker'], lambda s: toggle_agents(s, total=6))
+        calls = [json.loads(line) for line in (root/'rex-calls.jsonl').read_text().splitlines()[before:]]
+        assert ['focus', '-s', 'session:agents', 'block:second'] in calls, calls
+
+        cfg.write_text(config.replace('show_tabs=true\n', '', 1))
+        run_case('toggle-agents-from-default-session-pane-tree', ['picker'], toggle_agents)
+        cfg.write_text(config.replace('show_tabs=true\n', '', 1) + '\n[tui.keybindings]\ntoggle_agents=["alt-a"]\n')
+        run_case('toggle-agents-custom-binding', ['picker'], lambda s: toggle_agents(s, key=b'\x1ba'))
+        cfg.write_text(config.replace('show_tabs=true\n', '', 1) + '\n[tui.keybindings]\ntoggle_agents=[]\n')
+        run_case('toggle-agents-disabled-restores-literal-at-input', ['picker'],
+                 lambda s: (s.expect('4/4'), s.send(b'@'), s.expect('0/0'), s.send(b'\x1b')))
         cfg.write_text(config.replace('show_tabs=true\n', '', 1))
         def panes_without_tabs(s):
             s.resize(240, 30)
@@ -442,6 +476,16 @@ else:
         text = run_case('default-list-excludes-unconnected-configured-targets', ['picker'], session_navigation)
         assert 'session:second' in text
         cfg.write_text(config)
+
+        def no_agents(s):
+            s.expect('4/4')
+            s.send(b'@')
+            s.expect('0/0')
+            offset = len(s.capture)
+            s.send(b'@')
+            s.until(lambda: b'4/4' in s.capture[offset:], 'empty agent filter did not restore sessions')
+            s.send(b'\x1b')
+        run_case('toggle-agents-empty-results-and-restore', ['picker'], no_agents)
 
         def cancel(s):
             s.expect(name)
