@@ -112,6 +112,8 @@ struct Catalog {
     agents_only: bool,
     status: String,
     initial_focus: Option<InitialFocus>,
+    current_focus: Option<InitialFocus>,
+    layout_ready: bool,
     loaded_icons: BTreeSet<&'static str>,
 }
 fn same_entry(a: &Entry, b: &Entry) -> bool {
@@ -140,6 +142,8 @@ impl Catalog {
             agents_only: false,
             status: String::new(),
             initial_focus: None,
+            current_focus: None,
+            layout_ready: false,
             loaded_icons: BTreeSet::new(),
         };
         state.replace(entries);
@@ -328,7 +332,7 @@ impl Catalog {
             true,
         )
     }
-    fn initial_position(&self, focus: InitialFocus) -> Option<usize> {
+    fn initial_position(&self, focus: &InitialFocus) -> Option<usize> {
         match focus {
             InitialFocus::Session {
                 id,
@@ -338,20 +342,58 @@ impl Catalog {
                 let find = |target: &str| {
                     self.entries.iter().position(|row| {
                         let entry = &self.targets[row];
-                        entry.session_id.as_deref() == Some(&id) && entry.target() == target
+                        entry.session_id.as_deref() == Some(id) && entry.target() == target
                     })
                 };
                 block_id
                     .as_deref()
                     .and_then(find)
                     .or_else(|| window_id.as_deref().and_then(find))
-                    .or_else(|| find(&id))
+                    .or_else(|| find(id))
             }
             InitialFocus::Worktree(path) => self.entries.iter().position(|id| {
                 let entry = &self.targets[id];
-                entry.source == Source::Worktree && crate::session::same_path(&entry.path, &path)
+                entry.source == Source::Worktree && crate::session::same_path(&entry.path, path)
             }),
         }
+    }
+
+    fn mark_current(
+        &self,
+        rows: Vec<u8>,
+        columns: usize,
+        preview_left: Option<usize>,
+    ) -> Result<Vec<u8>> {
+        if columns == 0 {
+            return Ok(rows);
+        }
+        let Some(position) = self
+            .current_focus
+            .as_ref()
+            .and_then(|focus| self.initial_position(focus))
+        else {
+            return Ok(rows);
+        };
+        let prefix = format!("{}\t", self.entries[position]);
+        let list_width = preview_left.map_or(columns, |left| {
+            left.saturating_sub(if self.options.preview_border == "none" {
+                0
+            } else {
+                2
+            })
+        });
+        // fzf reserves the pointer, one marker cell and one scrollbar cell.
+        let width = list_width.saturating_sub(clean(&self.options.pointer).width() + 2);
+        let mut output = Vec::new();
+        for row in std::str::from_utf8(&rows)?.split_terminator('\0') {
+            if row.starts_with(&prefix) {
+                let (fields, text) = row.split_at(row.match_indices('\t').nth(1).unwrap().0 + 1);
+                write!(output, "{fields}{}\0", current_marker(text, width))?;
+            } else {
+                write!(output, "{row}\0")?;
+            }
+        }
+        Ok(output)
     }
 
     fn header(&self) -> String {
@@ -401,6 +443,8 @@ struct Request {
     query: String,
     id: Option<String>,
     matches: usize,
+    columns: usize,
+    preview_left: Option<usize>,
 }
 
 /// Hidden CLI callback. Configuration and global CLI defaults are deliberately
@@ -420,6 +464,13 @@ pub fn helper(socket: &Path, action: &str, id: Option<&str>) -> Result<()> {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0),
+            columns: std::env::var("FZF_COLUMNS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0),
+            preview_left: std::env::var("FZF_PREVIEW_LEFT")
+                .ok()
+                .and_then(|v| v.parse().ok()),
         },
     )?;
     stream.shutdown(Shutdown::Write)?;
@@ -456,7 +507,12 @@ impl Bridge {
                         stream.set_write_timeout(Some(Duration::from_secs(5)))?;
                         let request: Request = serde_json::from_reader((&mut stream).take(1024 * 1024))?;
                         match request.action.as_str() {
-                            "rows" => rows(&state, &request.query),
+                            "rows" => {
+                                let rows = rows(&state, &request.query)?;
+                                let mut s = state.lock().unwrap();
+                                s.layout_ready = request.columns > 0;
+                                s.mark_current(rows, request.columns, request.preview_left)
+                            },
                             "icons" | "icons-reset" => {
                                 let mut s = state.lock().unwrap();
                                 if !s.options.native_icons { return Ok(Vec::new()); }
@@ -478,11 +534,15 @@ impl Bridge {
                             }
                             "initial" => {
                                 let mut s = state.lock().unwrap();
+                                // The start event runs before fzf knows its layout dimensions.
+                                if s.current_focus.is_some() && !s.layout_ready && request.columns > 0 {
+                                    return Ok(format!("reload({HELPER} rows)").into_bytes());
+                                }
                                 // Consume once, even if the user started typing before load.
                                 // Subsequent query reloads and dialogs keep normal fzf focus.
                                 let focus = s.initial_focus.take();
                                 let position = focus.filter(|_| request.query.is_empty())
-                                    .and_then(|focus| s.initial_position(focus));
+                                    .and_then(|focus| s.initial_position(&focus));
                                 Ok(position.map_or_else(Vec::new, |i| format!("pos({})", i + 1).into_bytes()))
                             }
                             "loaded" => {
@@ -823,6 +883,7 @@ fn finder(options: &PickerOptions, bridge: &Bridge, header: &str, query: &str) -
             }
         ))
         .arg(format!("--bind=change:bg-cancel+reload({HELPER} rows)"))
+        .arg(format!("--bind=resize:reload({HELPER} rows)"))
         .arg(format!(
             "--bind=load:{}transform({HELPER} initial)+bg-transform({HELPER} loaded)",
             if options.native_icons {
@@ -840,7 +901,10 @@ fn finder(options: &PickerOptions, bridge: &Bridge, header: &str, query: &str) -
         ("down", "down"),
         ("half_page_up", "half-page-up"),
         ("half_page_down", "half-page-down"),
-        ("toggle_preview", "toggle-preview"),
+        (
+            "toggle_preview",
+            &format!("toggle-preview+reload({HELPER} rows)"),
+        ),
         ("remove", "print(remove)+accept"),
     ] {
         bindings.bind(&mut command, action, fzf_action);
@@ -1209,18 +1273,15 @@ pub fn pick_with_create(
         }
         Err(error) => return Err(error),
     };
-    let initial_focus = if options.query.is_empty() && !entries.is_empty() {
-        initial_focus(&entries)
-    } else {
-        None
-    };
+    let current_focus = initial_focus(&entries);
     let fetch: Fetch = Arc::new(Mutex::new(Box::new(fetch)));
     let mut options = options;
     options.native_icons = options.show_icons && !options.worktree && crate::icons::available();
     let mut query = options.query.clone();
     let mut catalog = Catalog::new(options.clone(), entries);
     catalog.status = status;
-    catalog.initial_focus = initial_focus;
+    catalog.initial_focus = current_focus.clone().filter(|_| options.query.is_empty());
+    catalog.current_focus = current_focus;
     let state = Arc::new(Mutex::new(catalog));
     let bridge = Bridge::start(state.clone(), fetch.clone(), Arc::new(preview))?;
     loop {
@@ -1359,6 +1420,43 @@ fn display_icon(
         None => format!("\x1b[2m{icon}\x1b[22m"),
     };
     format!("{icon}{}", " ".repeat(padding + 2))
+}
+
+fn current_marker(text: &str, width: usize) -> String {
+    const ICON: &str = "\x1b[1;32m\x1b[0m";
+    if width == 0 {
+        return String::new();
+    }
+    if width <= 3 {
+        return format!("{}{ICON}", " ".repeat(width - 1));
+    }
+    let mut text = text.to_owned();
+    let mut visible = strip_ansi_escapes::strip_str(&text);
+    let available = width - 3;
+    if visible.width() > available {
+        visible.clear();
+        let mut escape = false;
+        let mut end = 0;
+        for (index, c) in text.char_indices() {
+            if c == '\x1b' {
+                escape = true;
+            }
+            if !escape {
+                visible.push(c);
+                if visible.width() > available.saturating_sub(1) {
+                    visible.pop();
+                    break;
+                }
+            }
+            end = index + c.len_utf8();
+            if c == 'm' {
+                escape = false;
+            }
+        }
+        text.truncate(end);
+        text.push_str("\x1b[0m…");
+    }
+    format!("{text}\x1b[0m  {ICON}")
 }
 
 fn display(entry: &Entry, options: &PickerOptions) -> String {
@@ -1566,11 +1664,19 @@ mod tests {
         );
         let detached = Entry::new("(detached abc123)", "/elsewhere/review", Source::Worktree);
         let state = Mutex::new(Catalog::new(options, vec![branch, detached]));
-        let text = String::from_utf8(rows(&state, "checkout").unwrap()).unwrap();
+        state.lock().unwrap().current_focus =
+            Some(InitialFocus::Worktree("/custom checkout/widgets".into()));
+        let raw = rows(&state, "checkout").unwrap();
+        let text =
+            String::from_utf8(state.lock().unwrap().mark_current(raw, 80, None).unwrap()).unwrap();
         assert!(text.contains("feature/widgets") && text.contains("/custom checkout/widgets"));
         assert!(!text.contains("detached") && !text.contains("#"));
-        let detached = String::from_utf8(rows(&state, "review").unwrap()).unwrap();
+        assert!(strip_ansi_escapes::strip_str(&text).ends_with(''));
+        let raw = rows(&state, "review").unwrap();
+        let detached =
+            String::from_utf8(state.lock().unwrap().mark_current(raw, 80, None).unwrap()).unwrap();
         assert!(detached.contains("detached abc123"));
+        assert!(!detached.contains(''));
     }
 
     #[test]
@@ -1801,6 +1907,111 @@ mod tests {
         assert_eq!(
             display_tab("终端 | ~/项目", &options),
             "终端 \x1b[2m~/项目\x1b[22m"
+        );
+    }
+
+    #[test]
+    fn current_marker_follows_titles_with_spacing_and_keeps_them_within_width() {
+        for width in 0..32 {
+            for text in [
+                "short",
+                "\x1b[34m\x1b[39m  中文 \x1b[2mlong title here\x1b[22m",
+                "\x1b[2m👩‍💻 e\u{301} a long title\x1b[22m",
+            ] {
+                let marked = current_marker(text, width);
+                let visible = strip_ansi_escapes::strip_str(&marked);
+                assert!(visible.width() <= width, "{marked:?}");
+                assert_eq!(visible.ends_with(''), width > 0);
+                if width > 0 {
+                    assert!(marked.ends_with("\x1b[1;32m\x1b[0m"));
+                }
+                if width > 3 {
+                    assert!(visible.ends_with("  "));
+                    if strip_ansi_escapes::strip_str(text).width() <= width - 3 {
+                        assert_eq!(
+                            visible,
+                            format!("{}  ", strip_ansi_escapes::strip_str(text))
+                        );
+                    }
+                }
+                if width > 3 && strip_ansi_escapes::strip_str(text).width() > width - 3 {
+                    assert!(visible.contains('…'));
+                }
+            }
+        }
+        assert_eq!(
+            current_marker("\x1b[34mtest\x1b[39m", 8),
+            "\x1b[34mtest\x1b[39m\x1b[0m  \x1b[1;32m\x1b[0m"
+        );
+        let icon = crate::icons::icon("pi").unwrap().placeholder();
+        let marked = current_marker(&format!("{icon}a long pane title"), 16);
+        assert!(marked.starts_with(&icon));
+        assert_eq!(strip_ansi_escapes::strip_str(marked).width(), 16);
+    }
+
+    #[test]
+    fn current_marker_uses_full_identity_and_survives_search_and_initial_focus() {
+        let mut session = Entry::new("same", "/repo", Source::Rex);
+        session.session_id = Some("session:full".into());
+        let mut tab = session.clone();
+        tab.window_id = Some("window:full".into());
+        let mut pane = tab.clone();
+        pane.block_id = Some("block:full".into());
+        let mut other = pane.clone();
+        other.block_id = Some("block:other".into());
+        let state = Mutex::new(Catalog::new(
+            PickerOptions {
+                show_icons: false,
+                ..Default::default()
+            },
+            vec![session, tab, pane, other],
+        ));
+        for (block, window, expected) in [
+            ("block:full", "window:full", "block:full"),
+            ("block:missing", "window:full", "window:full"),
+            ("block:missing", "window:missing", "session:full"),
+        ] {
+            state.lock().unwrap().current_focus = Some(InitialFocus::Session {
+                id: "session:full".into(),
+                window_id: Some(window.into()),
+                block_id: Some(block.into()),
+            });
+            for query in ["", "same", "#same"] {
+                let raw = rows(&state, query).unwrap();
+                let catalog = state.lock().unwrap();
+                assert!(catalog.initial_focus.is_none());
+                assert_eq!(catalog.mark_current(raw.clone(), 0, None).unwrap(), raw);
+                for (columns, preview_left, width) in [(80, None, 76), (80, Some(42), 36)] {
+                    let marked = catalog
+                        .mark_current(raw.clone(), columns, preview_left)
+                        .unwrap();
+                    let marked = String::from_utf8(marked).unwrap();
+                    assert_eq!(marked.matches('').count(), 1);
+                    for row in marked.split_terminator('\0') {
+                        let fields: Vec<_> = row.splitn(3, '\t').collect();
+                        let current = catalog.targets[&fields[0].parse::<u64>().unwrap()].target()
+                            == expected;
+                        assert_eq!(
+                            strip_ansi_escapes::strip_str(fields[2]).ends_with(''),
+                            current
+                        );
+                        if current {
+                            let visible = strip_ansi_escapes::strip_str(fields[2]);
+                            assert!(visible.width() <= width);
+                            assert!(visible.ends_with("same  "));
+                        }
+                    }
+                }
+            }
+        }
+        let raw = rows(&state, "missing").unwrap();
+        assert!(
+            state
+                .lock()
+                .unwrap()
+                .mark_current(raw, 80, None)
+                .unwrap()
+                .is_empty()
         );
     }
 

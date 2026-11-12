@@ -52,6 +52,7 @@ icon = ""
 # Colors default to the terminal palette; customize with fzf --color/--no-color
 # in FZF_DEFAULT_OPTS_FILE or FZF_DEFAULT_OPTS (the latter takes precedence).
 # Show unified tab icons and Rex program artwork for panes; character icons use a Nerd Font.
+# The bold green  current-item marker follows its text with two spaces, even when source icons are disabled.
 show_icons = true
 show_tabs = false # true: show tab rows between sessions and panes.
 prompt = "> "

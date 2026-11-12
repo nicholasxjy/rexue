@@ -285,6 +285,42 @@ else:
                      lambda s: (s.expect('AGENT_PREVIEW_block:second'), s.send(b'\r')))
             calls = [json.loads(line) for line in (root/'rex-calls.jsonl').read_text().splitlines()[before:]]
             assert ['focus', '-s', 'session:agents', 'block:second'] in calls, calls
+        def assert_current_marker_color(capture):
+            assert_terminal_palette(capture)
+            styles = re.findall(rb'\x1b\[([0-9;]*)m' + ''.encode(), capture)
+            assert styles, 'current-pane marker has no explicit color'
+            for style in styles:
+                params = [int(value or 0) for value in style.split(b';')]
+                assert 1 in params and 32 in params, ('current-pane marker is not bold green', style)
+
+        def current_pane_marker(s):
+            title = 'Other pane title  Blocked'
+            def expect_marker(offset=0):
+                row = title + '  '
+                s.until(lambda: row in s.text()[offset:], 'current-pane marker does not follow the title with spacing')
+            expect_marker()
+            offset = len(s.text())
+            s.send(b'\x0f')
+            expect_marker(offset)
+            offset = len(s.text())
+            s.resize(80, 30)
+            expect_marker(offset)
+            offset = len(s.text())
+            s.send(b'\x1b[A')
+            expect_marker(offset)
+            s.send(b'\x1b')
+        run_case('current-pane-marker-follows-preview-and-resize',
+                 ['picker', '--agents', '--icons=false', '--no-preview'], current_pane_marker,
+                 env_extra={'NO_COLOR': ''}, color_check=assert_current_marker_color)
+        run_case('current-pane-marker-with-prefilled-query',
+                 ['picker', '--agents', '--icons=false', '--no-preview', '--query=Other pane title'],
+                 lambda s: (s.expect(''), s.send(b'\x1b')),
+                 env_extra={'NO_COLOR': ''}, color_check=assert_current_marker_color)
+        for label, defaults in [('no-color-env', {'NO_COLOR': '1'}), ('no-color-option', {'NO_COLOR': '', 'FZF_DEFAULT_OPTS': '--no-color'})]:
+            run_case('current-pane-marker-' + label,
+                     ['picker', '--agents', '--icons=false', '--no-preview', '--query=Other pane title'],
+                     lambda s: (s.expect(''), s.send(b'\x1b')),
+                     env_extra=defaults, color_check=assert_no_color)
         current['block_id'] = 'block:missing'
         context.write_text(json.dumps(current))
         before = len((root/'rex-calls.jsonl').read_text().splitlines())
