@@ -22,7 +22,7 @@ python3 scripts/pty_smoke.py --binary target/debug/rexue
 python3 scripts/worktree_removal_smoke.py --binary target/debug/rexue
 ```
 
-Real fzf in a PTY covers selection, filtering, aliases, shortcuts, previews, rename/removal, worktree create/refresh and terminal restoration. Focused removal uses real Git/Worktrunk and fake Rex sessions to check ownership, handoff, dirty-checkout protection, failure recovery and unrelated-session preservation.
+Real fzf in a PTY covers selection, filtering, aliases, shortcuts, previews, rename/removal, worktree create/refresh and terminal restoration. The `@` agent view checks status trees and heading icons (including icons disabled), navigation across headings in both directions, half-page movement, heading double-clicks that keep the picker open, and numbering that counts only agents. Focused removal uses real Git/Worktrunk and fake Rex sessions to check ownership, handoff, dirty-checkout protection, failure recovery and unrelated-session preservation.
 
 For cleanup against live Rex:
 

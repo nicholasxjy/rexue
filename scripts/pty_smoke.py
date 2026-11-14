@@ -165,7 +165,8 @@ if (root/'agents-mode').exists():
         elif a[6]=='process':
             print(json.dumps({'last_exit':None,'foreground':{'pid':pid,'name':'node' if block not in ['block:shell','block:picker'] else 'zsh','argv0':'pi' if block not in ['block:shell','block:picker'] else 'zsh','cwd':fixture['path']}}))
         else:
-            print(json.dumps({'records':[{'app':'pi','state':'working' if block=='block:first' else 'blocked','owner':{'pid':pid,'name':'node'}}] if block not in ['block:shell','block:picker'] else []}))
+            states=json.loads((root/'agent-states.json').read_text()) if (root/'agent-states.json').exists() else {}
+            print(json.dumps({'records':[{'app':'pi','state':states.get(block,'working' if block=='block:first' else 'blocked'),'owner':{'pid':pid,'name':'node'}}] if block not in ['block:shell','block:picker'] else []}))
         sys.exit(0)
     if a[0]=='capture':print('AGENT_PREVIEW_'+a[4]);sys.exit(0)
     if a[0]=='focus':print('{}');sys.exit(0)
@@ -420,6 +421,7 @@ else:
             s.expect('AGENT_PREVIEW_block:shell')
             s.send(key)
             s.expect('2/2')
+            s.expect('Working')
             s.expect('AGENT_PREVIEW_block:first')
             s.send(b'Shell')
             s.expect('0/0')
@@ -441,6 +443,51 @@ else:
         run_case('toggle-agents-from-session-tab-pane-tree', ['picker'], lambda s: toggle_agents(s, total=6))
         calls = [json.loads(line) for line in (root/'rex-calls.jsonl').read_text().splitlines()[before:]]
         assert ['focus', '-s', 'session:agents', 'block:second'] in calls, calls
+
+        states = root/'agent-states.json'
+        states.write_text(json.dumps({'block:first': 'done', 'block:second': 'working'}))
+        def grouped_agents(s, icons=True):
+            s.expect('6/6')
+            s.expect('AGENT_PREVIEW_block:shell')
+            s.send(b'@')
+            s.expect('2/2')
+            s.expect('  Working' if icons else 'Working')
+            s.expect('  Done' if icons else 'Done')
+            icon = '󰚩  ' if icons else ''
+            s.expect('└── ' + icon + 'Other pane title  •••')
+            s.expect('└── ' + icon + 'Agent title  Done')
+            if not icons:
+                assert all(glyph not in s.text() for glyph in ('', '', '󰚩')), s.text()
+            s.expect('AGENT_PREVIEW_block:second')
+            # Double-click the first status heading; it must leave the picker open.
+            click = b'\x1b[<0;5;4M\x1b[<0;5;4m'
+            s.send(click * 2)
+            query = b"'Other pane title"
+            s.send(query)
+            s.expect('1/1')
+            offset = len(s.capture)
+            s.send(b'\x7f' * len(query))
+            s.until(lambda: b'2/2' in s.capture[offset:], 'heading double-click exited the picker')
+            for key, target, message in [
+                (b'\x1b[B', b'AGENT_PREVIEW_block:first', 'Down did not skip the next heading'),
+                (b'\x1b[A', b'AGENT_PREVIEW_block:second', 'Up did not skip the previous heading'),
+                (b'\x04', b'AGENT_PREVIEW_block:first', 'Half-page down did not select an agent'),
+                (b'\x15', b'AGENT_PREVIEW_block:second', 'Half-page up did not select an agent'),
+            ]:
+                offset = len(s.capture)
+                s.send(key)
+                s.until(lambda: target in s.capture[offset:], message)
+            s.send(b'#')
+            s.expect('#1')
+            s.expect('#2')
+            s.send(b'2')
+        for icons in [True, False]:
+            before = len((root/'rex-calls.jsonl').read_text().splitlines())
+            run_case('toggle-agents-status-tree-navigation-numbering-icons-' + str(icons),
+                     ['picker', '--icons=' + str(icons).lower()], lambda s: grouped_agents(s, icons))
+            calls = [json.loads(line) for line in (root/'rex-calls.jsonl').read_text().splitlines()[before:]]
+            assert ['focus', '-s', 'session:agents', 'block:first'] in calls, calls
+        states.unlink()
 
         cfg.write_text(config.replace('show_tabs=true\n', '', 1))
         run_case('toggle-agents-from-default-session-pane-tree', ['picker'], toggle_agents)

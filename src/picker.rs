@@ -95,6 +95,8 @@ impl Default for PickerOptions {
 // Only constant shell source appears in bindings. fzf quotes {1}; all other
 // user data travels in FZF_QUERY or over the private socket, never shell source.
 const HELPER: &str = "\"$REXUE_PICKER_EXE\" __picker \"$REXUE_PICKER_SOCKET\"";
+const GROUP_ID: &str = "group";
+const SKIP_GROUP: &str = "row_id={1}; if test \"$row_id\" = group; then if test \"$FZF_POS\" = 1; then echo down; elif test \"$FZF_ACTION\" = up -o \"$FZF_ACTION\" = half-page-up -o \"$FZF_ACTION\" = page-up; then echo up; else echo down; fi; fi";
 const LIMIT: u64 = 32 * 1024 * 1024;
 type Fetch = Arc<Mutex<Box<dyn Fn() -> Result<Vec<Entry>> + Send>>>;
 type Preview = Arc<dyn Fn(&Entry) -> Result<String> + Send + Sync>;
@@ -388,7 +390,14 @@ impl Catalog {
         for row in std::str::from_utf8(&rows)?.split_terminator('\0') {
             if row.starts_with(&prefix) {
                 let (fields, text) = row.split_at(row.match_indices('\t').nth(1).unwrap().0 + 1);
-                write!(output, "{fields}{}\0", current_marker(text, width))?;
+                let (text, count) = text
+                    .split_once('\t')
+                    .map_or((text, None), |(text, count)| (text, Some(count)));
+                write!(output, "{fields}{}", current_marker(text, width))?;
+                if let Some(count) = count {
+                    write!(output, "\t{count}")?;
+                }
+                output.push(0);
             } else {
                 write!(output, "{row}\0")?;
             }
@@ -442,7 +451,6 @@ struct Request {
     action: String,
     query: String,
     id: Option<String>,
-    matches: usize,
     columns: usize,
     preview_left: Option<usize>,
 }
@@ -460,10 +468,6 @@ pub fn helper(socket: &Path, action: &str, id: Option<&str>) -> Result<()> {
             action: action.into(),
             query: std::env::var("FZF_QUERY").unwrap_or_default(),
             id: id.map(str::to_owned),
-            matches: std::env::var("FZF_MATCH_COUNT")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0),
             columns: std::env::var("FZF_COLUMNS")
                 .ok()
                 .and_then(|v| v.parse().ok())
@@ -565,15 +569,17 @@ impl Bridge {
                             "index" => {
                                 let digit: usize = request.id.context("missing digit")?.parse()?;
                                 if !(1..=9).contains(&digit) { bail!("invalid index shortcut"); }
-                                let s = state.lock().unwrap();
-                                let action = if s.index_query(&request.query).is_some() {
-                                    // pos() clamps, so do not select when the requested row is absent.
-                                    let count = request.matches;
-                                    if digit <= count { format!("pos({digit})+print(accept)+accept") } else { String::new() }
+                                let numbered = state.lock().unwrap().index_query(&request.query).is_some();
+                                let action = if numbered {
+                                    let rows = rows(&state, &request.query)?;
+                                    numbered_position(&rows, digit).map_or_else(String::new, |position| {
+                                        format!("pos({position})+print(accept)+accept")
+                                    })
                                 } else { format!("put({digit})") };
                                 Ok(action.into_bytes())
                             }
                             "preview" => {
+                                if request.id.as_deref() == Some(GROUP_ID) { return Ok(Vec::new()); }
                                 let seq = preview_seq.fetch_add(1, Ordering::AcqRel) + 1;
                                 let entry = target(&state, request.id.as_deref())?;
                                 let _worker = preview_lock.lock().unwrap();
@@ -642,7 +648,7 @@ fn refresh(state: &Mutex<Catalog>, fetch: &Mutex<Box<dyn Fn() -> Result<Vec<Entr
 }
 
 fn rows(state: &Mutex<Catalog>, query: &str) -> Result<Vec<u8>> {
-    let (input, pattern, fuzzy, separator_aware, numbered, revision) = {
+    let (input, pattern, fuzzy, separator_aware, numbered, groups, revision) = {
         let mut s = state.lock().unwrap();
         if query != s.last_query {
             s.auto_armed = true;
@@ -656,10 +662,27 @@ fn rows(state: &Mutex<Catalog>, query: &str) -> Result<Vec<u8>> {
         let (ids, pattern, fuzzy) = s.candidates(query);
         let options = &s.options;
         let mut input = Vec::new();
+        let mut groups = BTreeMap::new();
         for id in ids {
             let entry = &s.targets[&id];
-            if s.agents_only && entry.agent.is_none() {
-                continue;
+            if s.agents_only {
+                let Some(agent) = &entry.agent else {
+                    continue;
+                };
+                let (rank, label, icon) = match agent.state.as_str() {
+                    "working" => (0, "Working", ""),
+                    "blocked" => (1, "Blocked", ""),
+                    "error" => (2, "Failed", ""),
+                    "done" => (3, "Done", ""),
+                    "idle" => (4, "Idle", ""),
+                    _ => (5, "Running", ""),
+                };
+                let heading = if options.show_icons {
+                    format!("{icon}  {label}")
+                } else {
+                    label.into()
+                };
+                groups.insert(id.to_string(), (rank, heading));
             }
             let search = if options.worktree || entry.source == Source::Agent {
                 format!(
@@ -697,6 +720,7 @@ fn rows(state: &Mutex<Catalog>, query: &str) -> Result<Vec<u8>> {
             fuzzy,
             options.separator_aware,
             !options.worktree && query.starts_with('#') && options.alias_filter_prefix != "#",
+            groups,
             s.revision,
         )
     };
@@ -736,32 +760,72 @@ fn rows(state: &Mutex<Catalog>, query: &str) -> Result<Vec<u8>> {
     } else {
         input
     };
-    // Number the actual filtered order, not backend positions.
-    if numbered {
-        let mut numbered = Vec::new();
-        for (i, row) in matched
-            .split(|c| *c == 0)
-            .filter(|r| !r.is_empty())
-            .enumerate()
-        {
-            let text = std::str::from_utf8(row)?;
-            let mut fields = text.splitn(3, '\t');
-            write!(
-                numbered,
-                "{}\t{}\t#{} {}\0",
-                fields.next().unwrap(),
-                fields.next().unwrap(),
-                i + 1,
-                fields.next().unwrap()
-            )?;
+    // Group after filtering so empty groups disappear and fuzzy order stays within each group.
+    if numbered || !groups.is_empty() {
+        let mut records: Vec<_> = std::str::from_utf8(&matched)?
+            .split_terminator('\0')
+            .collect();
+        if !groups.is_empty() {
+            records.sort_by_key(|row| groups[row.split('\t').next().unwrap()].0);
         }
-        matched = numbered;
+        let mut output = Vec::new();
+        let mut previous_group = None;
+        let count = records.len();
+        for (i, row) in records.iter().enumerate() {
+            let mut fields = row.splitn(3, '\t');
+            let id = fields.next().unwrap();
+            let search = fields.next().unwrap();
+            let display = fields.next().unwrap();
+            let group = groups.get(id);
+            if let Some(group) = group
+                && previous_group != Some(group)
+            {
+                write!(
+                    output,
+                    "{GROUP_ID}\t\t\x1b[2m{}\x1b[22m\t{count}\0",
+                    group.1
+                )?;
+                previous_group = Some(group);
+            }
+            write!(output, "{id}\t{search}\t")?;
+            if numbered {
+                write!(output, "#{} ", i + 1)?;
+            }
+            if let Some(group) = group {
+                let last = records
+                    .get(i + 1)
+                    .is_none_or(|next| groups.get(next.split('\t').next().unwrap()) != Some(group));
+                let branch = if last { "└── " } else { "├── " };
+                write!(output, "\x1b[2m{branch}\x1b[22m")?;
+            }
+            write!(output, "{display}")?;
+            if group.is_some() {
+                write!(output, "\t{count}")?;
+            }
+            output.push(0);
+        }
+        matched = output;
     }
     state
         .lock()
         .unwrap()
         .store_rows(revision, query, matched.clone());
     Ok(matched)
+}
+
+fn numbered_position(rows: &[u8], digit: usize) -> Option<usize> {
+    rows.split(|byte| *byte == 0)
+        .filter(|row| !row.is_empty())
+        .enumerate()
+        .filter(|(_, row)| row.split(|byte| *byte == b'\t').next() != Some(GROUP_ID.as_bytes()))
+        .nth(digit.checked_sub(1)?)
+        .map(|(index, _)| index + 1)
+}
+
+fn row_action(action: &str) -> String {
+    format!(
+        "transform[row_id={{1}}; if test \"$row_id\" != {GROUP_ID}; then printf '%s' '{action}'; fi]"
+    )
 }
 
 fn clean_fzf_env(command: &mut Command) -> Result<()> {
@@ -864,7 +928,7 @@ fn finder(options: &PickerOptions, bridge: &Bridge, header: &str, query: &str) -
             "--ansi",
             "--layout=reverse",
             "--delimiter=\t",
-            "--with-nth=3..",
+            "--with-nth=3",
             "--highlight-line",
             "--no-hscroll",
             "--ellipsis=…",
@@ -885,13 +949,23 @@ fn finder(options: &PickerOptions, bridge: &Bridge, header: &str, query: &str) -
         .arg(format!("--bind=change:bg-cancel+reload({HELPER} rows)"))
         .arg(format!("--bind=resize:reload({HELPER} rows)"))
         .arg(format!(
-            "--bind=load:{}transform({HELPER} initial)+bg-transform({HELPER} loaded)",
+            "--bind=load:{}transform({HELPER} initial){}+bg-transform({HELPER} loaded)",
             if options.native_icons {
                 format!("execute-silent({HELPER} icons > /dev/tty)+")
             } else {
                 String::new()
+            },
+            if options.worktree {
+                String::new()
+            } else {
+                format!("+transform({SKIP_GROUP})")
             }
         ));
+    if !options.worktree {
+        command.arg(format!("--bind=focus:transform({SKIP_GROUP})"));
+        // Field four carries the agent count; headings never count as matches.
+        command.arg("--info-command=agent_count={4}; if test -n \"$agent_count\"; then printf '%s/%s' \"$agent_count\" \"$agent_count\"; else printf '%s' \"$FZF_INFO\"; fi");
+    }
     let bindings = &options.keybindings;
     bindings.reset(&mut command, &Keybindings::picker_actions(options.worktree));
     for (action, fzf_action) in [
@@ -907,7 +981,12 @@ fn finder(options: &PickerOptions, bridge: &Bridge, header: &str, query: &str) -
         ),
         ("remove", "print(remove)+accept"),
     ] {
-        bindings.bind(&mut command, action, fzf_action);
+        let action_source = if !options.worktree && matches!(action, "accept" | "remove") {
+            row_action(fzf_action)
+        } else {
+            fzf_action.into()
+        };
+        bindings.bind(&mut command, action, &action_source);
     }
     if options.worktree {
         bindings.bind(&mut command, "refresh", "print(refresh)+accept");
@@ -917,7 +996,7 @@ fn finder(options: &PickerOptions, bridge: &Bridge, header: &str, query: &str) -
             "print(create_worktree)+accept",
         );
     } else {
-        bindings.bind(&mut command, "rename", "print(rename)+accept");
+        bindings.bind(&mut command, "rename", &row_action("print(rename)+accept"));
         bindings.bind(
             &mut command,
             "toggle_agents",
@@ -2171,6 +2250,163 @@ mod tests {
     }
 
     #[test]
+    fn agent_toggle_groups_rex_states_after_filtering_without_extra_targets() {
+        let entries: Vec<Entry> = [
+            ("done-first", "done"),
+            ("work-first", "working"),
+            ("running", "running"),
+            ("work-second", "working"),
+            ("idle", "idle"),
+            ("done-second", "done"),
+            ("blocked", "blocked"),
+            ("error", "error"),
+        ]
+        .into_iter()
+        .map(|(name, state)| {
+            serde_json::from_value(serde_json::json!({
+                "name": name, "pane_title": name, "source": "agent",
+                "session_id": "session:full",
+                "agent": {"app": "pi", "state": state, "session_name": "project",
+                          "window_id": "window:full", "block_id": format!("block:{name}")}
+            }))
+            .unwrap()
+        })
+        .collect();
+        let state = Mutex::new(Catalog::new(
+            PickerOptions {
+                show_icons: false,
+                ..Default::default()
+            },
+            entries.clone(),
+        ));
+        let original = rows(&state, "").unwrap();
+        assert!(!original.contains(&b'\n'));
+        state.lock().unwrap().toggle_agents();
+        let grouped = String::from_utf8(rows(&state, "").unwrap()).unwrap();
+        let records: Vec<_> = grouped.split_terminator('\0').collect();
+        assert!(
+            records.iter().all(|row| !row.contains('\n')),
+            "fzf highlights every line of an item; status headings must be separate rows"
+        );
+        assert_eq!(records.len(), entries.len() + 6);
+        let mut targets = Vec::new();
+        let mut headings = Vec::new();
+        for record in records {
+            let fields: Vec<_> = record.split('\t').collect();
+            assert_eq!(fields[3], "8");
+            if fields[0] == GROUP_ID {
+                headings.push(strip_ansi_escapes::strip_str(fields[2]));
+                assert!(target(&state, Some(fields[0])).is_err());
+            } else {
+                targets.push(target(&state, Some(fields[0])).unwrap().target().to_owned());
+            }
+        }
+        assert_eq!(
+            headings,
+            ["Working", "Blocked", "Failed", "Done", "Idle", "Running"]
+        );
+        assert_eq!(
+            targets,
+            [
+                "block:work-first",
+                "block:work-second",
+                "block:blocked",
+                "block:error",
+                "block:done-first",
+                "block:done-second",
+                "block:idle",
+                "block:running"
+            ]
+        );
+        let filtered = String::from_utf8(rows(&state, "'done").unwrap()).unwrap();
+        assert_eq!(filtered.split_terminator('\0').count(), 3);
+        assert!(!filtered.contains('\n'));
+        let visible: Vec<_> = filtered
+            .split_terminator('\0')
+            .map(|row| strip_ansi_escapes::strip_str(row.split('\t').nth(2).unwrap()))
+            .collect();
+        assert_eq!(
+            visible,
+            ["Done", "├── done-first  Done", "└── done-second  Done"]
+        );
+        assert!(!filtered.contains("Working"));
+        // Display headings are not search candidates.
+        assert!(rows(&state, "^Failed$").unwrap().is_empty());
+        assert!(rows(&state, "missing").unwrap().is_empty());
+        let numbered = rows(&state, "#").unwrap();
+        for (digit, position) in [2, 3, 5, 7, 9, 10, 12, 14].into_iter().enumerate() {
+            assert_eq!(numbered_position(&numbered, digit + 1), Some(position));
+        }
+        assert_eq!(numbered_position(&numbered, 0), None);
+        assert_eq!(numbered_position(&numbered, 9), None);
+        let numbered = strip_ansi_escapes::strip_str(String::from_utf8(numbered).unwrap());
+        assert!(numbered.contains("#1 ├── work-first"));
+        assert!(numbered.contains("#2 └── work-second"));
+        assert!(numbered.contains("#5 ├── done-first"));
+        assert!(numbered.contains("#8 └── running"));
+        state.lock().unwrap().current_focus = Some(InitialFocus::Session {
+            id: "session:full".into(),
+            window_id: Some("window:full".into()),
+            block_id: Some("block:work-first".into()),
+        });
+        let raw = rows(&state, "").unwrap();
+        let marked = strip_ansi_escapes::strip_str(
+            String::from_utf8(state.lock().unwrap().mark_current(raw, 80, None).unwrap()).unwrap(),
+        );
+        assert!(marked.contains("├── work-first  •••  "));
+        assert!(!marked.contains("Working  "));
+        let single = String::from_utf8(rows(&state, "'work-first").unwrap()).unwrap();
+        assert!(strip_ansi_escapes::strip_str(single).contains("└── work-first"));
+        {
+            let mut catalog = state.lock().unwrap();
+            catalog.options.show_icons = true;
+            catalog.replace(entries.clone());
+        }
+        let icons = String::from_utf8(rows(&state, "").unwrap()).unwrap();
+        let headings: Vec<_> = icons
+            .split_terminator('\0')
+            .filter(|row| row.starts_with("group\t"))
+            .map(|row| strip_ansi_escapes::strip_str(row.split('\t').nth(2).unwrap()))
+            .collect();
+        for heading in [
+            "  Working",
+            "  Blocked",
+            "  Failed",
+            "  Done",
+            "  Idle",
+            "  Running",
+        ] {
+            assert!(headings.iter().any(|label| label == heading));
+        }
+        let id = state.lock().unwrap().entries[0];
+        let mut updated = entries;
+        updated[0].agent.as_mut().unwrap().state = "working".into();
+        {
+            let mut catalog = state.lock().unwrap();
+            catalog.options.show_icons = false;
+            catalog.replace(updated);
+        }
+        let refreshed = String::from_utf8(rows(&state, "").unwrap()).unwrap();
+        assert_eq!(
+            refreshed
+                .split_terminator('\0')
+                .nth(1)
+                .unwrap()
+                .split('\t')
+                .next(),
+            Some(id.to_string().as_str())
+        );
+        assert!(strip_ansi_escapes::strip_str(&refreshed).contains("├── done-first"));
+        assert!(!refreshed.contains(''));
+        assert_eq!(
+            target(&state, Some(&id.to_string())).unwrap().target(),
+            "block:done-first"
+        );
+        state.lock().unwrap().toggle_agents();
+        assert!(!rows(&state, "").unwrap().contains(&b'\n'));
+    }
+
+    #[test]
     fn session_tree_keeps_tab_and_pane_order_identity_and_search_context() {
         let session: Entry = serde_json::from_value(serde_json::json!({
             "name": "project", "source": "rex", "session_id": "session:full",
@@ -2303,17 +2539,25 @@ mod tests {
             .split('\0')
             .filter(|row| !row.is_empty())
             .map(|row| row.split('\t').next().unwrap())
+            .filter(|id| *id != GROUP_ID)
             .collect();
         assert_eq!(agent_ids, [ids[2].to_string(), ids[3].to_string()]);
-        assert!(!filtered.contains("──"));
+        assert_eq!(filtered.matches("└── ").count(), 2);
+        assert!(!filtered.contains("├── "));
         assert!(state.lock().unwrap().header().contains("@ all"));
         assert!(rows(&state, "Shell").unwrap().is_empty());
         let blocked = String::from_utf8(rows(&state, "blocked").unwrap()).unwrap();
-        assert!(blocked.starts_with(&format!("{}\t", ids[3])));
+        assert!(
+            blocked
+                .split_terminator('\0')
+                .nth(1)
+                .unwrap()
+                .starts_with(&format!("{}\t", ids[3]))
+        );
         let numbered =
             strip_ansi_escapes::strip_str(String::from_utf8(rows(&state, "#").unwrap()).unwrap());
-        assert!(numbered.contains("#1 Same title"));
-        assert!(numbered.contains("#2 Same title"));
+        assert!(numbered.contains("#1 └── Same title"));
+        assert!(numbered.contains("#2 └── Same title"));
         assert!(!numbered.contains("#3"));
         rows(&state, "").unwrap();
         state.lock().unwrap().toggle_agents();

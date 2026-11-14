@@ -63,7 +63,7 @@ Requires fzf **0.63+**. `[tui]` applies to both pickers:
 
 | Key | Default | Behavior |
 | --- | --- | --- |
-| `show_icons` | `true` | Show source, custom and tab icons. |
+| `show_icons` | `true` | Show source, custom, tab and agent status-heading icons. |
 | `show_tabs` | `false` | Place panes directly under their session; `true` shows tab rows in between. |
 | `prompt` | `"> "` | Empty configuration uses the default. |
 | `placeholder` | `"Filter Sessions..."` | Empty uses the default; worktrees use `"Filter worktrees..."` unless customized. |
@@ -77,7 +77,7 @@ Requires fzf **0.63+**. `[tui]` applies to both pickers:
 
 CLI overrides: `--focus-pane`, `--icons`, `--separator-aware`, `--prompt`, `--placeholder`, `--query`, `--preview`, `--no-preview`, `--no-alias-auto`. Boolean values use `=`, e.g. `--icons=false`; `--no-preview` wins. CLI prompt/placeholder values may be empty. Worktree picker supports icons, prompt, placeholder and query overrides.
 
-In the session picker, `@` toggles a flat list containing only agent panes, preserving the current search; press it again to restore the full list. Change or disable this shortcut with `tui.keybindings.toggle_agents`. `/` filters aliases of live sessions and auto-connects an exact alias after typing. Outside this mode, auto-connect requires `alias_auto_connect = true`. Prefilled queries never auto-connect. `#` starts numbered selection unless it is the alias prefix. These modes do not apply to worktree pickers.
+In the session picker, `@` toggles a tree of agent panes under Rex program status headings in this order: Working, Blocked, Failed (`error`), Done, Idle, then Running (live agents without reported status). Headings use Nerd Font icons: `` Working, `` Blocked, `` Failed, `` Done, `` Idle and `` Running; `show_icons = false` hides them. Each heading is a tree root with agent children using the same subdued `├──` / `└──` connectors as the session tree. Empty groups are hidden. Filtering preserves the groups and fuzzy ranking within each group, recalculating the last child in each group; headings are separate display-only rows without selection highlighting. Navigation skips headings, clicking a heading moves focus to an agent, and double-clicking a heading never connects. Counts and `#` numbering include agents only. The current search is preserved; press `@` again to restore the full list. Change or disable this shortcut with `tui.keybindings.toggle_agents`. `/` filters aliases of live sessions and auto-connects an exact alias after typing. Outside this mode, auto-connect requires `alias_auto_connect = true`. Prefilled queries never auto-connect. `#` starts numbered selection unless it is the alias prefix. These modes do not apply to worktree pickers.
 
 `[icons.SOURCE]` accepts `icon` and `color` for `agent`, `rex`, `config`, `directory`, `worktree`. Colors: black, red, green, yellow, blue, magenta, cyan, white, optional `bright-`, or gray/grey. For session/source rows and character fallbacks, custom icons take priority: session → repository → wildcard → source. Native program artwork keeps its original colors.
 
